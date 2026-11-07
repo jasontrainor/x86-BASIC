@@ -1,11 +1,42 @@
 # x86-BASIC
 
-## Run
-./run.sh
+## Build and run
 
--- or --
+Needs `nasm`, `gcc`, GNU `ld`, `make` and `qemu-system-x86_64`.
 
-qemu-system-x86_64 -fda os.img -boot a
+    ./run.sh          # build, then boot in QEMU as a floppy
+    ./run.sh usb      # build, then boot as a USB stick
+
+or build with `make` and run QEMU yourself:
+
+    qemu-system-x86_64 -drive file=os.img,format=raw,if=floppy -boot a
+
+## Using BASIC
+
+Type a line with a number to store it in the program, or without one to
+run it immediately. Keywords can be typed in any case.
+
+| Command | Meaning |
+|---|---|
+| `RUN`, `LIST`, `NEW` | run, list or erase the program |
+| `10` (number alone) | delete line 10 |
+| `PRINT "TEXT"; A; A$` | print strings, numbers and string variables |
+| `LET A = 2*(B+1)` (`LET` optional) | integer variables `A`-`Z` |
+| `LET A$ = "TEXT"` | string variables `A$`-`Z$` (up to 63 characters) |
+| `IF A <> B THEN statement` | comparisons `=` `<>` `<` `<=` `>` `>=` |
+| `GOTO 100` | jump to a line |
+| `FOR I = 1 TO 10 STEP 2` ... `NEXT I` | loops, up to 16 nested |
+| `INK n`, `PAPER n`, `BORDER n` | colours 0-7, as on the ZX Spectrum |
+| `CLS`, `BEEP`, `END` | clear screen, beep, stop the program |
+
+Press **Esc** or **Ctrl+C** to stop a running program. Program lines are
+numbered 1-9999, hold up to 63 characters, and a program can have up to
+256 lines.
+
+## Tests
+
+    make test        # interpreter tests on the host, with ASan/UBSan
+    make boot-test   # boot the image in QEMU (floppy, hard disk, USB)
 
 ## Booting real hardware from a USB stick
 

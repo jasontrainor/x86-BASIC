@@ -6,6 +6,8 @@ CFLAGS = -m16 -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib -O
          -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
          -mgeneral-regs-only
 
+.PHONY: all test boot-test clean
+
 all: os.img
 
 # The boot sector loads exactly as many sectors as the kernel occupies,
