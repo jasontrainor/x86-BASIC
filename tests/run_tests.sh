@@ -19,7 +19,9 @@ pass=0; fail=0
 check() {
     local name=$1 in=$2; shift 2
     local out ok=1
-    out=$("$BIN" "$in" 2>&1; echo "<EOF>")   # sentinel keeps trailing newlines
+    # timeout: programs that loop forever without printing are cut off.
+    # The sentinel keeps trailing newlines that $(...) would strip.
+    out=$(timeout 2 "$BIN" "$in" 2>&1; echo "<EOF>")
     if [[ $out == *AddressSanitizer* || $out == *"runtime error"* ]]; then ok=0; fi
     for want in "$@"; do
         if [[ $want == !* ]]; then
@@ -50,6 +52,22 @@ check "end stops"        "10 PRINT 1+1${NL}20 END${NL}30 PRINT 1+2${NL}RUN${NL}"
 check "cls"              "CLS${NL}" "[CLS]"
 check "colours"          "INK 2${NL}PAPER 5${NL}BORDER 1${NL}" "[INK 2]" "[PAPER 5]" "[BORDER 1]"
 check "beep"             "BEEP${NL}" "[BEEP]"
+
+# --- Errors are reported, and stop the program --------------------------
+check "unknown statement" "10 FROB${NL}RUN${NL}" "ERROR: SYNTAX ERROR IN LINE 10"
+check "trailing junk"     "PRINT 1 2${NL}" "ERROR: SYNTAX ERROR"
+check "error stops run"   "10 PRINT 1+1${NL}20 GOTO 99${NL}30 PRINT 1+2${NL}RUN${NL}" "ERROR: LINE NOT FOUND IN LINE 20" "!${NL}3${NL}"
+check "if without then"   "IF 1=1 PRINT 5${NL}" "ERROR: THEN EXPECTED"
+check "division by zero"  "PRINT 1/0${NL}" "ERROR: DIVISION BY ZERO"
+check "missing paren"     "PRINT (1+2${NL}" "ERROR: MISSING )"
+check "bad expression"    "PRINT 1+*2${NL}" "ERROR: SYNTAX ERROR"
+check "for without to"    "FOR I=1${NL}" "ERROR: TO EXPECTED"
+check "next without for"  "10 NEXT I${NL}RUN${NL}" "ERROR: NEXT WITHOUT FOR IN LINE 10"
+check "let without ="     "LET A 5${NL}" "ERROR: SYNTAX ERROR"
+check "unary minus"       "A=5${NL}PRINT -A*2${NL}PRINT -(2+3)${NL}" "${NL}-10${NL}" "${NL}-5${NL}"
+check "for stack full"    "10 FOR A=1 TO 2${NL}11 FOR B=1 TO 2${NL}12 FOR C=1 TO 2${NL}13 FOR D=1 TO 2${NL}14 FOR E=1 TO 2${NL}15 FOR F=1 TO 2${NL}16 FOR G=1 TO 2${NL}17 FOR H=1 TO 2${NL}18 FOR I=1 TO 2${NL}19 FOR J=1 TO 2${NL}20 FOR K=1 TO 2${NL}21 FOR L=1 TO 2${NL}22 FOR M=1 TO 2${NL}23 FOR N=1 TO 2${NL}24 FOR O=1 TO 2${NL}25 FOR P=1 TO 2${NL}26 FOR Q=1 TO 2${NL}RUN${NL}" "TOO MANY NESTED FOR LOOPS IN LINE 26"
+check "goto into for"     "10 FOR I=1 TO 2${NL}20 PRINT 7*7${NL}30 GOTO 10${NL}RUN${NL}" "[OUTPUT LIMIT]" "!TOO MANY"
+check "next skips inner"  "10 FOR I=1 TO 2${NL}20 FOR J=1 TO 5${NL}30 NEXT I${NL}40 PRINT I*100${NL}RUN${NL}" "${NL}300${NL}"
 
 echo "$pass passed, $fail failed"
 ((fail == 0))

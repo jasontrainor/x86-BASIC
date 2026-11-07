@@ -52,6 +52,14 @@ void read_line() {
 int current_line = -1;
 char* p;
 
+// First error raised while executing the current statement, or 0.
+// Once set, the parser stops consuming input and the statement is abandoned.
+const char* error_msg = 0;
+
+void error(const char* msg) {
+    if (!error_msg) error_msg = msg;
+}
+
 int expr();
 int term();
 int factor();
@@ -62,16 +70,21 @@ void skip_space() {
 }
 
 int factor() {
+    if (error_msg) return 0;
     skip_space();
-    if (isdigit(*p) || (*p == '-' && isdigit(p[1]))) {
-        int sign = 1;
-        if (*p == '-') { sign = -1; p++; }
+    if (isdigit(*p)) {
         int val = 0;
         while (isdigit(*p)) {
             val = val * 10 + (*p - '0');
             p++;
         }
-        return val * sign;
+        return val;
+    } else if (*p == '-') {
+        p++;
+        return -factor();
+    } else if (*p == '+') {
+        p++;
+        return factor();
     } else if (isalpha(*p)) {
         int var_idx = (*p & ~32) - 'A';
         p++;
@@ -81,19 +94,22 @@ int factor() {
         int val = expr();
         skip_space();
         if (*p == ')') p++;
+        else error("MISSING )");
         return val;
     }
+    error("SYNTAX ERROR");
     return 0;
 }
 
 int term() {
     int val = factor();
     skip_space();
-    while (*p == '*' || *p == '/') {
+    while (!error_msg && (*p == '*' || *p == '/')) {
         char op = *p++;
         int next_val = factor();
         if (op == '*') val *= next_val;
-        else if (op == '/' && next_val != 0) val /= next_val;
+        else if (next_val == 0) error("DIVISION BY ZERO");
+        else val /= next_val;
         skip_space();
     }
     return val;
@@ -102,7 +118,7 @@ int term() {
 int expr() {
     int val = term();
     skip_space();
-    while (*p == '+' || *p == '-') {
+    while (!error_msg && (*p == '+' || *p == '-')) {
         char op = *p++;
         int next_val = term();
         if (op == '+') val += next_val;
@@ -138,20 +154,25 @@ void assignment() {
     int is_str = 0;
     if (*p == '$') { is_str = 1; p++; }
     skip_space();
-    if (*p == '=') {
-        p++;
-        skip_space();
-        if (is_str) {
-            if (*p == '"') {
-                p++;
-                int i = 0;
-                while (*p && *p != '"' && i < 63) strs[var_idx][i++] = *p++;
-                strs[var_idx][i] = '\0';
-                if (*p == '"') p++;
-            }
-        } else {
-            vars[var_idx] = expr();
+    if (*p != '=') {
+        error("SYNTAX ERROR");
+        return;
+    }
+    p++;
+    skip_space();
+    if (is_str) {
+        if (*p != '"') {
+            error("STRING EXPECTED");
+            return;
         }
+        p++;
+        int i = 0;
+        while (*p && *p != '"' && i < 63) strs[var_idx][i++] = *p++;
+        strs[var_idx][i] = '\0';
+        if (*p == '"') p++;
+    } else {
+        int val = expr();
+        if (!error_msg) vars[var_idx] = val;
     }
 }
 
@@ -173,6 +194,7 @@ void execute_statement() {
                 p += 2;
             } else {
                 int val = expr();
+                if (error_msg) return;
                 char buf[16];
                 itoa(val, buf);
                 print_string(buf);
@@ -188,22 +210,28 @@ void execute_statement() {
     } else if (strncmp(p, "GOTO", 4) == 0 || strncmp(p, "goto", 4) == 0) {
         p += 4;
         int target = expr();
+        if (error_msg) return;
         for (int i = 0; i < num_lines; i++) {
             if (program[i].num == target) {
-                current_line = i - 1; 
+                current_line = i - 1;
                 return;
             }
         }
-        print_string("ERROR: LINE NOT FOUND\n");
+        error("LINE NOT FOUND");
     } else if (strncmp(p, "IF", 2) == 0 || strncmp(p, "if", 2) == 0) {
         p += 2;
         int cond = condition();
+        if (error_msg) return;
         skip_space();
         if (strncmp(p, "THEN", 4) == 0 || strncmp(p, "then", 4) == 0) {
             p += 4;
             if (cond) {
                 execute_statement();
+            } else {
+                while (*p) p++;   // skip the rest of the line
             }
+        } else {
+            error("THEN EXPECTED");
         }
     } else if (strncmp(p, "FOR", 3) == 0 || strncmp(p, "for", 3) == 0) {
         p += 3;
@@ -211,40 +239,59 @@ void execute_statement() {
         int var_idx = (*p & ~32) - 'A';
         p++;
         skip_space();
-        if (*p == '=') p++;
+        if (*p != '=') { error("SYNTAX ERROR"); return; }
+        p++;
         int start_val = expr();
-        vars[var_idx] = start_val;
         skip_space();
-        if (strncmp(p, "TO", 2) == 0 || strncmp(p, "to", 2) == 0) {
-            p += 2;
-            int limit = expr();
-            int step = 1;
-            skip_space();
-            if (strncmp(p, "STEP", 4) == 0 || strncmp(p, "step", 4) == 0) {
-                p += 4;
-                step = expr();
-            }
-            if (for_sp < 16) {
-                for_stack[for_sp].var_idx = var_idx;
-                for_stack[for_sp].limit = limit;
-                for_stack[for_sp].step = step;
-                for_stack[for_sp].line_index = current_line;
-                for_sp++;
-            }
+        if (error_msg) return;
+        if (strncmp(p, "TO", 2) != 0 && strncmp(p, "to", 2) != 0) {
+            error("TO EXPECTED");
+            return;
         }
+        p += 2;
+        int limit = expr();
+        int step = 1;
+        skip_space();
+        if (strncmp(p, "STEP", 4) == 0 || strncmp(p, "step", 4) == 0) {
+            p += 4;
+            step = expr();
+        }
+        if (error_msg) return;
+        // Re-entering a FOR for a variable that is already looping (e.g.
+        // via GOTO) restarts that loop instead of stacking a duplicate.
+        for (int i = 0; i < for_sp; i++) {
+            if (for_stack[i].var_idx == var_idx) { for_sp = i; break; }
+        }
+        if (for_sp >= 16) {
+            error("TOO MANY NESTED FOR LOOPS");
+            return;
+        }
+        vars[var_idx] = start_val;
+        for_stack[for_sp].var_idx = var_idx;
+        for_stack[for_sp].limit = limit;
+        for_stack[for_sp].step = step;
+        for_stack[for_sp].line_index = current_line;
+        for_sp++;
     } else if (strncmp(p, "NEXT", 4) == 0 || strncmp(p, "next", 4) == 0) {
         p += 4;
         skip_space();
         int var_idx = (*p & ~32) - 'A';
-        if (for_sp > 0 && for_stack[for_sp-1].var_idx == var_idx) {
-            vars[var_idx] += for_stack[for_sp-1].step;
-            int limit = for_stack[for_sp-1].limit;
-            int step = for_stack[for_sp-1].step;
-            if ((step > 0 && vars[var_idx] <= limit) || (step < 0 && vars[var_idx] >= limit)) {
-                current_line = for_stack[for_sp-1].line_index;
-            } else {
-                for_sp--;
-            }
+        p++;
+        // Find the matching loop; any inner loops left unfinished are dropped.
+        int i = for_sp - 1;
+        while (i >= 0 && for_stack[i].var_idx != var_idx) i--;
+        if (i < 0) {
+            error("NEXT WITHOUT FOR");
+            return;
+        }
+        for_sp = i + 1;
+        vars[var_idx] += for_stack[i].step;
+        int limit = for_stack[i].limit;
+        int step = for_stack[i].step;
+        if ((step > 0 && vars[var_idx] <= limit) || (step < 0 && vars[var_idx] >= limit)) {
+            current_line = for_stack[i].line_index;
+        } else {
+            for_sp--;
         }
     } else if (strncmp(p, "CLS", 3) == 0 || strncmp(p, "cls", 3) == 0) {
         p += 3;
@@ -252,8 +299,8 @@ void execute_statement() {
     } else if (strncmp(p, "BEEP", 4) == 0 || strncmp(p, "beep", 4) == 0) {
         p += 4;
         beep();
-        // Skip args if user added them, as our beep is basic
-        while (*p && *p != ':') p++;
+        // Arguments (duration, pitch) are accepted but not used yet.
+        while (*p) p++;
     } else if (strncmp(p, "INK", 3) == 0 || strncmp(p, "ink", 3) == 0) {
         p += 3;
         int c = expr();
@@ -267,11 +314,36 @@ void execute_statement() {
         int c = expr();
         set_border(c);
     } else if (strncmp(p, "END", 3) == 0 || strncmp(p, "end", 3) == 0) {
+        p += 3;
         current_line = num_lines;
     } else if (isalpha(*p)) {
         // Must come last: every keyword above also starts with a letter.
         assignment();
+    } else {
+        error("SYNTAX ERROR");
     }
+}
+
+// Run one complete statement, flagging anything left over on the line.
+// Returns 1 on success; on failure prints the error and returns 0.
+int run_statement() {
+    error_msg = 0;
+    int line = current_line;
+    execute_statement();
+    skip_space();
+    if (!error_msg && *p) error("SYNTAX ERROR");
+    if (!error_msg) return 1;
+
+    print_string("ERROR: ");
+    print_string(error_msg);
+    if (line >= 0 && line < num_lines) {
+        char buf[16];
+        itoa(program[line].num, buf);
+        print_string(" IN LINE ");
+        print_string(buf);
+    }
+    print_string("\n");
+    return 0;
 }
 
 void run_program() {
@@ -279,7 +351,7 @@ void run_program() {
     current_line = 0;
     while (current_line >= 0 && current_line < num_lines) {
         p = program[current_line].text;
-        execute_statement();
+        if (!run_statement()) break;
         current_line++;
     }
 }
@@ -354,7 +426,7 @@ void basic_run() {
             clear_screen();
         } else {
             current_line = -1;
-            execute_statement();
+            run_statement();
         }
     }
 }
