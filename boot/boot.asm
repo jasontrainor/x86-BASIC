@@ -3,6 +3,11 @@
 
 KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
 
+; The Makefile passes the kernel's size in sectors (-DKERNEL_SECTORS=n).
+%ifndef KERNEL_SECTORS
+  %error "KERNEL_SECTORS not defined; build with make"
+%endif
+
 start:
     ; Some BIOSes enter at 07C0:0000 rather than 0000:7C00. Far-jump so
     ; CS is 0 and matches the org above.
@@ -41,12 +46,7 @@ start:
 load_kernel:
     mov bx, MSG_LOAD_KERNEL
     call print_string
-
-    mov bx, KERNEL_OFFSET  ; Set ES:BX = 0x0000:0x1000
-    mov dh, 30             ; Load 30 sectors (15KB, enough for our BASIC)
-    mov dl, [BOOT_DRIVE]
-    call disk_load
-
+    call disk_load         ; KERNEL_SECTORS sectors to 0000:KERNEL_OFFSET
     ret
 
 BOOT_DRIVE      db 0

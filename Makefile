@@ -8,8 +8,11 @@ CFLAGS = -m16 -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib -O
 
 all: os.img
 
-boot.bin: boot/boot.asm boot/print.asm boot/disk_load.asm
-	$(ASM) -f bin boot/boot.asm -o boot.bin
+# The boot sector loads exactly as many sectors as the kernel occupies,
+# so it is rebuilt whenever the kernel changes size.
+boot.bin: boot/boot.asm boot/print.asm boot/disk_load.asm kernel.bin
+	$(ASM) -f bin -DKERNEL_SECTORS=$$(( ($$(wc -c < kernel.bin) + 511) / 512 )) \
+		boot/boot.asm -o boot.bin
 
 kernel_entry.o: kernel/kernel_entry.asm
 	$(ASM) -f elf32 kernel/kernel_entry.asm -o kernel_entry.o
