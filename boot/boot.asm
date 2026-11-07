@@ -3,15 +3,22 @@
 
 KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
 
-    ; Set up the stack
-    mov bp, 0x9000
-    mov sp, bp
-
-    ; Set segments
+start:
+    ; Some BIOSes enter at 07C0:0000 rather than 0000:7C00. Far-jump so
+    ; CS is 0 and matches the org above.
+    cli
+    jmp 0x0000:.set_segments
+.set_segments:
     xor ax, ax
     mov ds, ax
     mov es, ax
+    ; Set SS and SP together with interrupts off, so an interrupt can't
+    ; arrive while the stack pointer is half set up.
     mov ss, ax
+    mov sp, 0x9000
+    mov bp, sp
+    sti
+    cld                    ; string instructions count upwards
 
     ; BIOS sets boot drive in 'dl'; store it
     mov [BOOT_DRIVE], dl
@@ -24,7 +31,7 @@ KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
     ; After kernel is loaded, jump to it
     ; Ensure segment is 0, offset is 0x1000
     jmp 0x0000:KERNEL_OFFSET
-    
+
     jmp $ ; infinite loop if kernel somehow returns
 
 %include "boot/print.asm"
