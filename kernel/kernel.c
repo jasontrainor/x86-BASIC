@@ -1,14 +1,16 @@
 #include "bios.h"
 #include "basic.h"
 
-extern char __bss_start;
-extern char __bss_end;
+extern char __bss_start, __bss_end;     // see linker.ld
+extern char __high_start, __high_end;
+
+static void zero(char *from, char *to) {
+    while (from < to) *from++ = 0;
+}
 
 void main() {
-    char *bss = &__bss_start;
-    while (bss < &__bss_end) {
-        *bss++ = 0;
-    }
+    zero(&__bss_start, &__bss_end);
+    zero(&__high_start, &__high_end);   // above 64KB: needs unreal mode
 
     init_video();
     

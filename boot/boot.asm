@@ -1,11 +1,19 @@
 [bits 16]
-[org 0x7c00]
+; The BIOS loads this sector at 0x7C00, but the first thing it does is
+; copy itself down to 0x0600, so that the kernel can be loaded into all
+; of 0x1000-0xEFFF without overwriting the code doing the loading.
+[org 0x0600]
 
+RELOCATED     equ 0x0600
 KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
+MAX_KERNEL_SECTORS equ (0xF000 - KERNEL_OFFSET) / 512
 
 ; The Makefile passes the kernel's size in sectors (-DKERNEL_SECTORS=n).
 %ifndef KERNEL_SECTORS
   %error "KERNEL_SECTORS not defined; build with make"
+%endif
+%if KERNEL_SECTORS > MAX_KERNEL_SECTORS
+  %error "kernel.bin is too big to load below 0xF000"
 %endif
 
 ; ---------------------------------------------------------------------------
@@ -44,21 +52,26 @@ KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
     db "        "          ; filesystem type (8 bytes, blank: none)
 
 start:
-    ; Some BIOSes enter at 07C0:0000 rather than 0000:7C00. Far-jump so
-    ; CS is 0 and matches the org above.
+    ; Some BIOSes enter at 07C0:0000 rather than 0000:7C00, so don't rely
+    ; on CS until the far jump below. Copying from linear 0x7C00 works
+    ; either way.
     cli
-    jmp 0x0000:.set_segments
-.set_segments:
     xor ax, ax
     mov ds, ax
     mov es, ax
     ; Set SS and SP together with interrupts off, so an interrupt can't
-    ; arrive while the stack pointer is half set up.
+    ; arrive while the stack pointer is half set up. The stack sits in
+    ; 0x0800-0x0FFF, between the relocated boot sector and the kernel.
     mov ss, ax
-    mov sp, 0x9000
-    mov bp, sp
-    sti
+    mov sp, KERNEL_OFFSET
     cld                    ; string instructions count upwards
+    mov si, 0x7C00
+    mov di, RELOCATED
+    mov cx, 256
+    rep movsw
+    jmp 0x0000:relocated   ; continue in the copy, with CS = 0
+relocated:
+    sti
 
     ; BIOS sets boot drive in 'dl'; store it
     mov [BOOT_DRIVE], dl
@@ -68,11 +81,10 @@ start:
 
     call load_kernel
 
-    ; After kernel is loaded, jump to it
-    ; Ensure segment is 0, offset is 0x1000
+    ; Jump to the kernel at 0000:1000, telling it the boot drive in DL
+    ; (it needs it to save and load programs).
+    mov dl, [BOOT_DRIVE]
     jmp 0x0000:KERNEL_OFFSET
-
-    jmp $ ; infinite loop if kernel somehow returns
 
 %include "boot/print.asm"
 %include "boot/disk_load.asm"

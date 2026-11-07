@@ -1,6 +1,7 @@
 #include "basic.h"
 #include "bios.h"
 #include "string.h"
+#include "mem.h"
 
 #define MAX_LINES 256
 #define MAX_LINE_LEN 64
@@ -10,7 +11,7 @@ struct line {
     char text[MAX_LINE_LEN];
 };
 
-struct line program[MAX_LINES];
+HIGH_MEM struct line program[MAX_LINES];
 int num_lines = 0;
 
 int vars[26];

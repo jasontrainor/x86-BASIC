@@ -1,5 +1,9 @@
 #include "bios.h"
 
+// kernel_entry.asm. Called after every BIOS call: a BIOS that switches to
+// protected mode internally may leave the segment limits at 64KB.
+void enter_unreal(void);
+
 int cursor_x = 0;
 int cursor_y = 0;
 unsigned char current_color = 0x70; // Spectrum default: White paper (7<<4), Black ink (0)
@@ -73,6 +77,7 @@ void set_border(int c) {
         : "a" (0x0B00), "b" (vga_col)
         : "cc"
     );
+    enter_unreal();
 }
 
 void update_cursor() {
@@ -82,6 +87,7 @@ void update_cursor() {
         : "a" (0x0200), "b" (0x0000), "d" ((cursor_y << 8) | cursor_x)
         : "cc"
     );
+    enter_unreal();
 }
 
 void clear_screen() {
@@ -146,6 +152,7 @@ char get_char() {
         : "a" (0x0000)
         : "cc"
     );
+    enter_unreal();
     return (char)(ax & 0xFF);
 }
 
@@ -162,6 +169,7 @@ int check_break() {
             : "a" (0x0100)
             : "cc"
         );
+        enter_unreal();
         if (no_key) return 0;
         char c = get_char();
         if (c == 27 || c == 3) return 1;   // Esc, Ctrl+C
@@ -218,12 +226,15 @@ void init_video() {
     // Real BIOSes may leave a graphics or vendor-logo mode active, so
     // explicitly select 80x25 colour text mode (this also clears it).
     __asm__ __volatile__ ("int $0x10" : : "a" (0x0003) : "cc", "memory");
+    enter_unreal();
 
     // Attribute bit 7 means "blink" by default on real VGA hardware, which
     // would make bright paper colours (e.g. white, 15) flash. Switch it to
     // mean "bright background" so all 16 paper colours are usable.
     __asm__ __volatile__ ("int $0x10" : : "a" (0x1003), "b" (0x0000) : "cc");
+    enter_unreal();
 
     // Spectrum-style full block cursor: CH=0 (top line), CL=15 (bottom).
     __asm__ __volatile__ ("int $0x10" : : "a" (0x0100), "c" (0x000F) : "cc");
+    enter_unreal();
 }

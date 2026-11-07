@@ -4,7 +4,7 @@ LD = ld
 
 CFLAGS = -m16 -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib -Os -Wall -Ikernel \
          -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
-         -mgeneral-regs-only
+         -mgeneral-regs-only -DBIOS_KERNEL
 
 .PHONY: all test boot-test clean
 
@@ -28,7 +28,7 @@ bios.o: kernel/bios.c kernel/bios.h
 string.o: kernel/string.c kernel/string.h
 	$(CC) $(CFLAGS) -c kernel/string.c -o string.o
 
-basic.o: kernel/basic.c kernel/basic.h kernel/bios.h kernel/string.h
+basic.o: kernel/basic.c kernel/basic.h kernel/bios.h kernel/string.h kernel/mem.h
 	$(CC) $(CFLAGS) -c kernel/basic.c -o basic.o
 
 kernel.bin: kernel_entry.o kernel.o bios.o string.o basic.o linker.ld

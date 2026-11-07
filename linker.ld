@@ -1,18 +1,26 @@
 /*
- * Memory map (real mode, everything in segment 0):
+ * Memory map (real mode; all segment registers are 0):
  *
  *   0x00000-0x004FF  interrupt vectors and BIOS data area
+ *   0x00600-0x007FF  boot sector (moved here from 0x7C00 by itself)
+ *   0x00800-0x00FFF  boot sector's stack
  *   0x01000-...      kernel code and data, loaded by the boot sector
- *   ...              .bss (program store, variables), zeroed at startup
- *   0x07C00-0x07DFF  boot sector (only needed until the kernel starts)
+ *   ...              .bss (small variables), zeroed at startup
  *   ...-0x0FFF0      stack, growing down from __stack_top
+ *   0x10000-...      .bss.high: big buffers (program, variables, screen)
  *
- * Everything must stay below 64KB: the C code addresses memory as
- * offsets from segment 0. The ASSERTs below fail the build if it doesn't
- * fit, instead of letting data and stack silently overlap.
+ * Code and stack must stay below 64KB: CS and SS are real-mode segments
+ * at 0. The data segments have a 4GB limit ("unreal mode", set up in
+ * kernel_entry.asm), so data above 64KB can be reached with 32-bit
+ * addresses; C code marks such buffers HIGH_MEM (see kernel/mem.h).
+ *
+ * The ASSERTs below fail the build if anything doesn't fit, instead of
+ * letting code, data and stack silently overlap.
  */
 __stack_top  = 0xFFF0;
-STACK_RESERVE = 16K;
+STACK_RESERVE = 12K;
+HIGH_START = 0x10000;
+HIGH_END   = 0x80000;   /* conventional memory is safe to well past this */
 
 ENTRY(_start)
 SECTIONS
@@ -33,8 +41,15 @@ SECTIONS
     }
     __image_end = .;   /* end of what kernel.bin contains */
 
-    /* Not stored in kernel.bin; kernel.c zeroes it at startup. */
-    .bss : ALIGN(4) {
+    /* Not stored in kernel.bin; kernel.c zeroes it at startup. Listed
+       before .bss so that the .bss.* pattern there doesn't claim it. */
+    .bss.high HIGH_START (NOLOAD) : ALIGN(16) {
+        __high_start = .;
+        *(.bss.high .bss.high.*)
+        __high_end = .;
+    }
+
+    .bss __image_end (NOLOAD) : ALIGN(4) {
         __bss_start = .;
         *(.bss .bss.*)
         *(COMMON)
@@ -47,8 +62,8 @@ SECTIONS
     }
 }
 
-/* The boot sector is still running at 0x7C00 while it loads the kernel. */
-ASSERT(__image_end <= 0x7C00,
-       "kernel.bin too big: loading it would overwrite the boot sector")
+/* boot/boot.asm loads at most up to 0xF000. */
+ASSERT(__image_end <= 0xF000, "kernel.bin too big for the boot sector to load")
 ASSERT(__bss_end <= __stack_top - STACK_RESERVE,
-       "kernel data too big: less than STACK_RESERVE left for the stack")
+       "kernel code and data too big: less than STACK_RESERVE left for the stack")
+ASSERT(__high_end <= HIGH_END, "HIGH_MEM buffers too big")

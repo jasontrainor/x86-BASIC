@@ -39,6 +39,12 @@ SESSION = [
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 
+# Use KVM when available. Besides being faster, it runs the code on the
+# real CPU, which enforces real-mode segment limits; QEMU's emulator
+# doesn't, so it can't catch code that only works because of that.
+# Set NOKVM=1 to force emulation.
+KVM = (['-enable-kvm'] if os.access('/dev/kvm', os.R_OK | os.W_OK)
+       and not os.environ.get('NOKVM') else [])
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -116,7 +122,7 @@ def screen_text(mon, tmpdir):
 
 def qemu_args(mode, image, monitor_path):
     drive = f'file={image},format=raw'
-    args = ['qemu-system-x86_64', '-display', 'none', '-no-reboot',
+    args = ['qemu-system-x86_64', '-display', 'none', '-no-reboot'] + KVM + [
             '-qmp', f'unix:{monitor_path},server,nowait']
     if mode == 'floppy':
         args += ['-drive', drive + ',if=floppy', '-boot', 'a']
@@ -167,7 +173,8 @@ def run(mode, image, show):
                 print(text)
             # Cell 0's attribute shows the paper/ink actually in effect
             # (0xf0 = bright white paper, black ink).
-            print(f'[{mode}] {"PASS" if ok else "FAIL"} (attribute of cell 0: 0x{raw[1]:02x})')
+            accel = 'kvm' if KVM else 'emulated'
+            print(f'[{mode}, {accel}] {"PASS" if ok else "FAIL"} (attribute of cell 0: 0x{raw[1]:02x})')
             return ok
         finally:
             proc.kill()
