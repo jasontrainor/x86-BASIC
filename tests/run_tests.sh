@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
-    -Wall -Ikernel \
+    -Wall -Ikernel -DHOST_TEST \
     -o "$BIN" tests/host_stub.c kernel/basic.c kernel/string.c kernel/num.c || exit 1
 
 pass=0; fail=0
@@ -71,14 +71,13 @@ check "next skips inner"  "10 FOR I=1 TO 2${NL}20 FOR J=1 TO 5${NL}30 NEXT I${NL
 
 # --- Input bounds ---------------------------------------------------------
 A60=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-check "line too long"     "10 PRINT \"${A60}\"${NL}20 PRINT 2*2${NL}LIST${NL}" "ERROR: LINE TOO LONG IN LINE 10" "LIST${NL}20 PRINT 2*2${NL}"
-check "line max length"   "10 PRINT \"${A60:0:54}\"${NL}LIST${NL}" "!ERROR"
-check "string too long"   "A\$=\"${A60}${A60}\"${NL}" "ERROR: STRING TOO LONG"
+A200=${A60}${A60}${A60}${A60:0:20}
+check "long line"         "10 PRINT \"${A200}\"${NL}LIST${NL}" "LIST${NL}10 PRINT \"${A200}\"${NL}" "!ERROR"
+check "string too long"   "A\$=\"${A200}\"${NL}A\$=A\$+A\$${NL}" "ERROR: STRING TOO LONG"
 check "line number range" "0 PRINT 1${NL}99999999999 PRINT 1${NL}" "LINE NUMBER MUST BE 1-9999"
 
-FULL=""; for i in $(seq 1 256); do FULL+="$i PRINT 1${NL}"; done
-check "program full"      "${FULL}257 PRINT 1${NL}" "ERROR: PROGRAM FULL IN LINE 257"
-check "full: replace ok"  "${FULL}256 PRINT 2${NL}" "!PROGRAM FULL"
+FULL=""; for i in $(seq 1 200); do FULL+="$i REM ${A200}${NL}"; done
+check "program full"      "${FULL}PRINT 6*7${NL}" "ERROR: PROGRAM FULL IN LINE 160" "${NL}42${NL}"
 
 # --- Variable names are validated ------------------------------------------
 check "let digit var"     "LET 5=3${NL}" "ERROR: BAD VARIABLE NAME"
@@ -93,14 +92,16 @@ T=" THEN PRINT 1+1${NL}"
 check "true comparisons"  "IF 1=1${T}IF 1<>2${T}IF 1<2${T}IF 2<=2${T}IF 3>2${T}IF 2>=2${T}" \
     "1=1${T}2${NL}" "1<>2${T}2${NL}" "1<2${T}2${NL}" "2<=2${T}2${NL}" "3>2${T}2${NL}" "2>=2${T}2${NL}"
 check "false comparisons" "IF 1=2 THEN PRINT 1+1${NL}IF 2<>2 THEN PRINT 1+1${NL}IF 2<1 THEN PRINT 1+1${NL}IF 3<=2 THEN PRINT 1+1${NL}IF 2>3 THEN PRINT 1+1${NL}IF 1>=2 THEN PRINT 1+1${NL}" "!${NL}2${NL}"
-check "no comparison"     "IF 1${NL}" "ERROR: COMPARISON EXPECTED"
+check "number as condition" "IF 2 THEN PRINT 6*7${NL}IF 0 THEN PRINT 6*8${NL}" "${NL}42${NL}" "!48"
 
 # --- Keyword matching -------------------------------------------------------
 check "mixed case"        "Print 3*3${NL}pRiNt 4*4${NL}" "${NL}9${NL}" "${NL}16${NL}"
 check "mixed case for"    "10 For I=1 To 2${NL}20 Print I*50${NL}30 Next I${NL}Run${NL}" "${NL}50${NL}100${NL}"
 check "keyword prefix"    "10 PRINT 3*3${NL}RUNX${NL}" "ERROR: SYNTAX ERROR" "!${NL}9${NL}"
 check "no space needed"   "10 GOTO30${NL}20 PRINT 1+1${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}"
-check "two-letter var"    "AB=5${NL}" "ERROR: SYNTAX ERROR"
+check "long names"        "SCORE=5${NL}TOTAL2=SCORE*2${NL}PRINT TOTAL2+1${NL}" "${NL}11${NL}"
+check "keyword in name"   "FORM=3${NL}TOTAL=4${NL}PRINT FORM*TOTAL${NL}" "${NL}12${NL}"
+check "name too long"     "ABCDEFGHIJKLMNOPQ=1${NL}" "ERROR: NAME TOO LONG"
 
 # --- Numbers ---------------------------------------------------------------
 check "decimals"          "PRINT 7/2${NL}PRINT 1/3${NL}PRINT 2/3${NL}PRINT .5+.25${NL}" "${NL}3.5${NL}" "${NL}0.33333333${NL}" "${NL}0.66666667${NL}" "${NL}0.75${NL}"
@@ -124,6 +125,26 @@ check "ln of zero"        "PRINT LN 0${NL}" "ERROR: INVALID ARGUMENT"
 check "decimal for step"  "10 FOR I=0 TO 1 STEP 0.25${NL}20 PRINT I${NL}30 NEXT I${NL}RUN${NL}" "${NL}0${NL}0.25${NL}0.5${NL}0.75${NL}1${NL}"
 check "integer range"     "INK 9${NL}" "ERROR: INTEGER OUT OF RANGE"
 check "goto rounds"       "10 GOTO 19.6${NL}20 PRINT 4*5${NL}RUN${NL}" "${NL}20${NL}"
+
+# --- Statements per line, comments, strings ---------------------------------
+check "colon"             "PRINT 1+1: PRINT 2+2${NL}" "${NL}2${NL}4${NL}"
+check "colon in program"  "10 A=1: B=2: PRINT A+B${NL}RUN${NL}" "${NL}3${NL}"
+check "for on one line"   "FOR I=1 TO 3: PRINT I*7;: NEXT I${NL}" "71421"
+check "if skips rest"     "IF 0 THEN PRINT 1+1: PRINT 3+3${NL}PRINT 5+5${NL}" "!${NL}6${NL}" "${NL}10${NL}"
+check "if runs rest"      "IF 1 THEN PRINT 1+1: PRINT 3+3${NL}" "${NL}2${NL}6${NL}"
+check "if then line"      "10 IF 1 THEN 30${NL}20 PRINT 1+1${NL}30 PRINT 3+3${NL}RUN${NL}" "${NL}6${NL}" "!${NL}2${NL}"
+check "rem"               "10 REM PRINT 1+1: PRINT 9${NL}20 PRINT 3+3${NL}RUN${NL}" "${NL}6${NL}" "!${NL}2${NL}" "!${NL}9${NL}"
+check "for skipped"       "10 FOR I=5 TO 1${NL}20 PRINT 1+1${NL}30 NEXT I${NL}40 PRINT I*10${NL}RUN${NL}" "${NL}50${NL}" "!${NL}2${NL}"
+check "for no next"       "10 FOR I=5 TO 1${NL}RUN${NL}" "ERROR: FOR WITHOUT NEXT IN LINE 10"
+check "string concat"     "A\$=\"AB\"${NL}B\$=A\$+\"CD\"+A\$${NL}PRINT B\$${NL}" "${NL}ABCDAB${NL}"
+check "string compare"    "IF \"ABC\"<\"ABD\" THEN PRINT 1+1${NL}IF \"A\"=\"A\" THEN PRINT 2+2${NL}IF \"AB\">\"A\" THEN PRINT 3+3${NL}" "${NL}2${NL}" "${NL}4${NL}" "${NL}6${NL}"
+check "type mismatch"     "PRINT \"A\"+1${NL}" "ERROR: STRING EXPECTED"
+check "type mismatch 2"   "A=\"X\"${NL}" "ERROR: NUMBER EXPECTED"
+check "variable not found" "PRINT Q+1${NL}" "ERROR: VARIABLE NOT FOUND"
+check "run clears vars"   "A=5${NL}10 PRINT A${NL}RUN${NL}" "ERROR: VARIABLE NOT FOUND IN LINE 10"
+check "print ; at end"    "PRINT 1+1;: PRINT 3+3${NL}" "${NL}26${NL}"
+check "list detokenizes"  "10 print a:goto 10${NL}20 if a<=b then print \"if\"${NL}LIST${NL}" "10 PRINT A: GOTO 10${NL}20 IF A<=B THEN PRINT \"if\"${NL}"
+check "list rem keeps text" "10 rem Hello print${NL}LIST${NL}" "10 REM Hello print${NL}"
 
 # --- BREAK --------------------------------------------------------------------
 ESC=$'\x1b'

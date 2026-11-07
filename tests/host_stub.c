@@ -17,7 +17,7 @@ void print_char(char c) {
     if (c == '\r') return;          /* cursor-only; keep output as plain \n */
     if (c == 8) c = '~';            /* make backspaces visible */
     putchar(c);
-    if (++output_chars > 20000) {   /* guard against runaway programs */
+    if (++output_chars > 100000) {   /* guard against runaway programs */
         puts("\n[OUTPUT LIMIT]");
         exit(0);
     }

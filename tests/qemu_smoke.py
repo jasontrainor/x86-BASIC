@@ -34,6 +34,7 @@ SESSION = [
     ('10 FOR I=1 TO 3\n20 PRINT "LOOP ";I*11\n30 NEXT I\n40 PRINT "DONE"\nRUN\n',
      ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE']),
     ('IF 1<>2 THEN PRINT "NOT EQUAL"\n', ['NOT EQUAL']),
+    ('TOTAL=0: FOR N=1 TO 4: TOTAL=TOTAL+N: NEXT N: PRINT "SUM ";TOTAL\n', ['SUM 10']),
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
     ('PRINT 1/3;" ";SQR 2;" ";2^0.5*1E10\n', ['0.33333333 1.4142136 1.4142136E+10']),
     ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
@@ -119,6 +120,11 @@ def screen_text(mon, tmpdir):
         row = data[r * 160:(r + 1) * 160:2]
         rows.append(row.decode('ascii', 'replace').rstrip())
     return '\n'.join(rows), data
+
+
+def ready(mon, tmpdir):
+    """True once the kernel's banner is on screen."""
+    return 'x86 BASIC' in screen_text(mon, tmpdir)[0]
 
 
 def qemu_args(mode, image, monitor_path):
