@@ -35,7 +35,7 @@ def main():
                 mon.cmd('sendkey ' + q.key_name(ch))
                 time.sleep(0.02)
             time.sleep(a.wait)
-            print(q.screen_text(mon, tmp)[0])
+            print(q.screen_text(mon, tmp))
         finally:
             proc.kill()
             proc.wait()

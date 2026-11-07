@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Ikernel -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/string.c kernel/num.c || exit 1
+    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/string.c kernel/num.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
@@ -197,6 +197,25 @@ check "print tab"         "PRINT \"AB\";TAB 6;\"C\"${NL}" "${NL}AB    C${NL}"
 check "print comma"       "PRINT 1,2${NL}" "${NL}1               2${NL}"
 check "list from"         "10 PRINT 1${NL}20 PRINT 2${NL}30 PRINT 3${NL}LIST 20${NL}" "LIST 20${NL}20 PRINT 2${NL}30 PRINT 3${NL}"
 check "beep range"        "BEEP 1,100${NL}" "ERROR: INTEGER OUT OF RANGE"
+
+# --- Graphics ----------------------------------------------------------------
+check "plot point"        "PLOT 10,10: PRINT POINT (10,10);POINT (11,10)${NL}" "${NL}10${NL}"
+check "plot range"        "PLOT 256,0${NL}" "ERROR: INTEGER OUT OF RANGE"
+check "plot y range"      "PLOT 0,176${NL}" "ERROR: INTEGER OUT OF RANGE"
+check "draw line"         "PLOT 0,0: DRAW 100,50: PRINT POINT (50,25);POINT (100,50);POINT (50,30)${NL}" "${NL}110${NL}"
+check "draw relative"     "PLOT 10,10: DRAW 10,0: DRAW 0,10: PRINT POINT (20,15);POINT (15,10)${NL}" "${NL}11${NL}"
+check "draw off screen"   "PLOT 250,0: DRAW 10,0${NL}" "ERROR: INTEGER OUT OF RANGE"
+check "draw arc"          "PLOT 100,100: DRAW 50,0,PI: PRINT POINT (150,100);POINT (125,75);POINT (125,125)${NL}" "${NL}110${NL}"
+check "circle"            "CIRCLE 100,80,10: PRINT POINT (110,80);POINT (100,90);POINT (100,80)${NL}" "${NL}110${NL}"
+check "circle clipped"    "CIRCLE 0,0,50: PRINT POINT (50,0)${NL}" "${NL}1${NL}"
+check "over"              "PLOT 5,5: OVER 1: PLOT 5,5: PRINT POINT (5,5)${NL}" "[OVER 1]0${NL}"
+check "inverse plot"      "PLOT 5,5: INVERSE 1: PLOT 5,5: INVERSE 0: PRINT POINT (5,5)${NL}" "[INVERSE 0]0${NL}"
+check "cls clears"        "PLOT 5,5: CLS: PRINT POINT (5,5)${NL}" "[CLS]0${NL}"
+check "attributes"        "BRIGHT 1: INVERSE 1: OVER 1${NL}" "[BRIGHT 1]" "[INVERSE 1]" "[OVER 1]"
+check "attribute range"   "BRIGHT 2${NL}" "ERROR: INTEGER OUT OF RANGE"
+check "print colours"     "PRINT INK 2;\"R\";PAPER 6;\"Y\"${NL}PRINT \"X\"${NL}" "${NL}RY${NL}PRINT \"X\"${NL}X${NL}"
+check "block graphics"    "PRINT CHR\$ 128;CHR\$ 143;CHR\$ 127${NL}" "!ERROR"
+check "scrolling"         "FOR I=1 TO 40: PRINT I: NEXT I${NL}PRINT 6*7${NL}" "${NL}39${NL}40${NL}"
 
 # --- BREAK --------------------------------------------------------------------
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "BREAK IN LINE 10" "${NL}25${NL}"

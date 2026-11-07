@@ -1,234 +1,12 @@
-#include "bios.h"
+/*
+ * The platform layer (platform.h) for PCs booted through the BIOS:
+ * VGA graphics, BIOS keyboard and timer services, and the PC speaker.
+ */
+#include "platform.h"
 
 // kernel_entry.asm. Called after every BIOS call: a BIOS that switches to
 // protected mode internally may leave the segment limits at 64KB.
 void enter_unreal(void);
-
-int cursor_x = 0;
-int cursor_y = 0;
-unsigned char current_color = 0x70; // Spectrum default: White paper (7<<4), Black ink (0)
-
-/*
- * Text-mode video memory lives at physical 0xB8000. This code runs in
- * 16-bit real mode, where an address is segment*16 + offset and the
- * offset must stay below 64KB, so 0xB8000 can't be reached through the
- * zero-based DS that the C code uses. Instead, load FS (which GCC never
- * uses) with segment 0xB800 and access cells as small FS-relative offsets.
- * QEMU doesn't enforce the 64KB limit, but real CPUs fault on it.
- */
-#define VGA_SEGMENT 0xB800
-#define VGA_COLS 80
-#define VGA_ROWS 25
-
-static void vga_put(int cell, unsigned short value) {
-    __asm__ __volatile__ (
-        "mov %w2, %%fs\n\t"
-        "movw %w0, %%fs:(%1)"
-        :
-        : "r" (value), "r" (cell * 2), "r" (VGA_SEGMENT)
-        : "memory"
-    );
-}
-
-static unsigned short vga_get(int cell) {
-    unsigned short value;
-    __asm__ __volatile__ (
-        "mov %w2, %%fs\n\t"
-        "movw %%fs:(%1), %w0"
-        : "=r" (value)
-        : "r" (cell * 2), "r" (VGA_SEGMENT)
-        : "memory"
-    );
-    return value;
-}
-
-static unsigned short vga_cell(char c) {
-    return (unsigned char)c | (current_color << 8);
-}
-
-// Map Spectrum colors (0-7) to VGA text colors
-unsigned char spec_to_vga(int color) {
-    switch (color) {
-        case 0: return 0; // Black
-        case 1: return 1; // Blue
-        case 2: return 4; // Red
-        case 3: return 5; // Magenta
-        case 4: return 2; // Green
-        case 5: return 3; // Cyan
-        case 6: return 14; // Yellow
-        case 7: return 15; // White
-    }
-    return 0;
-}
-
-void set_ink(int c) {
-    current_color = (current_color & 0xF0) | (spec_to_vga(c) & 0x0F);
-}
-
-void set_paper(int c) {
-    current_color = (current_color & 0x0F) | ((spec_to_vga(c) & 0x0F) << 4);
-}
-
-void set_border(int c) {
-    int vga_col = spec_to_vga(c);
-    __asm__ __volatile__ (
-        "int $0x10"
-        :
-        : "a" (0x0B00), "b" (vga_col)
-        : "cc"
-    );
-    enter_unreal();
-}
-
-void update_cursor() {
-    __asm__ __volatile__ (
-        "int $0x10"
-        :
-        : "a" (0x0200), "b" (0x0000), "d" ((cursor_y << 8) | cursor_x)
-        : "cc"
-    );
-    enter_unreal();
-}
-
-void set_cursor(int col, int row) {
-    cursor_x = col;
-    cursor_y = row;
-    update_cursor();
-}
-
-int cursor_col() { return cursor_x; }
-int screen_cols() { return VGA_COLS; }
-int screen_rows() { return VGA_ROWS; }
-
-void clear_screen() {
-    for (int i = 0; i < VGA_COLS * VGA_ROWS; i++) {
-        vga_put(i, vga_cell(' '));
-    }
-    cursor_x = 0;
-    cursor_y = 0;
-    update_cursor();
-}
-
-void scroll() {
-    for (int i = 0; i < VGA_COLS * (VGA_ROWS - 1); i++) {
-        vga_put(i, vga_get(i + VGA_COLS));
-    }
-    for (int i = VGA_COLS * (VGA_ROWS - 1); i < VGA_COLS * VGA_ROWS; i++) {
-        vga_put(i, vga_cell(' '));
-    }
-    cursor_y = VGA_ROWS - 1;
-}
-
-void print_char(char c) {
-    if (c == '\n') {
-        cursor_x = 0;
-        cursor_y++;
-    } else if (c == '\r') {
-        cursor_x = 0;
-    } else if (c == 8) {
-        if (cursor_x > 0) {
-            cursor_x--;
-            vga_put(cursor_y * VGA_COLS + cursor_x, vga_cell(' '));
-        }
-    } else {
-        vga_put(cursor_y * VGA_COLS + cursor_x, vga_cell(c));
-        cursor_x++;
-        if (cursor_x >= VGA_COLS) {
-            cursor_x = 0;
-            cursor_y++;
-        }
-    }
-    if (cursor_y >= VGA_ROWS) {
-        scroll();
-    }
-    update_cursor();
-}
-
-void print_string(const char* str) {
-    while (*str) {
-        if (*str == '\n') {
-            print_char('\r');
-        }
-        print_char(*str);
-        str++;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Keyboard
-//
-// Keys are moved from the BIOS buffer into our own small queue, so that
-// check_break() can look for Esc among keys typed while a program runs
-// without throwing the others away (INKEY$ and INPUT still get them).
-// ---------------------------------------------------------------------------
-
-#define KEYQ_SIZE 32
-static char keyq[KEYQ_SIZE];
-static int keyq_head, keyq_len;
-static int break_pending;
-
-// Move any keys waiting in the BIOS buffer into the queue (non-blocking).
-static void poll_bios_keys() {
-    while (1) {
-        unsigned char no_key;
-        __asm__ __volatile__ (
-            "int $0x16\n\t"
-            "setz %0"
-            : "=qm" (no_key)
-            : "a" (0x0100)
-            : "cc"
-        );
-        enter_unreal();
-        if (no_key) return;
-        unsigned short ax;
-        __asm__ __volatile__ ("int $0x16" : "=a" (ax) : "a" (0x0000) : "cc");
-        enter_unreal();
-        char c = (char)(ax & 0xFF);
-        if (c == 27 || c == 3) {           // Esc, Ctrl+C: BREAK
-            break_pending = 1;
-            keyq_len = 0;
-        } else if (keyq_len < KEYQ_SIZE) {
-            keyq[(keyq_head + keyq_len++) % KEYQ_SIZE] = c;
-        }
-    }
-}
-
-// Next key, or -1 if none is waiting. Esc comes back as 27.
-int poll_key() {
-    poll_bios_keys();
-    if (break_pending) {
-        break_pending = 0;
-        return 27;
-    }
-    if (!keyq_len) return -1;
-    char c = keyq[keyq_head];
-    keyq_head = (keyq_head + 1) % KEYQ_SIZE;
-    keyq_len--;
-    return (unsigned char)c;
-}
-
-int key_waiting() {
-    poll_bios_keys();
-    return break_pending || keyq_len > 0;
-}
-
-char get_char() {
-    int c;
-    while ((c = poll_key()) < 0) {
-        __asm__ __volatile__ ("hlt");      // sleep until the next interrupt
-    }
-    return (char)c;
-}
-
-// Non-blocking: returns 1 if Esc or Ctrl+C has been pressed.
-int check_break() {
-    poll_bios_keys();
-    if (break_pending) {
-        break_pending = 0;
-        return 1;
-    }
-    return 0;
-}
 
 static void outb(unsigned short port, unsigned char val) {
     __asm__ __volatile__ ("outb %0, %1" : : "a" (val), "Nd" (port));
@@ -240,13 +18,122 @@ static unsigned char inb(unsigned short port) {
     return val;
 }
 
+/* ------------------------------------------------------------------------
+ * Display: VGA mode 13h, 320x200 pixels with one byte per pixel at
+ * 0xA0000. The 256x192 Spectrum screen sits in the middle, leaving a
+ * border of 32 pixels left and right and 4 above and below. (Unreal mode
+ * lets the C code address 0xA0000 directly.)
+ * --------------------------------------------------------------------- */
+
+#define VGA_MEM   ((volatile unsigned char *)0xA0000)
+#define VGA_WIDTH 320
+#define VGA_HEIGHT 200
+#define WIN_X 32
+#define WIN_Y 4
+
+// Colours 0-7 are the Spectrum's: black, blue, red, magenta, green,
+// cyan, yellow, white - so bit 0 is blue, bit 1 red and bit 2 green.
+// 8-15 are their BRIGHT versions. VGA DAC levels are 0-63.
+static void set_palette(void) {
+    outb(0x3C8, 0);                       // start at colour 0
+    for (int i = 0; i < 16; i++) {
+        int level = (i & 8) ? 63 : 52;
+        outb(0x3C9, (i & 2) ? level : 0); // red
+        outb(0x3C9, (i & 4) ? level : 0); // green
+        outb(0x3C9, (i & 1) ? level : 0); // blue
+    }
+}
+
+void plat_init(void) {
+    // Real BIOSes may leave a text mode or a vendor-logo mode active;
+    // select 320x200 256-colour graphics (this also clears the screen).
+    __asm__ __volatile__ ("int $0x10" : : "a" (0x0013) : "cc", "memory");
+    enter_unreal();
+    set_palette();
+}
+
+void plat_draw_cell(int col, int row, const unsigned char *bits, int ink, int paper) {
+    volatile unsigned char *p = VGA_MEM + (WIN_Y + row * 8) * VGA_WIDTH + WIN_X + col * 8;
+    for (int y = 0; y < 8; y++, p += VGA_WIDTH) {
+        // Build the 8 pixels as two 32-bit words: fewer, faster writes.
+        unsigned int lo = 0, hi = 0;
+        for (int x = 0; x < 4; x++) {
+            lo |= (unsigned int)((bits[y] & (0x80 >> x)) ? ink : paper) << (8 * x);
+            hi |= (unsigned int)((bits[y] & (0x08 >> x)) ? ink : paper) << (8 * x);
+        }
+        ((volatile unsigned int *)p)[0] = lo;
+        ((volatile unsigned int *)p)[1] = hi;
+    }
+}
+
+static void fill(int x, int y, int w, int h, int colour) {
+    unsigned int four = colour * 0x01010101u;
+    for (int j = 0; j < h; j++) {
+        volatile unsigned int *p = (volatile unsigned int *)(VGA_MEM + (y + j) * VGA_WIDTH + x);
+        for (int i = 0; i < w / 4; i++) p[i] = four;
+    }
+}
+
+void plat_border(int colour) {
+    fill(0, 0, VGA_WIDTH, WIN_Y, colour);
+    fill(0, VGA_HEIGHT - WIN_Y, VGA_WIDTH, WIN_Y, colour);
+    fill(0, WIN_Y, WIN_X, VGA_HEIGHT - 2 * WIN_Y, colour);
+    fill(VGA_WIDTH - WIN_X, WIN_Y, WIN_X, VGA_HEIGHT - 2 * WIN_Y, colour);
+}
+
+/* ------------------------------------------------------------------------
+ * Keyboard: BIOS INT 16h
+ * --------------------------------------------------------------------- */
+
+int plat_read_key(void) {
+    for (;;) {
+        unsigned char no_key;
+        __asm__ __volatile__ (
+            "int $0x16\n\t"
+            "setz %0"
+            : "=qm" (no_key)
+            : "a" (0x0100)                // AH=01h: is a key waiting?
+            : "cc"
+        );
+        enter_unreal();
+        if (no_key) return -1;
+        unsigned short ax;
+        __asm__ __volatile__ ("int $0x16" : "=a" (ax) : "a" (0x0000) : "cc");
+        enter_unreal();
+        unsigned char ascii = ax & 0xFF, scan = ax >> 8;
+        if (ascii != 0 && ascii != 0xE0) return ascii;
+        switch (scan) {                   // keys without a character
+        case 0x48: return KEY_UP;
+        case 0x50: return KEY_DOWN;
+        case 0x4B: return KEY_LEFT;
+        case 0x4D: return KEY_RIGHT;
+        case 0x47: return KEY_HOME;
+        case 0x4F: return KEY_END;
+        case 0x53: return KEY_DELETE;
+        }
+        // Some other key (F1, say): ignore it and look again.
+    }
+}
+
+void plat_idle(void) {
+    __asm__ __volatile__ ("hlt");         // sleep until the next interrupt
+}
+
+/* ------------------------------------------------------------------------
+ * Time and sound
+ * --------------------------------------------------------------------- */
+
 // BIOS timer tick count at 0040:006C, incremented ~18.2 times a second
-// by the BIOS timer interrupt. Lies inside segment 0, so DS can reach it.
-// (Read via asm: GCC warns about dereferencing constant addresses < 4KB.)
-static unsigned int bios_ticks() {
+// by the BIOS timer interrupt. (Read via asm: GCC warns about
+// dereferencing constant addresses below 4KB.)
+static unsigned int bios_ticks(void) {
     unsigned int t;
     __asm__ __volatile__ ("movl 0x046C, %0" : "=r" (t) : : "memory");
     return t;
+}
+
+unsigned long plat_timer_ms(void) {
+    return bios_ticks() * 55UL;
 }
 
 // Wait for the given number of timer ticks (~55ms each). This is
@@ -266,13 +153,8 @@ static void wait_ticks(int n) {
     }
 }
 
-unsigned long timer_ms() {
-    return bios_ticks() * 55UL;
-}
-
-// Play a tone of freq Hz on the PC speaker for about ms milliseconds
-// (to the nearest timer tick, ~55ms). freq 0 is a rest.
-void tone(int freq, int ms) {
+// The duration is rounded to whole timer ticks (~55ms).
+void plat_tone(int freq, int ms) {
     int ticks = (ms + 27) / 55;
     if (ticks < 1 && ms > 0) ticks = 1;
     if (freq >= 20 && freq <= 20000) {
@@ -287,21 +169,4 @@ void tone(int freq, int ms) {
     } else {
         wait_ticks(ticks);
     }
-}
-
-void init_video() {
-    // Real BIOSes may leave a graphics or vendor-logo mode active, so
-    // explicitly select 80x25 colour text mode (this also clears it).
-    __asm__ __volatile__ ("int $0x10" : : "a" (0x0003) : "cc", "memory");
-    enter_unreal();
-
-    // Attribute bit 7 means "blink" by default on real VGA hardware, which
-    // would make bright paper colours (e.g. white, 15) flash. Switch it to
-    // mean "bright background" so all 16 paper colours are usable.
-    __asm__ __volatile__ ("int $0x10" : : "a" (0x1003), "b" (0x0000) : "cc");
-    enter_unreal();
-
-    // Spectrum-style full block cursor: CH=0 (top line), CL=15 (bottom).
-    __asm__ __volatile__ ("int $0x10" : : "a" (0x0100), "c" (0x000F) : "cc");
-    enter_unreal();
 }

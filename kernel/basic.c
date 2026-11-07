@@ -14,7 +14,7 @@
  * the next character to read.
  */
 #include "basic.h"
-#include "bios.h"
+#include "screen.h"
 #include "string.h"
 #include "mem.h"
 #include "num.h"
@@ -753,6 +753,14 @@ static struct value primary() {
     } else if (c == T_RND) {
         p++;
         return num_value(rnd());
+    } else if (c == T_POINT) {             // POINT (x,y): 1 if ink there
+        p++;
+        expect_char('(', "SYNTAX ERROR");
+        int x = expr_int(0, SCREEN_WIDTH - 1);
+        expect_char(',', "SYNTAX ERROR");
+        int y = expr_int(0, PLOT_HEIGHT - 1);
+        expect_char(')', "MISSING )");
+        return num_value(error_msg ? 0 : point(x, y));
     } else if (isalpha(c)) {
         return variable_value();
     }
@@ -983,10 +991,21 @@ static void print_spaces_to(int col) {
  * half-screen column). AT row,col and TAB col move the cursor. A
  * trailing ; or , leaves the cursor after the text.
  */
+static int colour_item(struct colours *c);
+
 static void st_print() {
     int newline = 1;
-    while (!at_statement_end()) {
+    // Colours given within PRINT (PRINT INK 2;"RED") last for this
+    // PRINT only, as on the Spectrum.
+    struct colours saved, temp;
+    get_colours(&saved);
+    temp = saved;
+    while (!at_statement_end() && !error_msg) {
         newline = 1;
+        if (colour_item(&temp)) {
+            set_colours(&temp);
+            continue;
+        }
         if (accept_char(';')) {
             newline = 0;
             continue;
@@ -1014,14 +1033,15 @@ static void st_print() {
             continue;
         }
         struct value v = expr();
-        if (error_msg) return;
+        if (error_msg) break;
         print_value(v);
         if (!at_statement_end() && *p != ';' && *p != ',') {
             error("SYNTAX ERROR");
-            return;
+            break;
         }
     }
-    if (newline) print_string("\n");
+    if (newline && !error_msg) print_string("\n");
+    set_colours(&saved);
 }
 
 // Skip to the end of the current line.
@@ -1335,9 +1355,93 @@ static void st_continue() {
     if (cont_next && !next_statement()) running = 0;
 }
 
-static void st_colour(void (*set)(int)) {
-    int c = expr_int(0, 7);
+static void st_colour(void (*set)(int), int max) {
+    int c = expr_int(0, max);
     if (!error_msg) set(c);
+}
+
+// INK n, PAPER n etc. as an item within PRINT: updates *c.
+static int colour_item(struct colours *c) {
+    skip_space();
+    unsigned char t = *p;
+    int *field = t == T_INK ? &c->ink : t == T_PAPER ? &c->paper :
+                 t == T_BRIGHT ? &c->bright : t == T_INVERSE ? &c->inverse :
+                 t == T_OVER ? &c->over : 0;
+    if (!field) return 0;
+    p++;
+    int v = expr_int(0, (t == T_INK || t == T_PAPER) ? 7 : 1);
+    if (!error_msg) *field = v;
+    return 1;
+}
+
+/*
+ * Graphics, in Spectrum coordinates: x 0-255 left to right, y 0-175
+ * bottom to top. DRAW is relative to the last point plotted.
+ */
+int plot_x, plot_y;
+
+static void st_plot() {
+    int x = expr_int(0, SCREEN_WIDTH - 1);
+    expect_char(',', "SYNTAX ERROR");
+    int y = expr_int(0, PLOT_HEIGHT - 1);
+    if (error_msg) return;
+    plot(x, y);
+    plot_x = x;
+    plot_y = y;
+}
+
+// DRAW dx,dy [,angle]: a line, or with an angle (in radians), an arc
+// that turns through that angle (anticlockwise if positive).
+static void st_draw() {
+    double dx = expr_num();
+    expect_char(',', "SYNTAX ERROR");
+    double dy = expr_num();
+    double a = 0;
+    if (accept_char(',')) a = expr_num();
+    if (error_msg) return;
+    int x1 = to_int(plot_x + dx, 0, SCREEN_WIDTH - 1);
+    int y1 = to_int(plot_y + dy, 0, PLOT_HEIGHT - 1);
+    if (error_msg) return;
+    double t = num_tan(a / 2);
+    double sx = plot_x, sy = plot_y, ddx = x1 - sx, ddy = y1 - sy;
+    double len = num_sqrt(ddx * ddx + ddy * ddy);
+    if (num_abs(t) < 1e-9 || len == 0) {
+        draw_line(plot_x, plot_y, x1, y1);
+    } else {
+        // The arc's centre is on the perpendicular bisector of the chord,
+        // to its left for a positive (anticlockwise) angle.
+        double h = (len / 2) / t;
+        double cx = sx + ddx / 2 - ddy / len * h;
+        double cy = sy + ddy / 2 + ddx / len * h;
+        double r = num_sqrt((sx - cx) * (sx - cx) + (sy - cy) * (sy - cy));
+        double start = num_atan2(sy - cy, sx - cx);
+        int n = (int)(num_abs(a) * r / 4) + 4;     // segments of ~4 pixels
+        if (n > 1000) n = 1000;
+        int px = plot_x, py = plot_y;
+        for (int i = 1; i <= n; i++) {
+            int qx = x1, qy = y1;
+            if (i < n) {
+                double th = start + a * i / n;
+                qx = (int)num_round(cx + r * num_cos(th));
+                qy = (int)num_round(cy + r * num_sin(th));
+            }
+            draw_line(px, py, qx, qy);     // parts off the screen are skipped
+            px = qx;
+            py = qy;
+        }
+    }
+    plot_x = x1;
+    plot_y = y1;
+}
+
+static void st_circle() {
+    int x = expr_int(0, SCREEN_WIDTH - 1);
+    expect_char(',', "SYNTAX ERROR");
+    int y = expr_int(0, PLOT_HEIGHT - 1);
+    expect_char(',', "SYNTAX ERROR");
+    int r = expr_int(0, 1000);
+    if (error_msg) return;
+    circle(x, y, r);                       // parts off the screen are skipped
 }
 
 static void list_program(int from) {
@@ -1403,10 +1507,19 @@ static void execute_statement() {
     case T_FOR:    st_for(); break;
     case T_NEXT:   st_next(); break;
     case T_REM:    skip_line(); break;
-    case T_CLS:    clear_screen(); break;
-    case T_INK:    st_colour(set_ink); break;
-    case T_PAPER:  st_colour(set_paper); break;
-    case T_BORDER: st_colour(set_border); break;
+    case T_CLS:
+        clear_screen();
+        plot_x = plot_y = 0;
+        break;
+    case T_INK:     st_colour(set_ink, 7); break;
+    case T_PAPER:   st_colour(set_paper, 7); break;
+    case T_BORDER:  st_colour(set_border, 7); break;
+    case T_BRIGHT:  st_colour(set_bright, 1); break;
+    case T_INVERSE: st_colour(set_inverse, 1); break;
+    case T_OVER:    st_colour(set_over, 1); break;
+    case T_PLOT:    st_plot(); break;
+    case T_DRAW:    st_draw(); break;
+    case T_CIRCLE:  st_circle(); break;
     case T_END:    running = 0; break;
     case T_NEW:
         cont_ok = 0;
@@ -1414,6 +1527,7 @@ static void execute_statement() {
         clear_variables();
         reset_run_state();
         clear_screen();
+        plot_x = plot_y = 0;
         running = 0;
         break;
     case T_CLEAR:

@@ -1,4 +1,5 @@
-#include "bios.h"
+#include "platform.h"
+#include "screen.h"
 #include "basic.h"
 
 extern char __bss_start, __bss_end;     // see linker.ld
@@ -12,20 +13,17 @@ void main() {
     zero(&__bss_start, &__bss_end);
     zero(&__high_start, &__high_end);   // above 64KB: needs unreal mode
 
-    init_video();
-    
-    // Spectrum defaults: White paper (7), Black ink (0), White border (7)
-    set_paper(7);
-    set_ink(0);
-    set_border(7);
-    clear_screen();
-    
+    plat_init();
+    screen_init();   // Spectrum defaults: black ink on white paper, white border
+
     // Spectrum-style boot screen: blank, with a banner at the bottom left.
     // (Our own name rather than a real company's copyright notice.)
-    for (int i = 0; i < 23; i++) {
-        print_string("\n");
-    }
-    print_string("x86 BASIC - Spectrum-style BASIC for PCs\n");
-    
+    // The first key clears it.
+    set_cursor(0, SCREEN_ROWS - 1);
+    print_string("x86 BASIC for PCs");
+    set_cursor(0, 0);
+    unget_key(get_key());
+    clear_screen();
+
     basic_run();
 }

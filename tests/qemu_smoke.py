@@ -2,8 +2,9 @@
 """
 Boot os.img in QEMU (headless), type a BASIC session, and check the screen.
 
-The screen is read straight out of VGA text memory (0xB8000) through the
-QEMU monitor, so the check sees exactly what a user would.
+The screen is a graphics mode, so the text is read back by taking a
+screenshot and matching each 8x8 character cell against the font
+(tools/mkfont.py): the check sees exactly what a user would.
 
     tests/qemu_smoke.py [--mode floppy|hdd|usb|all] [--image os.img] [--show]
 
@@ -21,12 +22,24 @@ import sys
 import tempfile
 import time
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+from mkfont import font_table  # noqa: E402
+
 KEYS = {
     ' ': 'spc', '\n': 'ret', '=': 'equal', '+': 'shift-equal', '-': 'minus',
     '*': 'shift-8', '/': 'slash', '(': 'shift-9', ')': 'shift-0',
     '"': 'shift-apostrophe', '$': 'shift-4', ';': 'semicolon', ',': 'comma',
     '<': 'shift-comma', '>': 'shift-dot', ':': 'shift-semicolon',
-    '\x1b': 'esc', '.': 'dot', '^': 'shift-6',
+    '.': 'dot', '^': 'shift-6', '!': 'shift-1', '@': 'shift-2', '#': 'shift-3',
+    '%': 'shift-5', '&': 'shift-7', '?': 'shift-slash', '_': 'shift-minus',
+    "'": 'apostrophe', '`': 'grave_accent', '~': 'shift-grave_accent',
+    '[': 'bracket_left', ']': 'bracket_right', '{': 'shift-bracket_left',
+    '}': 'shift-bracket_right', '\\': 'backslash', '|': 'shift-backslash',
+    '\x1b': 'esc', '\b': 'backspace',
+    # Control characters stand for the cursor keys in a session.
+    '\x02': 'left', '\x06': 'right', '\x10': 'up', '\x0e': 'down',
+    '\x01': 'home', '\x05': 'end', '\x7f': 'delete',
 }
 
 # (keystrokes, text that must then be on screen)
@@ -36,11 +49,14 @@ SESSION = [
     ('IF 1<>2 THEN PRINT "NOT EQUAL"\n', ['NOT EQUAL']),
     ('TOTAL=0: FOR N=1 TO 4: TOTAL=TOTAL+N: NEXT N: PRINT "SUM ";TOTAL\n', ['SUM 10']),
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
-    ('PRINT 1/3;" ";SQR 2;" ";2^0.5*1E10\n', ['0.33333333 1.4142136 1.4142136E+10']),
+    ('PRINT 1/3;" ";SQR 2\n', ['0.33333333 1.4142136']),
     ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
     ('A$="HELLO": DIM N(3): N(2)=7: PRINT A$(2 TO 4);LEN A$;N(2)\n', ['ELL57']),
     ('NEW\n10 INPUT "AGE";A\n20 GOSUB 100: STOP\n100 PRINT "DOUBLE ";A*2: RETURN\nRUN\n21\n',
      ['DOUBLE 42', 'STOPPED IN LINE 20']),
+    ('CLS: PLOT 0,0: DRAW 50,50: CIRCLE 100,100,20: PRINT POINT (25,25);POINT (120,100)\n',
+     ['11']),
+    ('PRINT "lower case: abc xyz"\n', ['lower case: abc xyz']),
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 
@@ -50,7 +66,10 @@ SESSION = [
 # Set NOKVM=1 to force emulation.
 KVM = (['-enable-kvm'] if os.access('/dev/kvm', os.R_OK | os.W_OK)
        and not os.environ.get('NOKVM') else [])
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Glyph rows -> character, for reading the screen.
+GLYPH_CHARS = {tuple(rows): chr(code) for code, rows in font_table().items()
+               if code < 127}
 
 
 def key_name(ch):
@@ -108,26 +127,68 @@ class Monitor:
         return self._reply().get('return')
 
 
+def read_ppm(path):
+    data = open(path, 'rb').read()
+    fields, pos = [], 0
+    while len(fields) < 4:                  # P6 width height maxval
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        start = pos
+        while not data[pos:pos + 1].isspace():
+            pos += 1
+        fields.append(data[start:pos])
+    assert fields[0] == b'P6', fields[0]
+    return int(fields[1]), int(fields[2]), data[pos + 1:]
+
+
+def layout(width, height):
+    """Where the 256x192 screen is: (scale, left, top), as the kernel
+    places it. VGA mode 13h (320x200) is shown double-scanned (640x400)."""
+    double = 2 if (width, height) == (640, 400) else 1
+    w, h = width // double, height // double
+    scale = max(1, min(w // 320, h // 240))
+    return (scale * double, (w - 256 * scale) // 2 * double,
+            (h - 192 * scale) // 2 * double)
+
+
 def screen_text(mon, tmpdir):
-    dump = os.path.join(tmpdir, 'vga.bin')
+    """The text on screen, read off a screenshot: 24 lines of 32."""
+    dump = os.path.join(tmpdir, 'screen.ppm')
     if os.path.exists(dump):
         os.unlink(dump)
-    mon.qmp('pmemsave', val=0xB8000, size=4000, filename=dump)
+    mon.qmp('screendump', filename=dump)
     for _ in range(50):
-        if os.path.exists(dump) and os.path.getsize(dump) == 4000:
+        if os.path.exists(dump) and os.path.getsize(dump) > 0:
             break
         time.sleep(0.05)
-    data = open(dump, 'rb').read()
-    rows = []
-    for r in range(25):
-        row = data[r * 160:(r + 1) * 160:2]
-        rows.append(row.decode('ascii', 'replace').rstrip())
-    return '\n'.join(rows), data
+    width, height, pix = read_ppm(dump)
+    if width < 256 or height < 192:         # not in graphics mode yet
+        return ''
+    scale, left, top = layout(width, height)
+
+    def pixel(x, y):
+        px, py = left + x * scale + scale // 2, top + y * scale + scale // 2
+        i = (py * width + px) * 3
+        return pix[i:i + 3]
+
+    lines = []
+    for r in range(24):
+        line = ''
+        for c in range(32):
+            # Every glyph's top-left pixel is background (or, under the
+            # inverted cursor, foreground), so compare against that.
+            bg = pixel(c * 8, r * 8)
+            rows = tuple(sum(0x80 >> x for x in range(8)
+                             if pixel(c * 8 + x, r * 8 + y) != bg)
+                         for y in range(8))
+            line += GLYPH_CHARS.get(rows, '?')
+        lines.append(line.rstrip())
+    return '\n'.join(lines)
 
 
 def ready(mon, tmpdir):
     """True once the kernel's banner is on screen."""
-    return 'x86 BASIC' in screen_text(mon, tmpdir)[0]
+    return 'x86 BASIC' in screen_text(mon, tmpdir)
 
 
 def qemu_args(mode, image, monitor_path):
@@ -145,7 +206,14 @@ def qemu_args(mode, image, monitor_path):
     return args
 
 
+def type_keys(mon, keys):
+    for ch in keys:
+        mon.cmd('sendkey ' + key_name(ch))
+        time.sleep(0.02)
+
+
 def run(mode, image, show):
+    accel = 'kvm' if KVM else 'emulated'
     with tempfile.TemporaryDirectory() as tmp:
         mon_path = os.path.join(tmp, 'mon.sock')
         proc = subprocess.Popen(qemu_args(mode, image, mon_path),
@@ -153,25 +221,22 @@ def run(mode, image, show):
         try:
             mon = Monitor(mon_path)
             # Wait for the kernel's banner rather than a fixed delay.
-            deadline = time.time() + 20
-            while True:
-                text, _ = screen_text(mon, tmp)
-                if 'x86 BASIC' in text:
-                    break
+            deadline = time.time() + 30
+            while not ready(mon, tmp):
                 if time.time() > deadline:
-                    print(f'[{mode}] FAIL: kernel never started. Screen:\n{text}')
+                    print(f'[{mode}] FAIL: kernel never started. Screen:\n'
+                          f'{screen_text(mon, tmp)}')
                     return False
                 time.sleep(0.2)
 
             ok = True
+            text = ''
             for keys, expected in SESSION:
-                for ch in keys:
-                    mon.cmd('sendkey ' + key_name(ch))
-                    time.sleep(0.02)
+                type_keys(mon, keys)
                 # Key events are queued, so poll until the output shows up.
-                deadline = time.time() + 15
+                deadline = time.time() + 20
                 while True:
-                    text, raw = screen_text(mon, tmp)
+                    text = screen_text(mon, tmp)
                     missing = [w for w in expected if w not in text]
                     if not missing or time.time() > deadline:
                         break
@@ -181,10 +246,7 @@ def run(mode, image, show):
                     ok = False
             if show or not ok:
                 print(text)
-            # Cell 0's attribute shows the paper/ink actually in effect
-            # (0xf0 = bright white paper, black ink).
-            accel = 'kvm' if KVM else 'emulated'
-            print(f'[{mode}, {accel}] {"PASS" if ok else "FAIL"} (attribute of cell 0: 0x{raw[1]:02x})')
+            print(f'[{mode}, {accel}] {"PASS" if ok else "FAIL"}')
             return ok
         finally:
             proc.kill()
