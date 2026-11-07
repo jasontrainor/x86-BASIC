@@ -15,7 +15,7 @@ BIOS_CFLAGS = -m16 -march=i686 -mtune=generic -mfpmath=387 -mno-mmx -mno-sse -mn
               -O2 -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 \
               -Wall -Ikernel -DBIOS_KERNEL
 
-BIOS_C_OBJS = $(patsubst %,build/bios/%.o,kernel bios screen font string num basic)
+BIOS_C_OBJS = $(patsubst %,build/bios/%.o,kernel bios screen font editor string num basic)
 BIOS_OBJS = build/bios/kernel_entry.o build/bios/bios_string.o $(BIOS_C_OBJS)
 HEADERS = $(wildcard kernel/*.h)
 

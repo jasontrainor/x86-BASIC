@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Ikernel -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/string.c kernel/num.c || exit 1
+    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/string.c kernel/num.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
@@ -216,6 +216,23 @@ check "attribute range"   "BRIGHT 2${NL}" "ERROR: INTEGER OUT OF RANGE"
 check "print colours"     "PRINT INK 2;\"R\";PAPER 6;\"Y\"${NL}PRINT \"X\"${NL}" "${NL}RY${NL}PRINT \"X\"${NL}X${NL}"
 check "block graphics"    "PRINT CHR\$ 128;CHR\$ 143;CHR\$ 127${NL}" "!ERROR"
 check "scrolling"         "FOR I=1 TO 40: PRINT I: NEXT I${NL}PRINT 6*7${NL}" "${NL}39${NL}40${NL}"
+
+# --- Line editor ---------------------------------------------------------------
+L=$'\x02'; R=$'\x06'; UP=$'\x10'; DN=$'\x0e'; HOME=$'\x01'; END=$'\x05'; DEL=$'\x7f'; BS=$'\b'
+check "edit insert"       "PRINT 12${L}*${NL}" "PRINT 1*2${NL}2${NL}"
+check "edit backspace"    "PRINT 99${BS}8${NL}" "PRINT 98${NL}98${NL}"
+check "edit home"         "RINT 5${HOME}P${NL}" "PRINT 5${NL}5${NL}"
+check "edit delete"       "PRINT 1X2${L}${L}${DEL}${NL}" "PRINT 12${NL}12${NL}"
+check "edit end"          "PRINT 1${HOME}${END}+1${NL}" "PRINT 1+1${NL}2${NL}"
+check "edit right"        "PRINT 15${HOME}${R}${R}${R}${R}${R}${R}${R}0${NL}" "PRINT 105${NL}105${NL}"
+check "history up"        "PRINT 6*7${NL}${UP}${NL}" "42${NL}PRINT 6*7${NL}42${NL}"
+check "history twice"     "PRINT 1${NL}PRINT 2${NL}${UP}${UP}${NL}" "PRINT 2${NL}2${NL}PRINT 1${NL}1${NL}"
+check "history down"      "PRINT 1${NL}PRINT 3${UP}${DN}${NL}" "PRINT 3${NL}3${NL}"
+check "edit line"         "10 PRINT 5${NL}EDIT 10${NL}${BS}6${NL}LIST${NL}" "LIST${NL}10 PRINT 6${NL}"
+check "edit last line"    "10 PRINT 5${NL}20 PRINT 7${NL}EDIT${NL}${HOME}${R}${DEL}5${NL}LIST${NL}" "LIST${NL}10 PRINT 5${NL}20 PRINT 7${NL}25 PRINT 7${NL}" "!ERROR"
+check "edit missing"      "EDIT 50${NL}" "ERROR: LINE NOT FOUND"
+check "esc forgets line"  "PRINT 5*5${ESC}PRINT 6*6${NL}" "!25" "${NL}36${NL}"
+check "input not history" "10 INPUT A\$${NL}RUN${NL}SECRET${NL}${UP}${NL}" "? SECRET${NL}RUN${NL}?"
 
 # --- BREAK --------------------------------------------------------------------
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "BREAK IN LINE 10" "${NL}25${NL}"

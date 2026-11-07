@@ -18,5 +18,6 @@ void *memset(void *dest, int c, size_t n);
 int memcmp(const void *a, const void *b, size_t n);
 int atoi(const char* str);
 void itoa(int val, char* buf);
+void strncpy_safe(char *dest, const char *src, int cap);   // always terminated
 
 #endif

@@ -102,6 +102,11 @@ static void scroll(void) {
     draw_all();
 }
 
+void scroll_up(void) {
+    scroll();
+    if (cur_row > 0) cur_row--;
+}
+
 static void newline(void) {
     cur_col = 0;
     if (++cur_row == SCREEN_ROWS) {
@@ -148,6 +153,15 @@ void set_cursor(int c, int r) {
     TRACE("[AT %d,%d]", r, c);
     cur_col = c;
     cur_row = r;
+}
+
+void place_cursor(int c, int r) {
+    cur_col = c;
+    cur_row = r;
+}
+
+void transcript(const char *s) {
+    for (; *s; s++) ECHO(*s);         // (ECHO may expand to nothing)
 }
 
 int cursor_col(void)  { return cur_col; }

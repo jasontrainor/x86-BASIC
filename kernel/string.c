@@ -107,6 +107,16 @@ int atoi(const char* str) {
     return res * sign;
 }
 
+// Copy at most cap-1 characters, always adding the terminating 0.
+void strncpy_safe(char *dest, const char *src, int cap) {
+    int i = 0;
+    while (i < cap - 1 && src[i]) {
+        dest[i] = src[i];
+        i++;
+    }
+    dest[i] = '\0';
+}
+
 void itoa(int val, char* buf) {
     char temp[16];
     int i = 0;

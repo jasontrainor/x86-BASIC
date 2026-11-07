@@ -43,7 +43,16 @@ void plat_border(int colour) {}
 int plat_read_key(void) {
     static int toggle;
     if (!*input || (toggle = !toggle) == 0) return -1;
-    return (unsigned char)*input++;
+    switch (*input++) {             /* control characters for the editing keys */
+    case 0x02: return KEY_LEFT;     /* (as Ctrl+B, F, P, N, A, E in Emacs) */
+    case 0x06: return KEY_RIGHT;
+    case 0x10: return KEY_UP;
+    case 0x0e: return KEY_DOWN;
+    case 0x01: return KEY_HOME;
+    case 0x05: return KEY_END;
+    case 0x7f: return KEY_DELETE;
+    }
+    return (unsigned char)input[-1];
 }
 
 void plat_idle(void) {

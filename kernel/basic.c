@@ -18,6 +18,7 @@
 #include "string.h"
 #include "mem.h"
 #include "num.h"
+#include "editor.h"
 
 /* ------------------------------------------------------------------------
  * Tokens
@@ -130,11 +131,13 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
 }
 
 // The reverse, for LIST: tokens back to words, with spaces around them.
-// out must hold at least cap bytes.
-static void detokenize(const unsigned char *src, char *out, int cap) {
+// out must hold at least cap bytes. If kw isn't 0, kw[i] is set to 1
+// where out[i] is part of a keyword (for colouring).
+static void detokenize(const unsigned char *src, char *out, char *kw, int cap) {
     int n = 0;
     int in_str = 0;
-#define OUT(c) do { if (n < cap - 1) out[n++] = (c); } while (0)
+    int is_kw = 0;
+#define OUT(c) do { if (n < cap - 1) { if (kw) kw[n] = is_kw; out[n++] = (c); } } while (0)
     for (; *src; src++) {
         unsigned char c = *src;
         if (c == '"') in_str = !in_str;
@@ -142,7 +145,9 @@ static void detokenize(const unsigned char *src, char *out, int cap) {
         const char *name = token_name(c);
         int word = isalpha(name[0]);
         if (word && n > 0 && out[n - 1] != ' ' && out[n - 1] != '(') OUT(' ');
+        is_kw = 1;
         while (*name) OUT(*name++);
+        is_kw = 0;
         unsigned char next = src[1];
         if (word && next && next != ' ' && next != ':' && next != ';' &&
             next != ',' && next != ')')
@@ -1184,6 +1189,8 @@ static void st_return() {
 
 static int read_line();
 extern char input_buf[];
+extern char edit_next[MAX_TEXT + 1];
+extern int last_line;
 
 // Stop at the current statement as if BREAK had been pressed, so that
 // CONTINUE runs it again.
@@ -1444,15 +1451,30 @@ static void st_circle() {
     circle(x, y, r);                       // parts off the screen are skipped
 }
 
+// A program line as text: "10 PRINT X". kw: see detokenize.
+static void line_to_text(int off, char *out, char *kw, int cap) {
+    itoa(line_num(off), out);
+    int n = strlen(out);
+    out[n] = ' ';
+    if (kw) memset(kw, 0, n + 1);
+    detokenize(line_text(off), out + n + 1, kw ? kw + n + 1 : 0, cap - n - 1);
+}
+
+// LIST shows keywords in a colour of their own: blue, or cyan on dark paper.
 static void list_program(int from) {
-    char buf[MAX_TEXT * 4];
+    char buf[MAX_TEXT * 4], kw[MAX_TEXT * 4];
+    struct colours normal, keyword;
+    get_colours(&normal);
+    keyword = normal;
+    keyword.ink = normal.paper <= 3 ? 5 : 1;
+    if (keyword.ink == normal.paper) keyword.ink = normal.ink;
     for (int off = line_find(from); off < prog_len && !check_break(); off = line_next(off)) {
-        char num[8];
-        itoa(line_num(off), num);
-        print_string(num);
-        print_char(' ');
-        detokenize(line_text(off), buf, sizeof(buf));
-        print_string(buf);
+        line_to_text(off, buf, kw, sizeof(buf));
+        for (int i = 0; buf[i]; i++) {
+            set_colours(kw[i] ? &keyword : &normal);
+            print_char(buf[i]);
+        }
+        set_colours(&normal);
         print_string("\n");
     }
 }
@@ -1503,6 +1525,22 @@ static void execute_statement() {
         running = 0;
         break;
     case T_CONTINUE: st_continue(); break;
+    case T_EDIT: {
+        // Put the line in the editor for the next command line.
+        int num = at_statement_end() ? last_line : expr_int(1, 9999);
+        if (error_msg) break;
+        int off = line_find(num);
+        if (num <= 0 || off >= prog_len || line_num(off) != num) {
+            error("LINE NOT FOUND");
+            break;
+        }
+        char kw[MAX_TEXT * 4];
+        char text[MAX_TEXT * 4];
+        line_to_text(off, text, kw, sizeof(text));
+        strncpy_safe(edit_next, text, sizeof(edit_next));
+        running = 0;
+        break;
+    }
     case T_IF:     st_if(); break;
     case T_FOR:    st_for(); break;
     case T_NEXT:   st_next(); break;
@@ -1634,39 +1672,27 @@ static void run() {
  * --------------------------------------------------------------------- */
 
 char input_buf[MAX_TEXT + 1];
+int last_line;            // the last line number entered, for EDIT
 unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
 
-// Read a line into input_buf. Returns -1 if Esc was pressed.
+// Read a line into input_buf with the line editor, starting with
+// whatever is in edit_next (put there by EDIT). Returns -1 for Esc.
+char edit_next[MAX_TEXT + 1];
+
+static int edit_input(int use_history) {
+    strcpy(input_buf, edit_next);
+    edit_next[0] = '\0';
+    return edit_line(input_buf, sizeof(input_buf), use_history);
+}
+
 static int read_line() {
-    int pos = 0;
-    while (1) {
-        char c = get_char();
-        if (c == '\r' || c == '\n') {
-            print_string("\n");
-            input_buf[pos] = '\0';
-            return 0;
-        } else if (c == 27) {
-            print_string("\n");
-            input_buf[0] = '\0';
-            return -1;
-        } else if (c == 8) {
-            if (pos > 0) {
-                pos--;
-                print_char(8);
-                print_char(' ');
-                print_char(8);
-            }
-        } else if (pos < MAX_TEXT && c >= 32 && c < 127) {
-            input_buf[pos++] = c;
-            print_char(c);
-        }
-    }
+    return edit_input(0);
 }
 
 void basic_run() {
     randomize(timer_ms() * 2654435761u);
     while (1) {
-        read_line();
+        if (edit_input(1) < 0) continue;     // Esc: forget the line
         char *s = input_buf;
         while (*s == ' ') s++;
         if (*s == '\0') continue;
@@ -1687,6 +1713,7 @@ void basic_run() {
             continue;
         }
         if (num > 0) {
+            last_line = num;
             // Editing the program invalidates any loops in progress.
             reset_run_state();
             cont_ok = 0;

@@ -31,6 +31,9 @@ int screen_cols(void);
 int screen_rows(void);
 void put_char_at(int col, int row, char c);   // no cursor movement
 void show_cursor(int on);             // draw/remove the cursor block
+void place_cursor(int col, int row);  // like set_cursor, for the editor
+void scroll_up(void);                 // scroll the screen up a row
+void transcript(const char *s);       // tests: record s as if printed
 
 // Colours and attributes
 void set_ink(int c);                  // 0-7

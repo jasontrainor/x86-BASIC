@@ -15,6 +15,7 @@ screenshot and matching each 8x8 character cell against the font
 """
 import argparse
 import json
+import shutil
 import os
 import socket
 import subprocess
@@ -56,7 +57,10 @@ SESSION = [
      ['DOUBLE 42', 'STOPPED IN LINE 20']),
     ('CLS: PLOT 0,0: DRAW 50,50: CIRCLE 100,100,20: PRINT POINT (25,25);POINT (120,100)\n',
      ['11']),
-    ('PRINT "lower case: abc xyz"\n', ['lower case: abc xyz']),
+    ('CLS: PRINT "lower case: abc xyz"\n', ['lower case: abc xyz']),
+    # Line editor: cursor keys, Home, Delete, history.
+    ('PRINT 1X2\x02\x02\x7f\x01\x06\x06\x06\x06\x06\x06"=";\x05\n', ['PRINT "=";12\n=12']),
+    ('PRINT 6*8\n\x10\n', ['48\nPRINT 6*8\n48']),
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 
@@ -216,10 +220,20 @@ def run(mode, image, show):
     accel = 'kvm' if KVM else 'emulated'
     with tempfile.TemporaryDirectory() as tmp:
         mon_path = os.path.join(tmp, 'mon.sock')
-        proc = subprocess.Popen(qemu_args(mode, image, mon_path),
+        # Boot a copy: the session SAVEs programs, and a copy can't clash
+        # with another QEMU using the image.
+        copy = os.path.join(tmp, 'os.img')
+        shutil.copy(image, copy)
+        proc = subprocess.Popen(qemu_args(mode, copy, mon_path),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
-            mon = Monitor(mon_path)
+            try:
+                mon = Monitor(mon_path)
+            except RuntimeError:
+                proc.kill()
+                print(f'[{mode}] FAIL: QEMU did not start: '
+                      f'{proc.communicate()[1].decode().strip()}')
+                return False
             # Wait for the kernel's banner rather than a fixed delay.
             deadline = time.time() + 30
             while not ready(mon, tmp):
