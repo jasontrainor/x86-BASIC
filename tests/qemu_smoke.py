@@ -35,6 +35,7 @@ SESSION = [
      ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE']),
     ('IF 1<>2 THEN PRINT "NOT EQUAL"\n', ['NOT EQUAL']),
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
+    ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

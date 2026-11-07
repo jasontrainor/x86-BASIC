@@ -110,5 +110,9 @@ check "add overflow"      "PRINT 2147483647+1${NL}" "ERROR: NUMBER TOO BIG"
 check "min / -1"          "A=0-2147483647-1${NL}PRINT A/(0-1)${NL}" "ERROR: NUMBER TOO BIG"
 check "for at int max"    "10 FOR I=2147483646 TO 2147483647${NL}20 PRINT 1+1${NL}30 NEXT I${NL}40 PRINT 3+3${NL}RUN${NL}" "${NL}2${NL}2${NL}6${NL}"
 
+# --- BREAK --------------------------------------------------------------------
+ESC=$'\x1b'
+check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "BREAK IN LINE 10" "${NL}25${NL}"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

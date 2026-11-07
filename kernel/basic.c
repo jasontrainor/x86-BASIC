@@ -395,6 +395,14 @@ void run_program() {
     for_sp = 0;
     current_line = 0;
     while (current_line >= 0 && current_line < num_lines) {
+        if (check_break()) {
+            char buf[16];
+            itoa(program[current_line].num, buf);
+            print_string("BREAK IN LINE ");
+            print_string(buf);
+            print_string("\n");
+            break;
+        }
         p = program[current_line].text;
         if (!run_statement()) break;
         current_line++;

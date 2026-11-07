@@ -149,6 +149,25 @@ char get_char() {
     return (char)(ax & 0xFF);
 }
 
+// Non-blocking: returns 1 if Esc or Ctrl+C is waiting in the keyboard
+// buffer. Any keys typed while a program runs are consumed, so a BREAK
+// press can't get stuck behind them.
+int check_break() {
+    while (1) {
+        unsigned char no_key;
+        __asm__ __volatile__ (
+            "int $0x16\n\t"
+            "setz %0"
+            : "=qm" (no_key)
+            : "a" (0x0100)
+            : "cc"
+        );
+        if (no_key) return 0;
+        char c = get_char();
+        if (c == 27 || c == 3) return 1;   // Esc, Ctrl+C
+    }
+}
+
 void beep() {
     __asm__ __volatile__ (
         "mov $0xB6, %%al \n"

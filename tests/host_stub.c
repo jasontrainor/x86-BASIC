@@ -30,6 +30,12 @@ char get_char(void) {
     return *input++;
 }
 
+/* An Esc (0x1b) at the front of the input acts as a BREAK press. */
+int check_break(void) {
+    if (*input == 27) { input++; return 1; }
+    return 0;
+}
+
 void clear_screen(void)  { fputs("[CLS]", stdout); }
 void set_ink(int c)      { printf("[INK %d]", c); }
 void set_paper(int c)    { printf("[PAPER %d]", c); }

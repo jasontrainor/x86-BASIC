@@ -4,6 +4,7 @@
 void print_char(char c);
 void print_string(const char* str);
 char get_char();
+int check_break();
 void clear_screen();
 void set_ink(int c);
 void set_paper(int c);
