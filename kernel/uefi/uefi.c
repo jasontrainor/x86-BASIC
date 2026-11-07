@@ -1,0 +1,263 @@
+/*
+ * The platform layer (platform.h) for PCs that boot with UEFI, where
+ * there is no BIOS: the screen is drawn through the Graphics Output
+ * Protocol, keys come from the console input, and saved programs are
+ * read and written through Block I/O on the disk we were loaded from.
+ *
+ * This file is built, with the shared kernel code, into a 64-bit UEFI
+ * application, EFI/BOOT/BOOTX64.EFI on the disk image's EFI system
+ * partition. The firmware's boot services stay in use throughout.
+ */
+#include "efi.h"
+#include "platform.h"
+#include "string.h"
+
+void kernel_start(void);                  // kernel.c
+
+static EFI_SYSTEM_TABLE *st;
+static EFI_BOOT_SERVICES *bs;
+
+static void print(const char *s) {
+    CHAR16 buf[128];
+    int n = 0;
+    while (*s && n < 126) {
+        if (*s == '\n') buf[n++] = '\r';
+        buf[n++] = (unsigned char)*s++;
+    }
+    buf[n] = 0;
+    st->ConOut->OutputString(st->ConOut, buf);
+}
+
+static void halt(const char *why) {
+    print(why);
+    for (;;) bs->Stall(1000000);
+}
+
+/* ------------------------------------------------------------------------
+ * Display. The 256x192 screen is drawn at the largest whole-number scale
+ * that leaves room for a border (the same rule tests/qemu_smoke.py uses
+ * to find it), centred, with the border colour filling the rest.
+ * --------------------------------------------------------------------- */
+
+static EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
+static unsigned int screen_w, screen_h, scale, win_x, win_y;
+
+#define MAX_SCALE 8
+static EFI_GRAPHICS_OUTPUT_BLT_PIXEL cell_px[8 * MAX_SCALE * 8 * MAX_SCALE];
+
+// Spectrum colours 0-7 (bit 0 blue, bit 1 red, bit 2 green) and BRIGHT 8-15.
+static EFI_GRAPHICS_OUTPUT_BLT_PIXEL colour(int c) {
+    UINT8 level = (c & 8) ? 0xFF : 0xD0;
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = {
+        (c & 1) ? level : 0, (c & 4) ? level : 0, (c & 2) ? level : 0, 0
+    };
+    return px;
+}
+
+void plat_init(void) {
+    EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+    if (bs->LocateProtocol(&gop_guid, 0, (void **)&gop) != EFI_SUCCESS || !gop)
+        halt("x86 BASIC: no graphics output available\n");
+    screen_w = gop->Mode->Info->HorizontalResolution;
+    screen_h = gop->Mode->Info->VerticalResolution;
+    scale = screen_w / 320 < screen_h / 240 ? screen_w / 320 : screen_h / 240;
+    if (scale < 1) scale = 1;
+    if (scale > MAX_SCALE) scale = MAX_SCALE;
+    if (screen_w < 256 * scale || screen_h < 192 * scale)
+        halt("x86 BASIC: the screen is too small\n");
+    win_x = (screen_w - 256 * scale) / 2;
+    win_y = (screen_h - 192 * scale) / 2;
+}
+
+void plat_draw_cell(int col, int row, const unsigned char *bits, int ink, int paper) {
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL fg = colour(ink), bg = colour(paper);
+    unsigned int size = 8 * scale;
+    for (unsigned int y = 0; y < size; y++) {
+        unsigned char b = bits[y / scale];
+        for (unsigned int x = 0; x < size; x++)
+            cell_px[y * size + x] = (b & (0x80 >> (x / scale))) ? fg : bg;
+    }
+    gop->Blt(gop, cell_px, EfiBltBufferToVideo, 0, 0,
+             win_x + col * size, win_y + row * size, size, size, 0);
+}
+
+static void fill(unsigned int x, unsigned int y, unsigned int w, unsigned int h,
+                 EFI_GRAPHICS_OUTPUT_BLT_PIXEL px) {
+    if (w && h) gop->Blt(gop, &px, EfiBltVideoFill, 0, 0, x, y, w, h, 0);
+}
+
+void plat_border(int c) {
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = colour(c);
+    unsigned int win_w = 256 * scale, win_h = 192 * scale;
+    fill(0, 0, screen_w, win_y, px);
+    fill(0, win_y + win_h, screen_w, screen_h - win_y - win_h, px);
+    fill(0, win_y, win_x, win_h, px);
+    fill(win_x + win_w, win_y, screen_w - win_x - win_w, win_h, px);
+}
+
+/* ------------------------------------------------------------------------
+ * Keyboard
+ * --------------------------------------------------------------------- */
+
+int plat_read_key(void) {
+    EFI_INPUT_KEY key;
+    for (;;) {
+        if (st->ConIn->ReadKeyStroke(st->ConIn, &key) != EFI_SUCCESS) return -1;
+        switch (key.ScanCode) {
+        case SCAN_UP:     return KEY_UP;
+        case SCAN_DOWN:   return KEY_DOWN;
+        case SCAN_LEFT:   return KEY_LEFT;
+        case SCAN_RIGHT:  return KEY_RIGHT;
+        case SCAN_HOME:   return KEY_HOME;
+        case SCAN_END:    return KEY_END;
+        case SCAN_DELETE: return KEY_DELETE;
+        case SCAN_ESC:    return 27;
+        }
+        CHAR16 c = key.UnicodeChar;
+        if (c == '\r' || c == '\n') return 13;
+        if (c == 8 || c == 3 || (c >= 32 && c < 127)) return c;
+        // Anything else (function keys, accented letters): ignore it.
+    }
+}
+
+void plat_idle(void) {
+    bs->Stall(1000);
+}
+
+/* ------------------------------------------------------------------------
+ * Time: the CPU's time-stamp counter, calibrated against the firmware's
+ * Stall() at startup.
+ * --------------------------------------------------------------------- */
+
+static UINT64 tsc_per_ms = 1;
+
+static UINT64 rdtsc(void) {
+    UINT32 lo, hi;
+    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((UINT64)hi << 32) | lo;
+}
+
+static void calibrate_timer(void) {
+    UINT64 start = rdtsc();
+    bs->Stall(20000);                     // 20ms
+    UINT64 per_ms = (rdtsc() - start) / 20;
+    tsc_per_ms = per_ms ? per_ms : 1;
+}
+
+unsigned long plat_timer_ms(void) {
+    return rdtsc() / tsc_per_ms;
+}
+
+/* ------------------------------------------------------------------------
+ * Sound: PC-compatible machines still decode the PC speaker ports, so
+ * this is the same as in the BIOS kernel (silent where there is none).
+ * --------------------------------------------------------------------- */
+
+static void outb(UINT16 port, UINT8 val) {
+    __asm__ __volatile__ ("outb %0, %1" : : "a" (val), "Nd" (port));
+}
+
+static UINT8 inb(UINT16 port) {
+    UINT8 val;
+    __asm__ __volatile__ ("inb %1, %0" : "=a" (val) : "Nd" (port));
+    return val;
+}
+
+void plat_tone(int freq, int ms) {
+    if (freq >= 20 && freq <= 20000) {
+        unsigned int div = 1193182 / freq;
+        outb(0x43, 0xB6);
+        outb(0x42, div & 0xFF);
+        outb(0x42, div >> 8);
+        outb(0x61, inb(0x61) | 0x03);
+        bs->Stall((UINTN)ms * 1000);
+        outb(0x61, inb(0x61) & ~0x03);
+    } else {
+        bs->Stall((UINTN)ms * 1000);
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * Disk. We are loaded from a partition (the EFI system partition), but
+ * saved programs live outside it, at fixed sectors of the whole disk
+ * (see kernel/storage.h). So find the disk the partition is on: take the
+ * partition's device path, drop its last (hard drive partition) node,
+ * and ask for the Block I/O protocol of the device that path names.
+ * --------------------------------------------------------------------- */
+
+static EFI_BLOCK_IO_PROTOCOL *disk;
+static UINT8 sector[512] __attribute__((aligned(4096)));   // meets any IoAlign
+
+static unsigned int node_length(EFI_DEVICE_PATH_PROTOCOL *n) {
+    return n->Length[0] | (n->Length[1] << 8);
+}
+
+static void find_disk(EFI_HANDLE image) {
+    EFI_GUID loaded_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
+    EFI_GUID path_guid = EFI_DEVICE_PATH_PROTOCOL_GUID;
+    EFI_GUID block_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
+    EFI_LOADED_IMAGE_PROTOCOL *loaded;
+    EFI_DEVICE_PATH_PROTOCOL *path;
+    if (bs->HandleProtocol(image, &loaded_guid, (void **)&loaded) != EFI_SUCCESS) return;
+    if (bs->HandleProtocol(loaded->DeviceHandle, &path_guid, (void **)&path) != EFI_SUCCESS) return;
+
+    // Copy the path, ending it before a final partition node.
+    static UINT8 copy[1024];
+    unsigned int used = 0;
+    EFI_DEVICE_PATH_PROTOCOL *n = path, *last = 0;
+    while (n->Type != DEVICE_PATH_END_TYPE) {
+        unsigned int len = node_length(n);
+        if (len < 4 || used + len + 4 > sizeof(copy)) return;
+        last = (EFI_DEVICE_PATH_PROTOCOL *)(copy + used);
+        memcpy(copy + used, n, len);
+        used += len;
+        n = (EFI_DEVICE_PATH_PROTOCOL *)((UINT8 *)n + len);
+    }
+    if (last && last->Type == MEDIA_DEVICE_PATH && last->SubType == MEDIA_HARDDRIVE_DP)
+        used = (UINT8 *)last - copy;
+    EFI_DEVICE_PATH_PROTOCOL *end = (EFI_DEVICE_PATH_PROTOCOL *)(copy + used);
+    end->Type = DEVICE_PATH_END_TYPE;
+    end->SubType = DEVICE_PATH_END_SUBTYPE;
+    end->Length[0] = 4;
+    end->Length[1] = 0;
+
+    void *remaining = copy;
+    EFI_HANDLE handle;
+    EFI_BLOCK_IO_PROTOCOL *bio;
+    if (bs->LocateDevicePath(&block_guid, &remaining, &handle) != EFI_SUCCESS) return;
+    if (((EFI_DEVICE_PATH_PROTOCOL *)remaining)->Type != DEVICE_PATH_END_TYPE) return;
+    if (bs->HandleProtocol(handle, &block_guid, (void **)&bio) != EFI_SUCCESS) return;
+    if (bio->Media->LogicalPartition || bio->Media->BlockSize != 512) return;
+    disk = bio;
+}
+
+int plat_disk_read(unsigned int lba, void *buf) {
+    if (!disk || disk->ReadBlocks(disk, disk->Media->MediaId, lba, 512, sector) != EFI_SUCCESS)
+        return -1;
+    memcpy(buf, sector, 512);
+    return 0;
+}
+
+int plat_disk_write(unsigned int lba, const void *buf) {
+    if (!disk || disk->Media->ReadOnly) return -1;
+    memcpy(sector, buf, 512);
+    if (disk->WriteBlocks(disk, disk->Media->MediaId, lba, 512, sector) != EFI_SUCCESS)
+        return -1;
+    disk->FlushBlocks(disk);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------ */
+
+EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
+    st = system_table;
+    bs = st->BootServices;
+    // The firmware resets the machine after 5 minutes in a boot
+    // application unless told otherwise.
+    bs->SetWatchdogTimer(0, 0, 0, 0);
+    st->ConOut->EnableCursor(st->ConOut, 0);
+    calibrate_timer();
+    find_disk(image);
+    kernel_start();
+    return EFI_SUCCESS;
+}

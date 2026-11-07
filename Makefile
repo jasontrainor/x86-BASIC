@@ -15,9 +15,22 @@ BIOS_CFLAGS = -m16 -march=i686 -mtune=generic -mfpmath=387 -mno-mmx -mno-sse -mn
               -O2 -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 \
               -Wall -Ikernel -DBIOS_KERNEL
 
-BIOS_C_OBJS = $(patsubst %,build/bios/%.o,kernel bios screen font editor storage string num basic)
+SHARED = kernel screen font editor storage string num basic
+BIOS_C_OBJS = $(patsubst %,build/bios/%.o,bios $(SHARED))
 BIOS_OBJS = build/bios/kernel_entry.o build/bios/bios_string.o $(BIOS_C_OBJS)
-HEADERS = $(wildcard kernel/*.h)
+HEADERS = $(wildcard kernel/*.h kernel/uefi/*.h)
+
+# --- The 64-bit kernel, a UEFI application ------------------------------
+#
+# Compiled as ordinary x86-64 ELF objects (position-independent, so the
+# firmware can load it anywhere) and linked straight into a PE image by
+# GNU ld's i386pep emulation. Only calls into the firmware use the
+# Microsoft calling convention (EFIAPI in kernel/uefi/efi.h).
+UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-red-zone \
+              -fshort-wchar -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
+              -fcf-protection=none -fno-ident -fno-tree-loop-distribute-patterns \
+              -include kernel/uefi/hidden.h -O2 -Wall -Ikernel -DUEFI_KERNEL
+UEFI_OBJS = $(patsubst %,build/uefi/%.o,uefi $(SHARED))
 
 .PHONY: all test boot-test clean
 
@@ -32,6 +45,22 @@ build/bios/%.o: kernel/%.c $(HEADERS) Makefile | build/bios
 build/bios/%.o: kernel/%.asm Makefile | build/bios
 	$(ASM) -f elf32 $< -o $@
 
+build/uefi:
+	mkdir -p $@
+
+build/uefi/%.o: kernel/%.c $(HEADERS) Makefile | build/uefi
+	$(CC) $(UEFI_CFLAGS) -c $< -o $@
+
+build/uefi/uefi.o: kernel/uefi/uefi.c $(HEADERS) Makefile | build/uefi
+	$(CC) $(UEFI_CFLAGS) -c $< -o $@
+
+# Subsystem 10: EFI application.
+build/BOOTX64.EFI: $(UEFI_OBJS)
+	@if objdump -r $(UEFI_OBJS) | grep -q GOTPC; then \
+		echo "GOT references in the UEFI build (see kernel/uefi/hidden.h)" >&2; exit 1; fi
+	$(LD) -m i386pep --subsystem 10 -e efi_main -nostdlib --no-insert-timestamp \
+		$(UEFI_OBJS) -o $@
+
 build/kernel.bin: $(BIOS_OBJS) linker.ld tools/check16.sh
 	sh tools/check16.sh $(BIOS_C_OBJS)
 	$(LD) -m elf_i386 -T linker.ld --oformat binary $(BIOS_OBJS) -o $@
@@ -42,10 +71,10 @@ build/boot.bin: boot/boot.asm boot/print.asm boot/disk_load.asm build/kernel.bin
 	$(ASM) -f bin -DKERNEL_SECTORS=$$(( ($$(wc -c < build/kernel.bin) + 511) / 512 )) \
 		boot/boot.asm -o $@
 
-os.img: build/boot.bin build/kernel.bin
-	cat build/boot.bin build/kernel.bin > os.img
-	# Pad to 1.44MB floppy size
-	truncate -s 1474560 os.img
+# One image for both: BIOS boot code and kernel, plus an EFI system
+# partition with the UEFI kernel (see tools/mkimage.py).
+os.img: build/boot.bin build/kernel.bin build/BOOTX64.EFI tools/mkimage.py
+	python3 tools/mkimage.py build/boot.bin build/kernel.bin build/BOOTX64.EFI $@
 
 test:
 	tests/run_tests.sh

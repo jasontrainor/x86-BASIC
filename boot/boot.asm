@@ -101,29 +101,45 @@ MSG_REAL_MODE   db "Started in 16-bit Real Mode", 0x0D, 0x0A, 0
 MSG_LOAD_KERNEL db "Loading BASIC kernel...", 0x0D, 0x0A, 0
 
 ; ---------------------------------------------------------------------------
-; MBR partition table
+; MBR partition table (the layout is described in tools/mkimage.py)
 ;
-; In hard-disk emulation ("USB-HDD") mode - the default on most machines
-; for USB sticks - many BIOSes only boot a disk whose partition table has
-; an active (bootable) entry. Describe one partition covering the rest of
-; the image, of type 0xDA ("non-filesystem data") so that operating
-; systems leave it alone.
+; Partition 1 is what the BIOS boots: in hard-disk emulation ("USB-HDD")
+; mode - the default on most machines for USB sticks - many BIOSes only
+; boot a disk whose partition table has an active entry. It holds the
+; kernel and saved programs, and has type 0xDA ("non-filesystem data") so
+; that operating systems leave it alone.
+;
+; Partition 2 is the EFI system partition (type 0xEF), a FAT filesystem
+; holding the UEFI kernel, which is what UEFI firmware boots.
+;
+; CHS fields use the usual 255-head, 63-sector translation.
 ; ---------------------------------------------------------------------------
 IMAGE_SECTORS equ 2880
+ESP_START     equ 1152
+
+%macro chs 1               ; CHS address of LBA %1 (cylinder < 256 here)
+    db (%1) / 63 % 255     ; head
+    db (%1) % 63 + 1       ; sector
+    db (%1) / (63 * 255)   ; cylinder
+%endmacro
 
 times 0x1B8-($-$$) db 0    ; (assembly fails here if the code is too big)
     dd 0x42534958          ; disk signature
     dw 0
-; Partition 1: active, LBA 1 .. IMAGE_SECTORS-1. CHS fields use the
-; usual 255-head, 63-sector translation.
+; Partition 1: active, LBA 1 .. ESP_START-1
     db 0x80                ; status: active
-    db 0, 2, 0             ; first sector CHS: head 0, sector 2, cylinder 0
+    chs 1
     db 0xDA                ; type: non-filesystem data
-    db (IMAGE_SECTORS - 1) / 63 % 255              ; last sector: head
-    db (IMAGE_SECTORS - 1) % 63 + 1                ;   sector (cyl < 256)
-    db (IMAGE_SECTORS - 1) / (63 * 255)            ;   cylinder
+    chs ESP_START - 1
     dd 1                   ; first sector (LBA)
-    dd IMAGE_SECTORS - 1   ; number of sectors
-    times 3 * 16 db 0      ; partitions 2-4: unused
+    dd ESP_START - 1       ; number of sectors
+; Partition 2: EFI system partition, LBA ESP_START .. IMAGE_SECTORS-1
+    db 0x00
+    chs ESP_START
+    db 0xEF                ; type: EFI system partition
+    chs IMAGE_SECTORS - 1
+    dd ESP_START
+    dd IMAGE_SECTORS - ESP_START
+    times 2 * 16 db 0      ; partitions 3-4: unused
 
 dw 0xaa55

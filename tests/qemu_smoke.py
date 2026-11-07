@@ -6,12 +6,16 @@ The screen is a graphics mode, so the text is read back by taking a
 screenshot and matching each 8x8 character cell against the font
 (tools/mkfont.py): the check sees exactly what a user would.
 
-    tests/qemu_smoke.py [--mode floppy|hdd|usb|all] [--image os.img] [--show]
+    tests/qemu_smoke.py [--mode MODE|all] [--image os.img] [--show]
 
-  floppy  boot as drive A: (BIOS drive 0x00)
-  hdd     boot as the first hard disk (drive 0x80) - how most BIOSes
-          present a USB stick in "USB-HDD" mode
-  usb     boot from an emulated USB mass-storage stick on an xHCI controller
+BIOS (SeaBIOS) modes:
+  floppy     boot as drive A: (BIOS drive 0x00)
+  hdd        boot as the first hard disk (drive 0x80) - how most BIOSes
+             present a USB stick in "USB-HDD" mode
+  usb        boot from an emulated USB stick on an xHCI controller
+UEFI (OVMF) modes - skipped if OVMF isn't installed:
+  uefi       boot the UEFI kernel from a USB stick on an xHCI controller
+  uefi-hdd   the same, from a SATA/IDE hard disk
 """
 import argparse
 import json
@@ -53,6 +57,7 @@ SESSION = [
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
     ('PRINT 1/3;" ";SQR 2\n', ['0.33333333 1.4142136']),
     ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
+    ('INK 1: BORDER 2: PRINT 6*9: INK 0: BORDER 7\n', ['\n54']),
     ('A$="HELLO": DIM N(3): N(2)=7: PRINT A$(2 TO 4);LEN A$;N(2)\n', ['ELL57']),
     ('NEW\n10 INPUT "AGE";A\n20 GOSUB 100: STOP\n100 PRINT "DOUBLE ";A*2: RETURN\nRUN\n21\n',
      ['DOUBLE 42', 'STOPPED IN LINE 20']),
@@ -199,6 +204,19 @@ def ready(mon, tmpdir):
     return 'x86 BASIC' in screen_text(mon, tmpdir)
 
 
+MODES = ['floppy', 'hdd', 'usb', 'uefi', 'uefi-hdd']
+
+# UEFI firmware for QEMU (the edk2 "OVMF" build), wherever the
+# distribution puts it. A single combined image works with -bios.
+OVMF_PATHS = ['/usr/share/ovmf/OVMF.fd', '/usr/share/qemu/OVMF.fd',
+              '/usr/share/OVMF/OVMF.fd', '/usr/share/edk2/ovmf/OVMF.fd',
+              '/usr/share/edk2-ovmf/x64/OVMF.fd']
+
+
+def ovmf():
+    return next((p for p in OVMF_PATHS if os.path.exists(p)), None)
+
+
 def qemu_args(mode, image, monitor_path):
     drive = f'file={image},format=raw'
     args = ['qemu-system-x86_64', '-display', 'none', '-no-reboot'] + KVM + [
@@ -207,10 +225,14 @@ def qemu_args(mode, image, monitor_path):
         args += ['-drive', drive + ',if=floppy', '-boot', 'a']
     elif mode == 'hdd':
         args += ['-drive', drive + ',if=ide', '-boot', 'c']
-    elif mode == 'usb':
+    elif mode in ('usb', 'uefi'):
         args += ['-drive', drive + ',if=none,id=stick',
                  '-device', 'qemu-xhci',
                  '-device', 'usb-storage,drive=stick,bootindex=0']
+    elif mode == 'uefi-hdd':
+        args += ['-drive', drive + ',if=ide']
+    if mode.startswith('uefi'):
+        args += ['-bios', ovmf()]
     return args
 
 
@@ -222,6 +244,9 @@ def type_keys(mon, keys):
 
 def run(mode, image, show):
     accel = 'kvm' if KVM else 'emulated'
+    if mode.startswith('uefi') and not ovmf():
+        print(f'[{mode}] SKIPPED: no OVMF firmware found (install the ovmf package)')
+        return True
     with tempfile.TemporaryDirectory() as tmp:
         mon_path = os.path.join(tmp, 'mon.sock')
         # Boot a copy: the session SAVEs programs, and a copy can't clash
@@ -239,7 +264,7 @@ def run(mode, image, show):
                       f'{proc.communicate()[1].decode().strip()}')
                 return False
             # Wait for the kernel's banner rather than a fixed delay.
-            deadline = time.time() + 30
+            deadline = time.time() + 60    # (UEFI firmware takes a while)
             while not ready(mon, tmp):
                 if time.time() > deadline:
                     print(f'[{mode}] FAIL: kernel never started. Screen:\n'
@@ -260,7 +285,7 @@ def run(mode, image, show):
                                             stdout=subprocess.DEVNULL,
                                             stderr=subprocess.PIPE)
                     mon = Monitor(mon_path)
-                    deadline = time.time() + 30
+                    deadline = time.time() + 60
                     while not ready(mon, tmp) and time.time() < deadline:
                         time.sleep(0.2)
                     continue
@@ -287,11 +312,11 @@ def run(mode, image, show):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--mode', default='all', choices=['floppy', 'hdd', 'usb', 'all'])
+    ap.add_argument('--mode', default='all', choices=MODES + ['all'])
     ap.add_argument('--image', default=os.path.join(ROOT, 'os.img'))
     ap.add_argument('--show', action='store_true', help='print the final screen')
     a = ap.parse_args()
-    modes = ['floppy', 'hdd', 'usb'] if a.mode == 'all' else [a.mode]
+    modes = MODES if a.mode == 'all' else [a.mode]
     results = [run(m, a.image, a.show) for m in modes]
     sys.exit(0 if all(results) else 1)
 
