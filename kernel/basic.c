@@ -19,6 +19,7 @@
 #include "mem.h"
 #include "num.h"
 #include "editor.h"
+#include "storage.h"
 
 /* ------------------------------------------------------------------------
  * Tokens
@@ -1352,6 +1353,103 @@ static void st_beep() {
     tone((int)freq, (int)(secs * 1000));
 }
 
+/*
+ * SAVE "name" [LINE n], LOAD "name", ERASE "name", CAT: programs saved
+ * on the boot disk (see storage.c).
+ */
+static int file_name(char *name) {
+    struct value v = expr();
+    if (error_msg) return 0;
+    if (!v.is_str) { error("STRING EXPECTED"); return 0; }
+    if (v.len < 1 || v.len > STORE_NAME_LEN) {
+        error("NAME MUST BE 1-15 CHARACTERS");
+        return 0;
+    }
+    memcpy(name, v.str, v.len);
+    name[v.len] = '\0';
+    return 1;
+}
+
+static void st_save() {
+    char name[STORE_NAME_LEN + 1];
+    if (!file_name(name)) return;
+    int autorun = 0;
+    if (accept(T_LINE)) autorun = expr_int(1, 9999);
+    if (error_msg) return;
+    if (prog_len == 0) { error("NO PROGRAM TO SAVE"); return; }
+    const char *err = storage_save(name, prog, prog_len, autorun);
+    if (err) error(err);
+}
+
+// A loaded program must be well formed: the interpreter trusts it.
+static int valid_program(const unsigned char *data, int len) {
+    int off = 0, last = 0;
+    while (off < len) {
+        if (off + 4 > len) return 0;
+        int num = data[off] | (data[off + 1] << 8);
+        int n = data[off + 2];
+        if (num <= last || num > 9999 || n < 1 || off + 3 + n > len) return 0;
+        if (data[off + 3 + n - 1] != 0) return 0;
+        for (int i = 0; i < n - 1; i++)
+            if (data[off + 3 + i] == 0) return 0;
+        last = num;
+        off += 3 + n;
+    }
+    return 1;
+}
+
+HIGH_MEM unsigned char load_buf[PROG_SIZE];
+
+static void st_load() {
+    char name[STORE_NAME_LEN + 1];
+    if (!file_name(name)) return;
+    int len, autorun;
+    const char *err = storage_load(name, load_buf, PROG_SIZE, &len, &autorun);
+    if (!err && !valid_program(load_buf, len)) err = "BAD PROGRAM FILE";
+    if (err) { error(err); return; }
+    memcpy(prog, load_buf, len);
+    prog_len = len;
+    clear_variables();
+    reset_run_state();
+    cont_ok = 0;
+    if (autorun) {
+        go_to_line(autorun);              // SAVE ... LINE n: run it
+    } else {
+        running = 0;
+    }
+}
+
+static void st_erase() {
+    char name[STORE_NAME_LEN + 1];
+    if (!file_name(name)) return;
+    const char *err = storage_erase(name);
+    if (err) error(err);
+}
+
+static void cat_entry(const char *name, int len, int autorun) {
+    char buf[8];
+    print_string(name);
+    for (int i = strlen(name); i < 16; i++) print_char(' ');
+    itoa(len, buf);
+    print_string(buf);
+    if (autorun) {
+        itoa(autorun, buf);
+        print_string(" LINE ");
+        print_string(buf);
+    }
+    print_string("\n");
+}
+
+static void st_cat() {
+    int free_slots;
+    const char *err = storage_list(cat_entry, &free_slots);
+    if (err) { error(err); return; }
+    char buf[8];
+    itoa(free_slots, buf);
+    print_string(buf);
+    print_string(" FREE\n");
+}
+
 static int next_statement();
 
 static void st_continue() {
@@ -1525,6 +1623,10 @@ static void execute_statement() {
         running = 0;
         break;
     case T_CONTINUE: st_continue(); break;
+    case T_SAVE:   st_save(); break;
+    case T_LOAD:   st_load(); break;
+    case T_ERASE:  st_erase(); break;
+    case T_CAT:    st_cat(); break;
     case T_EDIT: {
         // Put the line in the editor for the next command line.
         int num = at_statement_end() ? last_line : expr_int(1, 9999);

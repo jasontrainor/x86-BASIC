@@ -43,7 +43,8 @@ KEYS = {
     '\x01': 'home', '\x05': 'end', '\x7f': 'delete',
 }
 
-# (keystrokes, text that must then be on screen)
+# (keystrokes, text that must then be on screen); RESET reboots the PC.
+RESET = None
 SESSION = [
     ('10 FOR I=1 TO 3\n20 PRINT "LOOP ";I*11\n30 NEXT I\n40 PRINT "DONE"\nRUN\n',
      ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE']),
@@ -61,6 +62,9 @@ SESSION = [
     # Line editor: cursor keys, Home, Delete, history.
     ('PRINT 1X2\x02\x02\x7f\x01\x06\x06\x06\x06\x06\x06"=";\x05\n', ['PRINT "=";12\n=12']),
     ('PRINT 6*8\n\x10\n', ['48\nPRINT 6*8\n48']),
+    ('NEW\n10 PRINT "SAVED ";6*7\nSAVE "keep"\nCAT\n', ['keep            ']),
+    (RESET, []),                      # reboot: the program must still be there
+    ('LOAD "KEEP"\nRUN\n', ['SAVED 42']),
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 
@@ -246,6 +250,20 @@ def run(mode, image, show):
             ok = True
             text = ''
             for keys, expected in SESSION:
+                if keys is RESET:
+                    # Power off and boot again from the same disk.
+                    mon.sock.close()
+                    proc.kill()
+                    proc.wait()
+                    os.unlink(mon_path)
+                    proc = subprocess.Popen(qemu_args(mode, copy, mon_path),
+                                            stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.PIPE)
+                    mon = Monitor(mon_path)
+                    deadline = time.time() + 30
+                    while not ready(mon, tmp) and time.time() < deadline:
+                        time.sleep(0.2)
+                    continue
                 type_keys(mon, keys)
                 # Key events are queued, so poll until the output shows up.
                 deadline = time.time() + 20

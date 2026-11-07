@@ -11,6 +11,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "platform.h"
 
 void basic_run(void);
@@ -66,6 +67,19 @@ void plat_idle(void) {
 unsigned long plat_timer_ms(void) { static unsigned long t; return t += 20; }
 
 void plat_tone(int f, int ms) { printf("[TONE %d %d]", f, ms); }
+
+/* A blank 1.44MB disk in memory. Sector 2879 always fails, for tests. */
+static unsigned char disk[2880][512];
+int plat_disk_read(unsigned int lba, void *buf) {
+    if (lba >= 2879) return -1;
+    memcpy(buf, disk[lba], 512);
+    return 0;
+}
+int plat_disk_write(unsigned int lba, const void *buf) {
+    if (lba >= 2879) return -1;
+    memcpy(disk[lba], buf, 512);
+    return 0;
+}
 
 int main(int argc, char **argv) {
     input = argc > 1 ? argv[1] : "";

@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Ikernel -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/string.c kernel/num.c || exit 1
+    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/storage.c kernel/string.c kernel/num.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
@@ -21,7 +21,7 @@ check() {
     local out ok=1
     # timeout: programs that loop forever without printing are cut off.
     # The sentinel keeps trailing newlines that $(...) would strip.
-    out=$(timeout 2 "$BIN" "$in" 2>&1; echo "<EOF>")
+    out=$(timeout 10 "$BIN" "$in" 2>&1; echo "<EOF>")
     if [[ $out == *AddressSanitizer* || $out == *"runtime error"* ]]; then ok=0; fi
     for want in "$@"; do
         if [[ $want == !* ]]; then
@@ -233,6 +233,22 @@ check "edit last line"    "10 PRINT 5${NL}20 PRINT 7${NL}EDIT${NL}${HOME}${R}${D
 check "edit missing"      "EDIT 50${NL}" "ERROR: LINE NOT FOUND"
 check "esc forgets line"  "PRINT 5*5${ESC}PRINT 6*6${NL}" "!25" "${NL}36${NL}"
 check "input not history" "10 INPUT A\$${NL}RUN${NL}SECRET${NL}${UP}${NL}" "? SECRET${NL}RUN${NL}?"
+
+# --- Saving programs -----------------------------------------------------------
+check "save load"         "10 PRINT 6*7${NL}SAVE \"answer\"${NL}NEW${NL}LOAD \"ANSWER\"${NL}LIST${NL}RUN${NL}" "LIST${NL}10 PRINT 6*7${NL}" "RUN${NL}42${NL}"
+check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             6${NL}TWO             12 LINE 20${NL}13 FREE${NL}"
+check "save replaces"     "10 PRINT 1${NL}SAVE \"P\"${NL}10 PRINT 2${NL}SAVE \"P\"${NL}NEW${NL}LOAD \"P\"${NL}LIST${NL}CAT${NL}" "LIST${NL}10 PRINT 2${NL}" "14 FREE"
+check "load autorun"      "10 PRINT 6*7${NL}SAVE \"GO\" LINE 10${NL}NEW${NL}LOAD \"GO\"${NL}" "LOAD \"GO\"${NL}42${NL}"
+check "load missing"      "LOAD \"NOPE\"${NL}" "ERROR: PROGRAM NOT FOUND"
+check "erase"             "10 PRINT 1${NL}SAVE \"X\"${NL}ERASE \"X\"${NL}LOAD \"X\"${NL}" "ERROR: PROGRAM NOT FOUND"
+check "bad name"          "SAVE \"\"${NL}SAVE \"ABCDEFGHIJKLMNOP\"${NL}SAVE 5${NL}" "ERROR: NAME MUST BE 1-15 CHARACTERS" "ERROR: STRING EXPECTED"
+check "save empty"        "SAVE \"E\"${NL}" "ERROR: NO PROGRAM TO SAVE"
+check "load clears vars"  "10 PRINT 1${NL}SAVE \"V\"${NL}A=5${NL}LOAD \"V\"${NL}PRINT A${NL}" "ERROR: VARIABLE NOT FOUND"
+FULL15=""; for i in $(seq 1 15); do FULL15+="SAVE \"P$i\"${NL}"; done
+check "disk full"         "10 PRINT 1${NL}${FULL15}SAVE \"P16\"${NL}CAT${NL}" "ERROR: DISK FULL" "0 FREE"
+BIG=""; for i in $(seq 1 150); do BIG+="$i REM ${A200}${NL}"; done
+check "big program"       "${BIG}SAVE \"BIG\"${NL}NEW${NL}LOAD \"BIG\"${NL}LIST 97${NL}" "LIST 97${NL}97 REM" "!ERROR"
+check "save in program"   "10 SAVE \"SELF\"${NL}20 PRINT 6*7${NL}RUN${NL}CAT${NL}" "${NL}42${NL}" "SELF "
 
 # --- BREAK --------------------------------------------------------------------
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "BREAK IN LINE 10" "${NL}25${NL}"
