@@ -90,6 +90,16 @@ void update_cursor() {
     enter_unreal();
 }
 
+void set_cursor(int col, int row) {
+    cursor_x = col;
+    cursor_y = row;
+    update_cursor();
+}
+
+int cursor_col() { return cursor_x; }
+int screen_cols() { return VGA_COLS; }
+int screen_rows() { return VGA_ROWS; }
+
 void clear_screen() {
     for (int i = 0; i < VGA_COLS * VGA_ROWS; i++) {
         vga_put(i, vga_cell(' '));
@@ -144,22 +154,21 @@ void print_string(const char* str) {
     }
 }
 
-char get_char() {
-    unsigned short ax;
-    __asm__ __volatile__ (
-        "int $0x16"
-        : "=a" (ax)
-        : "a" (0x0000)
-        : "cc"
-    );
-    enter_unreal();
-    return (char)(ax & 0xFF);
-}
+// ---------------------------------------------------------------------------
+// Keyboard
+//
+// Keys are moved from the BIOS buffer into our own small queue, so that
+// check_break() can look for Esc among keys typed while a program runs
+// without throwing the others away (INKEY$ and INPUT still get them).
+// ---------------------------------------------------------------------------
 
-// Non-blocking: returns 1 if Esc or Ctrl+C is waiting in the keyboard
-// buffer. Any keys typed while a program runs are consumed, so a BREAK
-// press can't get stuck behind them.
-int check_break() {
+#define KEYQ_SIZE 32
+static char keyq[KEYQ_SIZE];
+static int keyq_head, keyq_len;
+static int break_pending;
+
+// Move any keys waiting in the BIOS buffer into the queue (non-blocking).
+static void poll_bios_keys() {
     while (1) {
         unsigned char no_key;
         __asm__ __volatile__ (
@@ -170,10 +179,55 @@ int check_break() {
             : "cc"
         );
         enter_unreal();
-        if (no_key) return 0;
-        char c = get_char();
-        if (c == 27 || c == 3) return 1;   // Esc, Ctrl+C
+        if (no_key) return;
+        unsigned short ax;
+        __asm__ __volatile__ ("int $0x16" : "=a" (ax) : "a" (0x0000) : "cc");
+        enter_unreal();
+        char c = (char)(ax & 0xFF);
+        if (c == 27 || c == 3) {           // Esc, Ctrl+C: BREAK
+            break_pending = 1;
+            keyq_len = 0;
+        } else if (keyq_len < KEYQ_SIZE) {
+            keyq[(keyq_head + keyq_len++) % KEYQ_SIZE] = c;
+        }
     }
+}
+
+// Next key, or -1 if none is waiting. Esc comes back as 27.
+int poll_key() {
+    poll_bios_keys();
+    if (break_pending) {
+        break_pending = 0;
+        return 27;
+    }
+    if (!keyq_len) return -1;
+    char c = keyq[keyq_head];
+    keyq_head = (keyq_head + 1) % KEYQ_SIZE;
+    keyq_len--;
+    return (unsigned char)c;
+}
+
+int key_waiting() {
+    poll_bios_keys();
+    return break_pending || keyq_len > 0;
+}
+
+char get_char() {
+    int c;
+    while ((c = poll_key()) < 0) {
+        __asm__ __volatile__ ("hlt");      // sleep until the next interrupt
+    }
+    return (char)c;
+}
+
+// Non-blocking: returns 1 if Esc or Ctrl+C has been pressed.
+int check_break() {
+    poll_bios_keys();
+    if (break_pending) {
+        break_pending = 0;
+        return 1;
+    }
+    return 0;
 }
 
 static void outb(unsigned short port, unsigned char val) {
@@ -212,14 +266,27 @@ static void wait_ticks(int n) {
     }
 }
 
-void beep() {
-    // PIT channel 2, square wave, divisor 1193 -> ~1kHz tone.
-    outb(0x43, 0xB6);
-    outb(0x42, 1193 & 0xFF);
-    outb(0x42, 1193 >> 8);
-    outb(0x61, inb(0x61) | 0x03);    // gate the speaker on
-    wait_ticks(4);                   // ~0.2 seconds
-    outb(0x61, inb(0x61) & ~0x03);   // and off
+unsigned long timer_ms() {
+    return bios_ticks() * 55UL;
+}
+
+// Play a tone of freq Hz on the PC speaker for about ms milliseconds
+// (to the nearest timer tick, ~55ms). freq 0 is a rest.
+void tone(int freq, int ms) {
+    int ticks = (ms + 27) / 55;
+    if (ticks < 1 && ms > 0) ticks = 1;
+    if (freq >= 20 && freq <= 20000) {
+        // PIT channel 2, square wave, divisor = 1193182 Hz / freq.
+        unsigned int div = 1193182 / freq;
+        outb(0x43, 0xB6);
+        outb(0x42, div & 0xFF);
+        outb(0x42, div >> 8);
+        outb(0x61, inb(0x61) | 0x03);    // gate the speaker on
+        wait_ticks(ticks);
+        outb(0x61, inb(0x61) & ~0x03);   // and off
+    } else {
+        wait_ticks(ticks);
+    }
 }
 
 void init_video() {

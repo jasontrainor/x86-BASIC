@@ -38,6 +38,9 @@ SESSION = [
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
     ('PRINT 1/3;" ";SQR 2;" ";2^0.5*1E10\n', ['0.33333333 1.4142136 1.4142136E+10']),
     ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
+    ('A$="HELLO": DIM N(3): N(2)=7: PRINT A$(2 TO 4);LEN A$;N(2)\n', ['ELL57']),
+    ('NEW\n10 INPUT "AGE";A\n20 GOSUB 100: STOP\n100 PRINT "DOUBLE ";A*2: RETURN\nRUN\n21\n',
+     ['DOUBLE 42', 'STOPPED IN LINE 20']),
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 

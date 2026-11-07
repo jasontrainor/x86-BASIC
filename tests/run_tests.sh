@@ -34,6 +34,7 @@ check() {
     else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$out" | head -20; fi
 }
 NL=$'\n'
+ESC=$'\x1b'
 
 # --- Basics -------------------------------------------------------------
 check "let and print"    "LET A=6*7${NL}PRINT A${NL}" "${NL}42${NL}"
@@ -51,7 +52,7 @@ check "if then false"    "IF 1=2 THEN PRINT 2*21${NL}" "!42"
 check "end stops"        "10 PRINT 1+1${NL}20 END${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}2${NL}" "!${NL}3${NL}"
 check "cls"              "CLS${NL}" "[CLS]"
 check "colours"          "INK 2${NL}PAPER 5${NL}BORDER 1${NL}" "[INK 2]" "[PAPER 5]" "[BORDER 1]"
-check "beep"             "BEEP${NL}" "[BEEP]"
+check "beep"             "BEEP${NL}BEEP 1,12${NL}BEEP .5,0${NL}" "[TONE 1000 200]" "[TONE 523 1000]" "[TONE 261 500]"
 
 # --- Errors are reported, and stop the program --------------------------
 check "unknown statement" "10 FROB${NL}RUN${NL}" "ERROR: SYNTAX ERROR IN LINE 10"
@@ -146,8 +147,58 @@ check "print ; at end"    "PRINT 1+1;: PRINT 3+3${NL}" "${NL}26${NL}"
 check "list detokenizes"  "10 print a:goto 10${NL}20 if a<=b then print \"if\"${NL}LIST${NL}" "10 PRINT A: GOTO 10${NL}20 IF A<=B THEN PRINT \"if\"${NL}"
 check "list rem keeps text" "10 rem Hello print${NL}LIST${NL}" "10 REM Hello print${NL}"
 
+# --- More statements ---------------------------------------------------------
+check "gosub return"      "10 GOSUB 100: PRINT \"BACK\"${NL}20 END${NL}100 PRINT \"SUB\"${NL}110 RETURN${NL}RUN${NL}" "${NL}SUB${NL}BACK${NL}"
+check "nested gosub"      "10 GOSUB 100${NL}20 PRINT 3*3: END${NL}100 GOSUB 200: PRINT 2*2: RETURN${NL}200 PRINT 1*1: RETURN${NL}RUN${NL}" "${NL}1${NL}4${NL}9${NL}"
+check "return no gosub"   "RETURN${NL}" "ERROR: RETURN WITHOUT GOSUB"
+check "gosub too deep"    "10 GOSUB 10${NL}RUN${NL}" "ERROR: TOO MANY GOSUBS IN LINE 10"
+check "input number"      "10 INPUT \"N? \";N${NL}20 PRINT N*2${NL}RUN${NL}21${NL}" "N? 21${NL}42${NL}"
+check "input expression"  "10 INPUT N${NL}20 PRINT N${NL}RUN${NL}6*7${NL}" "${NL}42${NL}"
+check "input retry"       "10 INPUT N${NL}20 PRINT N+1${NL}RUN${NL}ABC${NL}41${NL}" "NUMBER EXPECTED - TRY AGAIN" "${NL}42${NL}"
+check "input string"      "10 INPUT \"NAME\";A\$${NL}20 PRINT \"HI \";A\$${NL}RUN${NL}Bob Smith${NL}" "HI Bob Smith${NL}"
+check "input two vars"    "10 INPUT A,B${NL}20 PRINT A*B${NL}RUN${NL}6${NL}7${NL}" "${NL}42${NL}"
+check "input break"       "10 INPUT A${NL}RUN${NL}${ESC}" "BREAK IN LINE 10"
+check "stop continue"     "10 PRINT 1+1: STOP: PRINT 3+3${NL}20 PRINT 5+5${NL}RUN${NL}CONTINUE${NL}" "STOPPED IN LINE 10" "${NL}6${NL}10${NL}"
+check "continue after error" "10 PRINT 100/D${NL}RUN${NL}D=4${NL}CONTINUE${NL}" "VARIABLE NOT FOUND IN LINE 10" "${NL}25${NL}"
+check "continue after break" "10 GOTO 10${NL}RUN${NL}${ESC}CONTINUE${NL}${ESC}" "CONTINUE${NL}BREAK IN LINE 10"
+check "can't continue"    "CONTINUE${NL}" "ERROR: CAN'T CONTINUE"
+check "and or not"        "PRINT 1 AND 1;0 AND 1;1 OR 0;0 OR 0;NOT 0;NOT 5${NL}" "${NL}101010${NL}"
+check "logic precedence"  "A=1: B=2${NL}IF A=1 AND B=2 THEN PRINT 6*7${NL}IF NOT A=2 THEN PRINT 6*8${NL}IF A=2 OR B=2 THEN PRINT 6*9${NL}" "${NL}42${NL}" "${NL}48${NL}" "${NL}54${NL}"
+check "string and"        "PRINT \"YES\" AND 1;\"NO\" AND 0;\"!\"${NL}" "${NL}YES!${NL}"
+check "len code chr"      "PRINT LEN \"HELLO\";\" \";CODE \"A\";\" \";CHR\$ 66;CHR\$ (67)${NL}" "${NL}5 65 BC${NL}"
+check "str val"           "A\$=STR\$ 3.5${NL}PRINT A\$+\"!\"${NL}PRINT VAL \"2*21\"${NL}PRINT VAL \"1E3\"+1${NL}" "${NL}3.5!${NL}" "${NL}42${NL}" "${NL}1001${NL}"
+check "val bad"           "PRINT VAL \"1+\"${NL}" "ERROR:"
+check "slicing"           "A\$=\"HELLO\"${NL}PRINT A\$(2 TO 4);\"/\";A\$(2);\"/\";A\$(TO 2);\"/\";A\$(4 TO)${NL}" "${NL}ELL/E/HE/LO${NL}"
+check "slice literal"     "PRINT \"ABCDEF\"(3 TO 4)${NL}" "${NL}CD${NL}"
+check "slice empty"       "A\$=\"AB\"${NL}PRINT \"[\";A\$(2 TO 1);\"]\"${NL}" "${NL}[]${NL}"
+check "slice range"       "A\$=\"AB\"${NL}PRINT A\$(1 TO 3)${NL}" "ERROR: SUBSCRIPT OUT OF RANGE"
+check "self slice"        "A\$=\"HELLO\"${NL}A\$=A\$(2 TO)${NL}PRINT A\$${NL}" "${NL}ELLO${NL}"
+check "dim numbers"       "DIM A(3): A(1)=5: A(3)=A(1)*2${NL}PRINT A(1);A(2);A(3)${NL}" "${NL}5010${NL}"
+check "dim 2d"            "DIM B(2,3): B(2,3)=7: PRINT B(2,3);B(1,1)${NL}" "${NL}70${NL}"
+check "dim strings"       "DIM N\$(2): N\$(1)=\"AL\": N\$(2)=\"BO\": PRINT N\$(2)+N\$(1)${NL}" "${NL}BOAL${NL}"
+check "array and var"     "DIM A(2): A=9: A(1)=3: PRINT A+A(1)${NL}" "${NL}12${NL}"
+check "subscript range"   "DIM A(3): PRINT A(4)${NL}" "ERROR: SUBSCRIPT OUT OF RANGE"
+check "subscript count"   "DIM A(3): PRINT A(1,1)${NL}" "ERROR: SUBSCRIPT OUT OF RANGE"
+check "no array"          "PRINT Z(1)${NL}" "ERROR: ARRAY NOT FOUND"
+check "dim too big"       "DIM A(65535,65535)${NL}" "ERROR: OUT OF MEMORY"
+check "for over array"    "DIM S(5): FOR I=1 TO 5: S(I)=I*I: NEXT I: PRINT S(5)${NL}" "${NL}25${NL}"
+check "read data"         "10 READ A,B\$,C${NL}20 PRINT A;B\$;C${NL}30 DATA 1,\"TWO\"${NL}40 DATA 2+1${NL}RUN${NL}" "${NL}1TWO3${NL}"
+check "out of data"       "10 READ A,B${NL}20 DATA 1${NL}RUN${NL}" "ERROR: OUT OF DATA IN LINE 10"
+check "restore"           "10 READ A: RESTORE: READ B${NL}20 PRINT A+B${NL}30 DATA 21${NL}RUN${NL}" "${NL}42${NL}"
+check "restore line"      "10 RESTORE 40: READ A: PRINT A${NL}30 DATA 1${NL}40 DATA 2${NL}RUN${NL}" "${NL}2${NL}"
+check "data skipped"      "10 DATA 1,\"A:B\",3: PRINT 4*4${NL}RUN${NL}" "${NL}16${NL}"
+check "rnd"               "RANDOMIZE 1: A=RND: RANDOMIZE 1: B=RND${NL}PRINT A=B;A>=0;A<1${NL}" "${NL}111${NL}"
+check "rnd varies"        "RANDOMIZE 5: PRINT RND=RND${NL}" "${NL}0${NL}"
+check "inkey"             "10 K\$=INKEY\$: IF K\$=\"\" THEN GOTO 10${NL}20 PRINT \"KEY \";K\$${NL}RUN${NL}X" "KEY X${NL}"
+check "pause"             "PAUSE 5: PRINT 6*7${NL}" "${NL}42${NL}"
+check "print at"          "PRINT AT 3,5;\"X\"${NL}" "[AT 3,5]X"
+check "print at range"    "PRINT AT 30,0;\"X\"${NL}" "ERROR: INTEGER OUT OF RANGE"
+check "print tab"         "PRINT \"AB\";TAB 6;\"C\"${NL}" "${NL}AB    C${NL}"
+check "print comma"       "PRINT 1,2${NL}" "${NL}1               2${NL}"
+check "list from"         "10 PRINT 1${NL}20 PRINT 2${NL}30 PRINT 3${NL}LIST 20${NL}" "LIST 20${NL}20 PRINT 2${NL}30 PRINT 3${NL}"
+check "beep range"        "BEEP 1,100${NL}" "ERROR: INTEGER OUT OF RANGE"
+
 # --- BREAK --------------------------------------------------------------------
-ESC=$'\x1b'
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "BREAK IN LINE 10" "${NL}25${NL}"
 
 echo "$pass passed, $fail failed"

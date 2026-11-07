@@ -79,7 +79,6 @@ static int find_token(const char *word) {
 static int tokenize(const char *src, unsigned char *dst, int cap) {
     int n = 0;
     int rest_raw = 0;    // after REM: copy the rest of the line as is
-    int in_data = 0;     // after DATA: copy as is up to the next ':'
 #define PUT(c) do { if (n >= cap - 1) return -1; dst[n++] = (c); } while (0)
     while (*src) {
         char c = *src;
@@ -88,12 +87,6 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
             PUT(*src++);
             while (*src && *src != '"') PUT(*src++);
             if (*src) PUT(*src++);
-            continue;
-        }
-        if (in_data) {
-            if (c == ':') in_data = 0;
-            PUT(c);
-            src++;
             continue;
         }
         if (isalpha(c)) {
@@ -121,7 +114,6 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
                 src += len;
                 while (*src == ' ') src++;
                 if (t == T_REM) rest_raw = 1;
-                if (t == T_DATA) in_data = 1;
             } else {
                 for (int i = 0; i < len; i++) PUT(toupper(*src++));
             }
@@ -288,11 +280,17 @@ static int read_name(char *name, int *is_str) {
     return 1;
 }
 
-static struct var *find_var(const char *name, int is_str, int create) {
+static struct var *lookup_var(const char *name, int is_str) {
     for (int i = 0; i < num_vars; i++) {
         if (vars[i].is_str == is_str && strcmp(vars[i].name, name) == 0)
             return &vars[i];
     }
+    return 0;
+}
+
+static struct var *find_var(const char *name, int is_str, int create) {
+    struct var *found = lookup_var(name, is_str);
+    if (found) return found;
     if (!create) {
         error("VARIABLE NOT FOUND");
         return 0;
@@ -309,8 +307,41 @@ static struct var *find_var(const char *name, int is_str, int create) {
     return v;
 }
 
+/*
+ * Arrays (DIM). Subscripts run from 1, as on the Spectrum. Array names
+ * are separate from simple variable names, so A and A() can both exist.
+ * Elements live in a heap that is emptied by CLEAR, RUN and NEW. String
+ * elements hold up to 255 characters each.
+ */
+#define MAX_ARRAYS 32
+#define MAX_DIMS 3
+#define HEAP_SIZE (192 * 1024)
+#define STR_SLOT (MAX_STR + 1)      // a string element: length, then text
+
+struct array {
+    char name[NAME_LEN];
+    char is_str;
+    int ndims;
+    int dims[MAX_DIMS];
+    unsigned char *data;
+};
+struct array arrays[MAX_ARRAYS];
+int num_arrays = 0;
+HIGH_MEM unsigned char heap[HEAP_SIZE];
+int heap_used = 0;
+
+static struct array *find_array(const char *name, int is_str) {
+    for (int i = 0; i < num_arrays; i++) {
+        if (arrays[i].is_str == is_str && strcmp(arrays[i].name, name) == 0)
+            return &arrays[i];
+    }
+    return 0;
+}
+
 static void clear_variables() {
     num_vars = 0;
+    num_arrays = 0;
+    heap_used = 0;
 }
 
 /* ------------------------------------------------------------------------
@@ -366,12 +397,6 @@ static double expr_num() {
     return v.num;
 }
 
-static struct value expr_str() {
-    struct value v = expr();
-    if (!error_msg && !v.is_str) error("STRING EXPECTED");
-    return v;
-}
-
 // Convert to a whole number in [lo, hi], rounding to the nearest.
 static int to_int(double v, int lo, int hi) {
     v = num_round(v);
@@ -386,6 +411,119 @@ static int expr_int(int lo, int hi) {
     double v = expr_num();
     return error_msg ? lo : to_int(v, lo, hi);
 }
+
+// Parse the subscripts "i, j, ...)" of an element of a (the "(" already
+// consumed). Returns the element number, or -1 after an error.
+static int element_index(struct array *a) {
+    int idx = 0;
+    for (int k = 0; k < a->ndims; k++) {
+        if (k > 0 && !accept_char(',')) {
+            error("SUBSCRIPT OUT OF RANGE");     // too few subscripts
+            return -1;
+        }
+        double v = expr_num();
+        if (error_msg) return -1;
+        v = num_round(v);
+        if (!(v >= 1 && v <= a->dims[k])) {
+            error("SUBSCRIPT OUT OF RANGE");
+            return -1;
+        }
+        idx = idx * a->dims[k] + (int)v - 1;
+    }
+    if (!accept_char(')')) {
+        error("SUBSCRIPT OUT OF RANGE");         // too many subscripts
+        return -1;
+    }
+    return idx;
+}
+
+/*
+ * Something that can be assigned to: a variable or an array element.
+ * A simple variable that doesn't exist yet is only created when the
+ * value is stored, so LET A=A+1 with no A is still an error.
+ */
+struct lvalue {
+    int is_str;
+    char name[NAME_LEN];
+    double *num;          // numbers: where the value goes
+    unsigned char *len;   // strings: where the length and text go
+    char *str;
+};
+
+static int parse_lvalue(struct lvalue *lv) {
+    lv->num = 0;
+    lv->len = 0;
+    lv->str = 0;
+    if (!read_name(lv->name, &lv->is_str)) return 0;
+    skip_space();
+    if (*p == '(') {
+        struct array *a = find_array(lv->name, lv->is_str);
+        if (!a) {
+            error("ARRAY NOT FOUND");
+            return 0;
+        }
+        p++;
+        int i = element_index(a);
+        if (i < 0) return 0;
+        if (a->is_str) {
+            lv->len = a->data + i * STR_SLOT;
+            lv->str = (char *)lv->len + 1;
+        } else {
+            lv->num = (double *)a->data + i;
+        }
+        return 1;
+    }
+    struct var *v = lookup_var(lv->name, lv->is_str);
+    if (v) {
+        lv->num = &v->num;
+        lv->len = &v->len;
+        lv->str = v->str;
+    }
+    return 1;
+}
+
+static void store(struct lvalue *lv, struct value val) {
+    if (error_msg) return;
+    if (lv->is_str != val.is_str) {
+        error(lv->is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
+        return;
+    }
+    if (!lv->num && !lv->len) {            // a new simple variable
+        struct var *v = find_var(lv->name, lv->is_str, 1);
+        if (!v) return;
+        lv->num = &v->num;
+        lv->len = &v->len;
+        lv->str = v->str;
+    }
+    if (lv->is_str) {
+        // memmove: the value may be part of the target (A$=A$(2 TO))
+        memmove(lv->str, val.str, val.len);
+        *lv->len = val.len;
+    } else {
+        *lv->num = val.num;
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * Random numbers (xorshift32), seeded from the timer at startup
+ * --------------------------------------------------------------------- */
+
+static unsigned int rnd_state = 1;
+
+static void randomize(unsigned int seed) {
+    rnd_state = seed ? seed : 1;
+}
+
+static double rnd() {
+    unsigned int x = rnd_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rnd_state = x;
+    return x / 4294967296.0;              // 0 <= RND < 1
+}
+
+int break_requested;      // Esc was seen by INKEY$ or INPUT
 
 /* ------------------------------------------------------------------------
  * Expressions
@@ -460,12 +598,126 @@ static struct value variable_value() {
     char name[NAME_LEN];
     int is_str;
     if (!read_name(name, &is_str)) return num_value(0);
+    skip_space();
+    if (*p == '(') {
+        struct array *a = find_array(name, is_str);
+        if (a) {
+            p++;
+            int i = element_index(a);
+            if (i < 0) return num_value(0);
+            if (is_str) {
+                unsigned char *e = a->data + i * STR_SLOT;
+                return str_value((char *)e + 1, *e);
+            }
+            return num_value(((double *)a->data)[i]);
+        }
+        if (!is_str) {
+            error("ARRAY NOT FOUND");
+            return num_value(0);
+        }
+        // A string followed by ( is sliced: see factor().
+    }
     struct var *v = find_var(name, is_str, 0);
     if (!v) return num_value(0);
     return is_str ? str_value(v->str, v->len) : num_value(v->num);
 }
 
+// Slice a string, Spectrum style (the "(" not yet consumed):
+//   S$(3) S$(2 TO 4) S$(TO 3) S$(2 TO)
+static struct value slice(struct value s) {
+    p++;
+    int from = 1, to = s.len;
+    if (!accept(T_TO)) {
+        from = expr_int(0, 65535);
+        to = from;
+        if (accept(T_TO)) to = s.len;
+        else goto close;
+    }
+    skip_space();
+    if (*p != ')') to = expr_int(0, 65535);
+close:
+    expect_char(')', "MISSING )");
+    if (error_msg || from > to) return str_value("", 0);
+    if (from < 1 || to > s.len) {
+        error("SUBSCRIPT OUT OF RANGE");
+        return str_value("", 0);
+    }
+    return str_value(s.str + from - 1, to - from + 1);
+}
+
+static struct value str_arg() {
+    struct value v = factor();
+    if (!error_msg && !v.is_str) error("STRING EXPECTED");
+    return v;
+}
+
+// VAL: evaluate a string as a numeric expression.
+static double val(struct value s) {
+    char text[MAX_STR + 1];
+    unsigned char tokens[MAX_STR + 2];
+    memcpy(text, s.str, s.len);
+    text[s.len] = '\0';
+    if (tokenize(text, tokens, sizeof(tokens)) < 0) return invalid_argument();
+    char *saved = p;
+    p = (char *)tokens;
+    double v = expr_num();
+    skip_space();
+    if (*p) error("INVALID ARGUMENT");
+    p = saved;
+    return v;
+}
+
+static struct value copy_to_pool(const char *s, int len) {
+    char *d = pool_alloc(len);
+    memcpy(d, s, len);
+    return str_value(d, len);
+}
+
+static struct value string_function(int t) {
+    struct value v;
+    char buf[24];
+    switch (t) {
+    case T_LEN:
+        v = str_arg();
+        return num_value(v.len);
+    case T_CODE:
+        v = str_arg();
+        return num_value(v.len ? (unsigned char)v.str[0] : 0);
+    case T_VAL:
+        v = str_arg();
+        return num_value(error_msg ? 0 : val(v));
+    case T_CHRS:
+        buf[0] = to_int(num_arg(), 0, 255);
+        return copy_to_pool(buf, 1);
+    case T_STRS:
+        num_format(num_arg(), buf);
+        return copy_to_pool(buf, strlen(buf));
+    case T_INKEYS: {
+        int k = poll_key();
+        if (k == 27) {            // Esc: leave it to stop the program
+            break_requested = 1;
+            k = -1;
+        }
+        if (k < 0) return str_value("", 0);
+        buf[0] = k;
+        return copy_to_pool(buf, 1);
+    }
+    }
+    return num_value(0);
+}
+
+static struct value primary();
+
 static struct value factor() {
+    struct value v = primary();
+    while (!error_msg && v.is_str && accept_char('(')) {
+        p--;
+        v = slice(v);
+    }
+    return v;
+}
+
+static struct value primary() {
     if (error_msg) return num_value(0);
     skip_space();
     unsigned char c = *p;
@@ -495,6 +747,12 @@ static struct value factor() {
     } else if (c >= T_ABS && c <= T_EXP) {
         p++;
         return numeric_function(c);
+    } else if (c >= T_LEN && c <= T_INKEYS) {
+        p++;
+        return string_function(c);
+    } else if (c == T_RND) {
+        p++;
+        return num_value(rnd());
     } else if (isalpha(c)) {
         return variable_value();
     }
@@ -601,8 +859,36 @@ static struct value comparison() {
     return v;
 }
 
-static struct value expr() {
+// NOT binds more loosely than comparisons: NOT A=B is NOT (A=B).
+static struct value not_expr() {
+    if (accept(T_NOT)) {
+        struct value v = not_expr();
+        if (v.is_str) error("NUMBER EXPECTED");
+        return num_value(v.num == 0);
+    }
     return comparison();
+}
+
+// As on the Spectrum: X AND Y is X if Y is true (non-zero), else 0
+// (or "" for a string X); X OR Y is 1 if Y is true, else X.
+static struct value and_expr() {
+    struct value v = not_expr();
+    while (!error_msg && accept(T_AND)) {
+        struct value w = not_expr();
+        if (w.is_str) { error("NUMBER EXPECTED"); break; }
+        if (w.num == 0) v = v.is_str ? str_value("", 0) : num_value(0);
+    }
+    return v;
+}
+
+static struct value expr() {
+    struct value v = and_expr();
+    while (!error_msg && accept(T_OR)) {
+        struct value w = and_expr();
+        if (v.is_str || w.is_str) { error("NUMBER EXPECTED"); break; }
+        if (w.num != 0) v = num_value(1);
+    }
+    return v;
 }
 
 /* ------------------------------------------------------------------------
@@ -620,8 +906,40 @@ struct for_loop {
 struct for_loop for_stack[MAX_FOR];
 int for_sp = 0;
 
+struct gosub {
+    int line;             // where to RETURN to: line offset
+    char *pos;            //   and position after the GOSUB statement
+};
+#define MAX_GOSUB 32
+struct gosub gosub_stack[MAX_GOSUB];
+int gosub_sp = 0;
+
+// Where READ takes its next item from: in the DATA statement at
+// data_pos if in_data, otherwise the next DATA from data_pos on (from
+// the start of the line at data_line if data_pos is 0).
+int data_line;
+char *data_pos;
+int in_data;
+
+// Where CONTINUE carries on: the statement at cont_pos (cont_next: the
+// one after it), if cont_ok.
+int cont_ok, cont_line, cont_next;
+char *cont_pos;
+
+// The statement being run, for errors and BREAK.
+int stmt_line;
+char *stmt_pos;
+
+static void restore(int num) {
+    data_line = line_find(num);
+    data_pos = 0;
+    in_data = 0;
+}
+
 static void reset_run_state() {
     for_sp = 0;
+    gosub_sp = 0;
+    restore(0);
 }
 
 // Continue at the start of line number num.
@@ -637,27 +955,13 @@ static void go_to_line(int num) {
     jumped = 1;
 }
 
-// Store a value in a variable.
-static void assign(struct var *v, struct value val) {
-    if (v->is_str) {
-        // memmove: val may be part of the variable itself
-        memmove(v->str, val.str, val.len);
-        v->len = val.len;
-    } else {
-        v->num = val.num;
-    }
-}
-
-// [LET] name = expression   (the LET itself already consumed)
+// [LET] target = expression   (the LET itself already consumed)
 static void st_let() {
-    char name[NAME_LEN];
-    int is_str;
-    if (!read_name(name, &is_str)) return;
+    struct lvalue lv;
+    if (!parse_lvalue(&lv)) return;
     if (!accept_char('=')) { error("SYNTAX ERROR"); return; }
-    struct value val = is_str ? expr_str() : num_value(expr_num());
-    if (error_msg) return;
-    struct var *v = find_var(name, is_str, 1);
-    if (v) assign(v, val);
+    struct value val = expr();
+    store(&lv, val);
 }
 
 static void print_value(struct value v) {
@@ -670,13 +974,43 @@ static void print_value(struct value v) {
     }
 }
 
-// PRINT item [; item]... - a trailing ; leaves the cursor after the text.
+static void print_spaces_to(int col) {
+    while (cursor_col() < col) print_char(' ');
+}
+
+/*
+ * PRINT items separated by ; (nothing between) or , (move to the next
+ * half-screen column). AT row,col and TAB col move the cursor. A
+ * trailing ; or , leaves the cursor after the text.
+ */
 static void st_print() {
     int newline = 1;
     while (!at_statement_end()) {
         newline = 1;
-        if (accept_char(';') || accept_char(',')) {
+        if (accept_char(';')) {
             newline = 0;
+            continue;
+        }
+        if (accept_char(',')) {
+            newline = 0;
+            int next = (cursor_col() / 16 + 1) * 16;
+            if (next >= screen_cols()) print_string("\n");
+            else print_spaces_to(next);
+            continue;
+        }
+        if (accept(T_AT)) {
+            int row = expr_int(0, screen_rows() - 1);
+            expect_char(',', "SYNTAX ERROR");
+            int col = expr_int(0, screen_cols() - 1);
+            if (error_msg) return;
+            set_cursor(col, row);
+            continue;
+        }
+        if (accept(T_TAB)) {
+            int col = expr_int(0, 65535) % screen_cols();
+            if (error_msg) return;
+            if (col < cursor_col()) print_string("\n");
+            print_spaces_to(col);
             continue;
         }
         struct value v = expr();
@@ -802,14 +1136,213 @@ static void st_next() {
     }
 }
 
+static void st_gosub() {
+    int num = expr_int(1, 9999);
+    if (error_msg) return;
+    if (gosub_sp == MAX_GOSUB) {
+        error("TOO MANY GOSUBS");
+        return;
+    }
+    int line = cur_line;
+    char *pos = p;
+    go_to_line(num);
+    if (error_msg) return;
+    gosub_stack[gosub_sp].line = line;
+    gosub_stack[gosub_sp].pos = pos;
+    gosub_sp++;
+}
+
+static void st_return() {
+    if (gosub_sp == 0) {
+        error("RETURN WITHOUT GOSUB");
+        return;
+    }
+    gosub_sp--;
+    cur_line = gosub_stack[gosub_sp].line;
+    p = gosub_stack[gosub_sp].pos;        // just after the GOSUB
+}
+
+static int read_line();
+extern char input_buf[];
+
+// Stop at the current statement as if BREAK had been pressed, so that
+// CONTINUE runs it again.
+static void break_here() {
+    break_requested = 1;
+    cur_line = stmt_line;
+    p = stmt_pos;
+    jumped = 1;
+}
+
+/*
+ * INPUT ["prompt";] var [, var]...
+ * Each variable is read from its own line. A number may be typed as any
+ * expression, as on the Spectrum; if it isn't valid, it's asked for
+ * again.
+ */
+static void st_input() {
+    int prompted = 0;
+    while (!at_statement_end()) {
+        if (accept_char(';') || accept_char(',')) continue;
+        if (*p == '"') {
+            struct value prompt = factor();
+            print_value(prompt);
+            prompted = 1;
+            continue;
+        }
+        struct lvalue lv;
+        if (!parse_lvalue(&lv)) return;
+        for (;;) {
+            if (!prompted) print_string("? ");
+            if (read_line() < 0) {            // Esc
+                break_here();
+                return;
+            }
+            struct value v;
+            if (lv.is_str) {
+                v = str_value(input_buf, strlen(input_buf));
+            } else {
+                v = num_value(val(str_value(input_buf, strlen(input_buf))));
+                if (error_msg) {
+                    error_msg = 0;
+                    print_string("NUMBER EXPECTED - TRY AGAIN\n");
+                    prompted = 0;
+                    continue;
+                }
+            }
+            store(&lv, v);
+            break;
+        }
+        prompted = 0;
+    }
+}
+
+static void st_dim() {
+    do {
+        char name[NAME_LEN];
+        int is_str;
+        if (!read_name(name, &is_str)) return;
+        if (!accept_char('(')) { error("SYNTAX ERROR"); return; }
+        int dims[MAX_DIMS], nd = 0;
+        int esize = is_str ? STR_SLOT : (int)sizeof(double);
+        int room = (HEAP_SIZE - heap_used) / esize;   // elements that fit
+        int count = 1;
+        do {
+            if (nd == MAX_DIMS) { error("TOO MANY DIMENSIONS"); return; }
+            int d = expr_int(1, 65535);
+            if (error_msg) return;
+            dims[nd++] = d;
+            count = count > room / d ? room + 1 : count * d;
+        } while (accept_char(','));
+        expect_char(')', "MISSING )");
+        if (error_msg) return;
+        if (count > room) { error("OUT OF MEMORY"); return; }
+        struct array *a = find_array(name, is_str);
+        if (!a) {
+            if (num_arrays == MAX_ARRAYS) { error("TOO MANY ARRAYS"); return; }
+            a = &arrays[num_arrays++];
+            strcpy(a->name, name);
+            a->is_str = is_str;
+        }
+        a->ndims = nd;
+        for (int i = 0; i < nd; i++) a->dims[i] = dims[i];
+        a->data = heap + heap_used;
+        heap_used += (count * esize + 7) & ~7;
+        memset(a->data, 0, count * esize);
+    } while (accept_char(','));
+}
+
+// Move data_pos to the next DATA item. Returns 0 if there are no more.
+static int find_data() {
+    if (in_data) return 1;
+    if (data_line >= prog_len) return 0;
+    unsigned char *q = data_pos ? (unsigned char *)data_pos : line_text(data_line);
+    // DATA is a token byte, which can't occur inside strings or comments
+    // (they only hold typed characters), so a plain search finds it.
+    for (;;) {
+        while (*q && *q != T_DATA) q++;
+        if (*q) {
+            data_pos = (char *)q + 1;
+            in_data = 1;
+            return 1;
+        }
+        data_line = line_next(data_line);
+        if (data_line >= prog_len) return 0;
+        q = line_text(data_line);
+    }
+}
+
+static void st_read() {
+    do {
+        struct lvalue lv;
+        if (!parse_lvalue(&lv)) return;
+        if (!find_data()) { error("OUT OF DATA"); return; }
+        char *saved = p;
+        p = data_pos;
+        struct value v = expr();
+        if (accept_char(',')) in_data = 1;
+        else if (at_statement_end()) in_data = 0;
+        else error("SYNTAX ERROR");
+        data_pos = p;
+        p = saved;
+        store(&lv, v);
+    } while (!error_msg && accept_char(','));
+}
+
+// DATA is only read by READ; running it does nothing.
+static void st_data() {
+    while (!at_statement_end()) {
+        if (*p++ == '"') {
+            while (*p && *p != '"') p++;
+            if (*p) p++;
+        }
+    }
+}
+
+// Wait for n/50 seconds (n = 0: forever), or until a key is pressed.
+static void pause(int n) {
+    unsigned long start = timer_ms();
+    while (!key_waiting()) {
+        if (n && timer_ms() - start >= n * 20UL) break;
+    }
+}
+
+// BEEP duration, pitch: seconds, and semitones above middle C.
+static void st_beep() {
+    if (at_statement_end()) {          // plain BEEP: a short click
+        tone(1000, 200);
+        return;
+    }
+    double secs = expr_num();
+    expect_char(',', "SYNTAX ERROR");
+    double pitch = expr_num();
+    if (error_msg) return;
+    if (secs < 0 || secs > 10 || pitch < -60 || pitch > 69) {
+        error("INTEGER OUT OF RANGE");
+        return;
+    }
+    double freq = 261.6255653 * num_exp(pitch / 12 * 0.69314718055994530942);
+    tone((int)freq, (int)(secs * 1000));
+}
+
+static int next_statement();
+
+static void st_continue() {
+    if (!cont_ok) { error("CAN'T CONTINUE"); return; }
+    cur_line = cont_line;
+    p = cont_pos;
+    jumped = 1;
+    if (cont_next && !next_statement()) running = 0;
+}
+
 static void st_colour(void (*set)(int)) {
     int c = expr_int(0, 7);
     if (!error_msg) set(c);
 }
 
-static void list_program() {
+static void list_program(int from) {
     char buf[MAX_TEXT * 4];
-    for (int off = 0; off < prog_len && !check_break(); off = line_next(off)) {
+    for (int off = line_find(from); off < prog_len && !check_break(); off = line_next(off)) {
         char num[8];
         itoa(line_num(off), num);
         print_string(num);
@@ -828,6 +1361,44 @@ static void execute_statement() {
     case T_PRINT:  st_print(); break;
     case T_LET:    st_let(); break;
     case T_GOTO:   go_to_line(expr_int(1, 9999)); break;
+    case T_GOSUB:  st_gosub(); break;
+    case T_RETURN: st_return(); break;
+    case T_INPUT:  st_input(); break;
+    case T_DIM:    st_dim(); break;
+    case T_READ:   st_read(); break;
+    case T_DATA:   st_data(); break;
+    case T_RESTORE:
+        restore(at_statement_end() ? 0 : expr_int(1, 9999));
+        break;
+    case T_RANDOMIZE:
+        if (at_statement_end()) {
+            randomize(timer_ms() * 2654435761u);
+        } else {
+            double n = expr_num();
+            if (!error_msg) randomize(n ? (unsigned int)to_int(n, 1, 2147483647)
+                                        : timer_ms() * 2654435761u);
+        }
+        break;
+    case T_PAUSE: {
+        int n = expr_int(0, 65535);
+        if (!error_msg) pause(n);
+        break;
+    }
+    case T_STOP:
+        cont_ok = cur_line >= 0;
+        cont_line = cur_line;
+        cont_pos = p;
+        cont_next = 1;
+        if (cur_line >= 0) {
+            char buf[8];
+            itoa(line_num(cur_line), buf);
+            print_string("STOPPED IN LINE ");
+            print_string(buf);
+            print_string("\n");
+        }
+        running = 0;
+        break;
+    case T_CONTINUE: st_continue(); break;
     case T_IF:     st_if(); break;
     case T_FOR:    st_for(); break;
     case T_NEXT:   st_next(); break;
@@ -838,6 +1409,7 @@ static void execute_statement() {
     case T_BORDER: st_colour(set_border); break;
     case T_END:    running = 0; break;
     case T_NEW:
+        cont_ok = 0;
         prog_len = 0;
         clear_variables();
         reset_run_state();
@@ -849,21 +1421,18 @@ static void execute_statement() {
         reset_run_state();
         break;
     case T_LIST:
-        list_program();
+        list_program(at_statement_end() ? 0 : expr_int(1, 9999));
         break;
     case T_RUN:
         clear_variables();
         reset_run_state();
+        cont_ok = 0;
         if (prog_len == 0) { running = 0; break; }
         cur_line = 0;
         p = (char *)line_text(0);
         jumped = 1;
         break;
-    case T_BEEP:
-        beep();
-        // Arguments (duration, pitch) are accepted but not used yet.
-        while (!at_statement_end()) p++;
-        break;
+    case T_BEEP:   st_beep(); break;
     default:
         if (isalpha(t)) st_let();          // LET is optional
         else error("SYNTAX ERROR");
@@ -884,40 +1453,63 @@ static void print_error(const char *msg, int num) {
 }
 
 /*
+ * Move p from the end of a statement to the start of the next one.
+ * Returns 0 at the end of the program (or of a typed line).
+ */
+static int next_statement() {
+    skip_space();
+    if (*p == ':') {
+        p++;
+        return 1;
+    }
+    if (*p == '\0') {
+        if (cur_line < 0) return 0;
+        cur_line = line_next(cur_line);
+        if (cur_line >= prog_len) return 0;
+        p = (char *)line_text(cur_line);
+        return 1;
+    }
+    error("SYNTAX ERROR");
+    return 0;
+}
+
+/*
  * Run statements from p until the end of the program (or of a typed
- * line, when cur_line is -1), an END, an error or BREAK.
+ * line, when cur_line is -1), an END, STOP, error or BREAK. Errors and
+ * BREAK leave CONTINUE set to run the statement again.
  */
 static void run() {
     running = 1;
     while (running) {
-        if (cur_line >= 0 && check_break()) {
-            char buf[8];
-            itoa(line_num(cur_line), buf);
-            print_string("BREAK IN LINE ");
-            print_string(buf);
+        if (break_requested || (cur_line >= 0 && check_break())) {
+            break_requested = 0;
+            print_string("BREAK");
+            if (cur_line >= 0) {
+                char buf[8];
+                itoa(line_num(cur_line), buf);
+                print_string(" IN LINE ");
+                print_string(buf);
+                cont_ok = 1;
+                cont_line = cur_line;
+                cont_pos = p;
+                cont_next = 0;
+            }
             print_string("\n");
             return;
         }
         error_msg = 0;
         pool_used = 0;
         jumped = 0;
-        int line = cur_line;
+        stmt_line = cur_line;
+        stmt_pos = p;
         execute_statement();
-        if (!error_msg && !jumped && running) {
-            skip_space();
-            if (*p == ':') {
-                p++;
-            } else if (*p == '\0') {
-                if (cur_line < 0) return;   // end of a typed line
-                cur_line = line_next(cur_line);
-                if (cur_line >= prog_len) return;
-                p = (char *)line_text(cur_line);
-            } else {
-                error("SYNTAX ERROR");
-            }
-        }
+        if (!error_msg && !jumped && running && !next_statement()) running = 0;
         if (error_msg) {
-            print_error(error_msg, line >= 0 ? line_num(line) : -1);
+            print_error(error_msg, stmt_line >= 0 ? line_num(stmt_line) : -1);
+            cont_ok = stmt_line >= 0;
+            cont_line = stmt_line;
+            cont_pos = stmt_pos;
+            cont_next = 0;
             return;
         }
     }
@@ -930,14 +1522,19 @@ static void run() {
 char input_buf[MAX_TEXT + 1];
 unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
 
-static void read_line() {
+// Read a line into input_buf. Returns -1 if Esc was pressed.
+static int read_line() {
     int pos = 0;
     while (1) {
         char c = get_char();
         if (c == '\r' || c == '\n') {
             print_string("\n");
             input_buf[pos] = '\0';
-            break;
+            return 0;
+        } else if (c == 27) {
+            print_string("\n");
+            input_buf[0] = '\0';
+            return -1;
         } else if (c == 8) {
             if (pos > 0) {
                 pos--;
@@ -953,6 +1550,7 @@ static void read_line() {
 }
 
 void basic_run() {
+    randomize(timer_ms() * 2654435761u);
     while (1) {
         read_line();
         char *s = input_buf;
@@ -977,6 +1575,7 @@ void basic_run() {
         if (num > 0) {
             // Editing the program invalidates any loops in progress.
             reset_run_state();
+            cont_ok = 0;
             if (len == 1) {
                 line_delete(num);         // just a number: delete the line
             } else {
