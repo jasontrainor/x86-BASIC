@@ -26,7 +26,7 @@ KEYS = {
     '*': 'shift-8', '/': 'slash', '(': 'shift-9', ')': 'shift-0',
     '"': 'shift-apostrophe', '$': 'shift-4', ';': 'semicolon', ',': 'comma',
     '<': 'shift-comma', '>': 'shift-dot', ':': 'shift-semicolon',
-    '\x1b': 'esc',
+    '\x1b': 'esc', '.': 'dot', '^': 'shift-6',
 }
 
 # (keystrokes, text that must then be on screen)
@@ -35,6 +35,7 @@ SESSION = [
      ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE']),
     ('IF 1<>2 THEN PRINT "NOT EQUAL"\n', ['NOT EQUAL']),
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
+    ('PRINT 1/3;" ";SQR 2;" ";2^0.5*1E10\n', ['0.33333333 1.4142136 1.4142136E+10']),
     ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]

@@ -19,6 +19,7 @@ _start:
     xor ebp, ebp
     mov [boot_drive], dl   ; the boot sector passes the BIOS drive number
     call dword enter_unreal
+    fninit                 ; x87 FPU in its default state (BASIC's numbers)
     sti
     cld                    ; GCC assumes the direction flag is clear
 

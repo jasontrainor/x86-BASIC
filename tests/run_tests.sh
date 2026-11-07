@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Ikernel \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/string.c || exit 1
+    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/string.c kernel/num.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
@@ -64,7 +64,7 @@ check "bad expression"    "PRINT 1+*2${NL}" "ERROR: SYNTAX ERROR"
 check "for without to"    "FOR I=1${NL}" "ERROR: TO EXPECTED"
 check "next without for"  "10 NEXT I${NL}RUN${NL}" "ERROR: NEXT WITHOUT FOR IN LINE 10"
 check "let without ="     "LET A 5${NL}" "ERROR: SYNTAX ERROR"
-check "unary minus"       "A=5${NL}PRINT -A*2${NL}PRINT -(2+3)${NL}" "${NL}-10${NL}" "${NL}-5${NL}"
+check "unary minus"       "A=5${NL}PRINT -A*2${NL}PRINT -(2+3)${NL}PRINT 3--2${NL}" "${NL}-10${NL}" "${NL}-5${NL}" "${NL}5${NL}"
 check "for stack full"    "10 FOR A=1 TO 2${NL}11 FOR B=1 TO 2${NL}12 FOR C=1 TO 2${NL}13 FOR D=1 TO 2${NL}14 FOR E=1 TO 2${NL}15 FOR F=1 TO 2${NL}16 FOR G=1 TO 2${NL}17 FOR H=1 TO 2${NL}18 FOR I=1 TO 2${NL}19 FOR J=1 TO 2${NL}20 FOR K=1 TO 2${NL}21 FOR L=1 TO 2${NL}22 FOR M=1 TO 2${NL}23 FOR N=1 TO 2${NL}24 FOR O=1 TO 2${NL}25 FOR P=1 TO 2${NL}26 FOR Q=1 TO 2${NL}RUN${NL}" "TOO MANY NESTED FOR LOOPS IN LINE 26"
 check "goto into for"     "10 FOR I=1 TO 2${NL}20 PRINT 7*7${NL}30 GOTO 10${NL}RUN${NL}" "[OUTPUT LIMIT]" "!TOO MANY"
 check "next skips inner"  "10 FOR I=1 TO 2${NL}20 FOR J=1 TO 5${NL}30 NEXT I${NL}40 PRINT I*100${NL}RUN${NL}" "${NL}300${NL}"
@@ -102,13 +102,28 @@ check "keyword prefix"    "10 PRINT 3*3${NL}RUNX${NL}" "ERROR: SYNTAX ERROR" "!$
 check "no space needed"   "10 GOTO30${NL}20 PRINT 1+1${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}"
 check "two-letter var"    "AB=5${NL}" "ERROR: SYNTAX ERROR"
 
-# --- Integer limits -----------------------------------------------------------
-check "most negative int" "A=0-2147483647-1${NL}PRINT A${NL}" "${NL}-2147483648${NL}"
-check "literal too big"   "PRINT 99999999999${NL}" "ERROR: NUMBER TOO BIG"
-check "multiply overflow" "PRINT 65536*65536${NL}" "ERROR: NUMBER TOO BIG"
-check "add overflow"      "PRINT 2147483647+1${NL}" "ERROR: NUMBER TOO BIG"
-check "min / -1"          "A=0-2147483647-1${NL}PRINT A/(0-1)${NL}" "ERROR: NUMBER TOO BIG"
-check "for at int max"    "10 FOR I=2147483646 TO 2147483647${NL}20 PRINT 1+1${NL}30 NEXT I${NL}40 PRINT 3+3${NL}RUN${NL}" "${NL}2${NL}2${NL}6${NL}"
+# --- Numbers ---------------------------------------------------------------
+check "decimals"          "PRINT 7/2${NL}PRINT 1/3${NL}PRINT 2/3${NL}PRINT .5+.25${NL}" "${NL}3.5${NL}" "${NL}0.33333333${NL}" "${NL}0.66666667${NL}" "${NL}0.75${NL}"
+check "negative decimal"  "PRINT -1/4${NL}PRINT 0-0.001${NL}" "${NL}-0.25${NL}" "${NL}-0.001${NL}"
+check "big whole numbers" "PRINT 2147483647+1${NL}PRINT 65536*65536${NL}" "${NL}2147483648${NL}" "${NL}4294967296${NL}"
+check "exponent output"   "PRINT 1E15${NL}PRINT 12345678912345${NL}PRINT 1/1E7${NL}" "${NL}1E+15${NL}" "${NL}1.2345679E+13${NL}" "${NL}1E-7${NL}"
+check "exponent input"    "PRINT 1.5E3${NL}PRINT 25E-2${NL}" "${NL}1500${NL}" "${NL}0.25${NL}"
+check "small fixed"       "PRINT 0.00012${NL}" "${NL}0.00012${NL}"
+check "rounding"          "PRINT 0.1+0.2${NL}PRINT 1/3*3${NL}" "${NL}0.3${NL}" "${NL}1${NL}"
+check "literal too big"   "PRINT 1E400${NL}" "ERROR: NUMBER TOO BIG"
+check "multiply overflow" "PRINT 1E200*1E200${NL}" "ERROR: NUMBER TOO BIG"
+check "power"             "PRINT 2^10${NL}PRINT -2^2${NL}PRINT 2^-1${NL}PRINT (-2)^3${NL}PRINT 2^0.5${NL}" "${NL}1024${NL}" "${NL}-4${NL}" "${NL}0.5${NL}" "${NL}-8${NL}" "${NL}1.4142136${NL}"
+check "power errors"      "PRINT (-8)^(1/3)${NL}PRINT 0^-1${NL}" "ERROR: INVALID ARGUMENT"
+check "functions"         "PRINT SQR 16${NL}PRINT ABS -3${NL}PRINT INT 2.7${NL}PRINT INT -2.5${NL}PRINT SGN -9${NL}" "${NL}4${NL}" "${NL}3${NL}" "${NL}2${NL}" "${NL}-3${NL}" "${NL}-1${NL}"
+check "trig"              "PRINT SIN (PI/2)${NL}PRINT COS 0${NL}PRINT INT (ATN 1*4*1000)${NL}PRINT TAN (PI/4)${NL}" "${NL}1${NL}" "${NL}1${NL}" "${NL}3141${NL}"
+check "asn acs"           "PRINT ASN 1*2${NL}PRINT ACS 1${NL}" "${NL}3.1415927${NL}" "${NL}0${NL}"
+check "ln exp"            "PRINT LN EXP 2${NL}PRINT EXP 1${NL}PRINT EXP 0${NL}" "${NL}2${NL}" "${NL}2.7182818${NL}" "${NL}1${NL}"
+check "function binding"  "PRINT SQR 4*3${NL}PRINT SQR (4*4)${NL}" "${NL}6${NL}" "${NL}4${NL}"
+check "invalid argument"  "PRINT SQR -1${NL}" "ERROR: INVALID ARGUMENT"
+check "ln of zero"        "PRINT LN 0${NL}" "ERROR: INVALID ARGUMENT"
+check "decimal for step"  "10 FOR I=0 TO 1 STEP 0.25${NL}20 PRINT I${NL}30 NEXT I${NL}RUN${NL}" "${NL}0${NL}0.25${NL}0.5${NL}0.75${NL}1${NL}"
+check "integer range"     "INK 9${NL}" "ERROR: INTEGER OUT OF RANGE"
+check "goto rounds"       "10 GOTO 19.6${NL}20 PRINT 4*5${NL}RUN${NL}" "${NL}20${NL}"
 
 # --- BREAK --------------------------------------------------------------------
 ESC=$'\x1b'

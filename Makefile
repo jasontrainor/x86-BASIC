@@ -4,7 +4,9 @@ LD = ld
 
 CFLAGS = -m16 -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib -Os -Wall -Ikernel \
          -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
-         -mgeneral-regs-only -DBIOS_KERNEL
+         -march=i686 -mfpmath=387 -mno-mmx -mno-sse -mno-sse2 -DBIOS_KERNEL
+# Floating point uses the x87 FPU only: SSE instructions fault until an
+# OS enables them, and this kernel never does.
 
 .PHONY: all test boot-test clean
 
@@ -28,11 +30,14 @@ bios.o: kernel/bios.c kernel/bios.h
 string.o: kernel/string.c kernel/string.h
 	$(CC) $(CFLAGS) -c kernel/string.c -o string.o
 
-basic.o: kernel/basic.c kernel/basic.h kernel/bios.h kernel/string.h kernel/mem.h
+num.o: kernel/num.c kernel/num.h kernel/string.h
+	$(CC) $(CFLAGS) -c kernel/num.c -o num.o
+
+basic.o: kernel/basic.c kernel/basic.h kernel/bios.h kernel/string.h kernel/mem.h kernel/num.h
 	$(CC) $(CFLAGS) -c kernel/basic.c -o basic.o
 
-kernel.bin: kernel_entry.o kernel.o bios.o string.o basic.o linker.ld
-	$(LD) -m elf_i386 -T linker.ld --oformat binary kernel_entry.o kernel.o bios.o string.o basic.o -o kernel.bin
+kernel.bin: kernel_entry.o kernel.o bios.o string.o num.o basic.o linker.ld
+	$(LD) -m elf_i386 -T linker.ld --oformat binary kernel_entry.o kernel.o bios.o string.o num.o basic.o -o kernel.bin
 
 os.img: boot.bin kernel.bin
 	cat boot.bin kernel.bin > os.img
