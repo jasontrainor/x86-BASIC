@@ -69,5 +69,12 @@ check "for stack full"    "10 FOR A=1 TO 2${NL}11 FOR B=1 TO 2${NL}12 FOR C=1 TO
 check "goto into for"     "10 FOR I=1 TO 2${NL}20 PRINT 7*7${NL}30 GOTO 10${NL}RUN${NL}" "[OUTPUT LIMIT]" "!TOO MANY"
 check "next skips inner"  "10 FOR I=1 TO 2${NL}20 FOR J=1 TO 5${NL}30 NEXT I${NL}40 PRINT I*100${NL}RUN${NL}" "${NL}300${NL}"
 
+# --- Input bounds ---------------------------------------------------------
+A60=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+check "line too long"     "10 PRINT \"${A60}\"${NL}20 PRINT 2*2${NL}LIST${NL}" "ERROR: LINE TOO LONG IN LINE 10" "LIST${NL}20 PRINT 2*2${NL}"
+check "line max length"   "10 PRINT \"${A60:0:54}\"${NL}LIST${NL}" "!ERROR"
+check "string too long"   "A\$=\"${A60}${A60}\"${NL}" "ERROR: STRING TOO LONG"
+check "line number range" "0 PRINT 1${NL}99999999999 PRINT 1${NL}" "LINE NUMBER MUST BE 1-9999"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

@@ -169,6 +169,7 @@ void assignment() {
         int i = 0;
         while (*p && *p != '"' && i < 63) strs[var_idx][i++] = *p++;
         strs[var_idx][i] = '\0';
+        if (*p && *p != '"') { error("STRING TOO LONG"); return; }
         if (*p == '"') p++;
     } else {
         int val = expr();
@@ -324,6 +325,19 @@ void execute_statement() {
     }
 }
 
+// Print "ERROR: <msg>", plus " IN LINE <n>" when line_num >= 0.
+void print_error(const char* msg, int line_num) {
+    print_string("ERROR: ");
+    print_string(msg);
+    if (line_num >= 0) {
+        char buf[16];
+        itoa(line_num, buf);
+        print_string(" IN LINE ");
+        print_string(buf);
+    }
+    print_string("\n");
+}
+
 // Run one complete statement, flagging anything left over on the line.
 // Returns 1 on success; on failure prints the error and returns 0.
 int run_statement() {
@@ -334,15 +348,7 @@ int run_statement() {
     if (!error_msg && *p) error("SYNTAX ERROR");
     if (!error_msg) return 1;
 
-    print_string("ERROR: ");
-    print_string(error_msg);
-    if (line >= 0 && line < num_lines) {
-        char buf[16];
-        itoa(program[line].num, buf);
-        print_string(" IN LINE ");
-        print_string(buf);
-    }
-    print_string("\n");
+    print_error(error_msg, line >= 0 && line < num_lines ? program[line].num : -1);
     return 0;
 }
 
@@ -367,11 +373,15 @@ void list_program() {
     }
 }
 
-void add_line(int num, const char* text) {
+// Store or replace a program line. Returns an error message, or 0 on success.
+const char* add_line(int num, const char* text) {
+    if (strlen(text) > MAX_LINE_LEN - 1) {
+        return "LINE TOO LONG";   // would overflow program[].text
+    }
     for (int i = 0; i < num_lines; i++) {
         if (program[i].num == num) {
             strcpy(program[i].text, text);
-            return;
+            return 0;
         } else if (program[i].num > num) {
             for (int j = num_lines; j > i; j--) {
                 program[j].num = program[j-1].num;
@@ -380,12 +390,13 @@ void add_line(int num, const char* text) {
             program[i].num = num;
             strcpy(program[i].text, text);
             num_lines++;
-            return;
+            return 0;
         }
     }
     program[num_lines].num = num;
     strcpy(program[num_lines].text, text);
     num_lines++;
+    return 0;
 }
 
 void basic_run() {
@@ -397,9 +408,13 @@ void basic_run() {
         
         if (isdigit(*p)) {
             int num = 0;
-            while (isdigit(*p)) {
+            while (isdigit(*p) && num <= 9999) {
                 num = num * 10 + (*p - '0');
                 p++;
+            }
+            if (num < 1 || num > 9999) {
+                print_error("LINE NUMBER MUST BE 1-9999", -1);
+                continue;
             }
             skip_space();
             if (*p == '\0') {
@@ -414,7 +429,8 @@ void basic_run() {
                     }
                 }
             } else {
-                add_line(num, p);
+                const char* err = add_line(num, p);
+                if (err) print_error(err, num);
             }
         } else if (strncmp(p, "RUN", 3) == 0 || strncmp(p, "run", 3) == 0) {
             run_program();
