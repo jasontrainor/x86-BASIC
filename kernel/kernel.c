@@ -18,11 +18,12 @@ void main() {
     set_border(7);
     clear_screen();
     
-    // Spectrum boot screen: Blank screen, copyright at bottom left
+    // Spectrum-style boot screen: blank, with a banner at the bottom left.
+    // (Our own name rather than a real company's copyright notice.)
     for (int i = 0; i < 23; i++) {
         print_string("\n");
     }
-    print_string("(C) 1982 Sinclair Research Ltd\n");
+    print_string("x86 BASIC - Spectrum-style BASIC for PCs\n");
     
     basic_run();
 }

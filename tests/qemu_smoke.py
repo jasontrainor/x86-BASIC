@@ -140,7 +140,7 @@ def run(mode, image, show):
             deadline = time.time() + 20
             while True:
                 text, _ = screen_text(mon, tmp)
-                if 'x86 BASIC' in text or 'Sinclair' in text:
+                if 'x86 BASIC' in text:
                     break
                 if time.time() > deadline:
                     print(f'[{mode}] FAIL: kernel never started. Screen:\n{text}')
