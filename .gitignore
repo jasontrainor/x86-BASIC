@@ -1,0 +1,8 @@
+# Build outputs
+*.o
+*.bin
+*.elf
+os.img
+
+# Host test harness build
+tests/build/
