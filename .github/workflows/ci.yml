@@ -1,0 +1,41 @@
+# Build the disk image and run all the tests on every push and pull request.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm qemu-system-x86 ovmf
+
+      # GitHub's Linux runners support KVM; the boot test uses it when it
+      # can (it catches real-mode bugs that QEMU's emulator doesn't).
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build
+        run: make
+
+      - name: Interpreter tests (host, with sanitizers)
+        run: make test
+
+      - name: "Boot tests (QEMU: floppy, hard disk, USB, UEFI)"
+        run: make boot-test
+
+      - name: Keep the disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: os.img
+          path: os.img
