@@ -60,6 +60,24 @@ void error(const char* msg) {
     if (!error_msg) error_msg = msg;
 }
 
+void skip_space();
+
+// If the text at p is the keyword kw (any letter case) and is not just
+// the start of a longer word, consume it and return 1. Variables are a
+// single letter, so a keyword followed by another letter (e.g. "RUNX")
+// is never a match. Digits and symbols may follow directly ("GOTO10").
+int keyword(const char* kw) {
+    skip_space();
+    int i = 0;
+    while (kw[i]) {
+        if ((p[i] & ~32) != kw[i] || !isalpha(p[i])) return 0;
+        i++;
+    }
+    if (isalpha(p[i])) return 0;
+    p += i;
+    return 1;
+}
+
 int expr();
 int term();
 int factor();
@@ -200,8 +218,7 @@ void assignment() {
 
 void execute_statement() {
     skip_space();
-    if (strncmp(p, "PRINT", 5) == 0 || strncmp(p, "print", 5) == 0) {
-        p += 5;
+    if (keyword("PRINT")) {
         skip_space();
         while (*p) {
             if (*p == '"') {
@@ -226,11 +243,9 @@ void execute_statement() {
             skip_space();
         }
         print_string("\n");
-    } else if (strncmp(p, "LET", 3) == 0 || strncmp(p, "let", 3) == 0) {
-        p += 3;
+    } else if (keyword("LET")) {
         assignment();
-    } else if (strncmp(p, "GOTO", 4) == 0 || strncmp(p, "goto", 4) == 0) {
-        p += 4;
+    } else if (keyword("GOTO")) {
         int target = expr();
         if (error_msg) return;
         for (int i = 0; i < num_lines; i++) {
@@ -240,13 +255,11 @@ void execute_statement() {
             }
         }
         error("LINE NOT FOUND");
-    } else if (strncmp(p, "IF", 2) == 0 || strncmp(p, "if", 2) == 0) {
-        p += 2;
+    } else if (keyword("IF")) {
         int cond = condition();
         if (error_msg) return;
         skip_space();
-        if (strncmp(p, "THEN", 4) == 0 || strncmp(p, "then", 4) == 0) {
-            p += 4;
+        if (keyword("THEN")) {
             if (cond) {
                 execute_statement();
             } else {
@@ -255,8 +268,7 @@ void execute_statement() {
         } else {
             error("THEN EXPECTED");
         }
-    } else if (strncmp(p, "FOR", 3) == 0 || strncmp(p, "for", 3) == 0) {
-        p += 3;
+    } else if (keyword("FOR")) {
         int var_idx = parse_var();
         if (error_msg) return;
         skip_space();
@@ -265,16 +277,14 @@ void execute_statement() {
         int start_val = expr();
         skip_space();
         if (error_msg) return;
-        if (strncmp(p, "TO", 2) != 0 && strncmp(p, "to", 2) != 0) {
+        if (!keyword("TO")) {
             error("TO EXPECTED");
             return;
         }
-        p += 2;
         int limit = expr();
         int step = 1;
         skip_space();
-        if (strncmp(p, "STEP", 4) == 0 || strncmp(p, "step", 4) == 0) {
-            p += 4;
+        if (keyword("STEP")) {
             step = expr();
         }
         if (error_msg) return;
@@ -293,8 +303,7 @@ void execute_statement() {
         for_stack[for_sp].step = step;
         for_stack[for_sp].line_index = current_line;
         for_sp++;
-    } else if (strncmp(p, "NEXT", 4) == 0 || strncmp(p, "next", 4) == 0) {
-        p += 4;
+    } else if (keyword("NEXT")) {
         int var_idx = parse_var();
         if (error_msg) return;
         // Find the matching loop; any inner loops left unfinished are dropped.
@@ -313,28 +322,22 @@ void execute_statement() {
         } else {
             for_sp--;
         }
-    } else if (strncmp(p, "CLS", 3) == 0 || strncmp(p, "cls", 3) == 0) {
-        p += 3;
+    } else if (keyword("CLS")) {
         clear_screen();
-    } else if (strncmp(p, "BEEP", 4) == 0 || strncmp(p, "beep", 4) == 0) {
-        p += 4;
+    } else if (keyword("BEEP")) {
         beep();
         // Arguments (duration, pitch) are accepted but not used yet.
         while (*p) p++;
-    } else if (strncmp(p, "INK", 3) == 0 || strncmp(p, "ink", 3) == 0) {
-        p += 3;
+    } else if (keyword("INK")) {
         int c = expr();
         set_ink(c);
-    } else if (strncmp(p, "PAPER", 5) == 0 || strncmp(p, "paper", 5) == 0) {
-        p += 5;
+    } else if (keyword("PAPER")) {
         int c = expr();
         set_paper(c);
-    } else if (strncmp(p, "BORDER", 6) == 0 || strncmp(p, "border", 6) == 0) {
-        p += 6;
+    } else if (keyword("BORDER")) {
         int c = expr();
         set_border(c);
-    } else if (strncmp(p, "END", 3) == 0 || strncmp(p, "end", 3) == 0) {
-        p += 3;
+    } else if (keyword("END")) {
         current_line = num_lines;
     } else if (isalpha(*p)) {
         // Must come last: every keyword above also starts with a letter.
@@ -458,11 +461,11 @@ void basic_run() {
                 const char* err = add_line(num, p);
                 if (err) print_error(err, num);
             }
-        } else if (strncmp(p, "RUN", 3) == 0 || strncmp(p, "run", 3) == 0) {
+        } else if (keyword("RUN")) {
             run_program();
-        } else if (strncmp(p, "LIST", 4) == 0 || strncmp(p, "list", 4) == 0) {
+        } else if (keyword("LIST")) {
             list_program();
-        } else if (strncmp(p, "NEW", 3) == 0 || strncmp(p, "new", 3) == 0) {
+        } else if (keyword("NEW")) {
             num_lines = 0;
             for_sp = 0;
             clear_screen();
