@@ -35,6 +35,11 @@ os.img: boot.bin kernel.bin
 test:
 	tests/run_tests.sh
 
+# Boot os.img headless in QEMU as floppy, hard disk and USB stick, and
+# check a short BASIC session on screen.
+boot-test: os.img
+	tests/qemu_smoke.py --mode all
+
 clean:
 	rm -f *.bin *.o kernel/*.o boot/*.bin os.img
 	rm -rf tests/build
