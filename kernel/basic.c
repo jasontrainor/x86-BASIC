@@ -93,13 +93,19 @@ int factor() {
     if (isdigit(*p)) {
         int val = 0;
         while (isdigit(*p)) {
-            val = val * 10 + (*p - '0');
+            if (__builtin_mul_overflow(val, 10, &val) ||
+                __builtin_add_overflow(val, *p - '0', &val)) {
+                error("NUMBER TOO BIG");
+                return 0;
+            }
             p++;
         }
         return val;
     } else if (*p == '-') {
         p++;
-        return -factor();
+        int val = factor();
+        if (__builtin_sub_overflow(0, val, &val)) error("NUMBER TOO BIG");
+        return val;
     } else if (*p == '+') {
         p++;
         return factor();
@@ -125,9 +131,17 @@ int term() {
     while (!error_msg && (*p == '*' || *p == '/')) {
         char op = *p++;
         int next_val = factor();
-        if (op == '*') val *= next_val;
-        else if (next_val == 0) error("DIVISION BY ZERO");
-        else val /= next_val;
+        if (error_msg) break;
+        if (op == '*') {
+            if (__builtin_mul_overflow(val, next_val, &val)) error("NUMBER TOO BIG");
+        } else if (next_val == 0) {
+            error("DIVISION BY ZERO");
+        } else if (next_val == -1) {
+            // INT_MIN / -1 overflows (and traps on x86)
+            if (__builtin_sub_overflow(0, val, &val)) error("NUMBER TOO BIG");
+        } else {
+            val /= next_val;
+        }
         skip_space();
     }
     return val;
@@ -139,8 +153,10 @@ int expr() {
     while (!error_msg && (*p == '+' || *p == '-')) {
         char op = *p++;
         int next_val = term();
-        if (op == '+') val += next_val;
-        else if (op == '-') val -= next_val;
+        if (error_msg) break;
+        int overflow = (op == '+') ? __builtin_add_overflow(val, next_val, &val)
+                                   : __builtin_sub_overflow(val, next_val, &val);
+        if (overflow) error("NUMBER TOO BIG");
         skip_space();
     }
     return val;
@@ -314,10 +330,11 @@ void execute_statement() {
             return;
         }
         for_sp = i + 1;
-        vars[var_idx] += for_stack[i].step;
         int limit = for_stack[i].limit;
         int step = for_stack[i].step;
-        if ((step > 0 && vars[var_idx] <= limit) || (step < 0 && vars[var_idx] >= limit)) {
+        // A counter that would overflow has necessarily passed the limit.
+        int done = __builtin_add_overflow(vars[var_idx], step, &vars[var_idx]);
+        if (!done && ((step > 0 && vars[var_idx] <= limit) || (step < 0 && vars[var_idx] >= limit))) {
             current_line = for_stack[i].line_index;
         } else {
             for_sp--;

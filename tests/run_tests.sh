@@ -102,5 +102,13 @@ check "keyword prefix"    "10 PRINT 3*3${NL}RUNX${NL}" "ERROR: SYNTAX ERROR" "!$
 check "no space needed"   "10 GOTO30${NL}20 PRINT 1+1${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}"
 check "two-letter var"    "AB=5${NL}" "ERROR: SYNTAX ERROR"
 
+# --- Integer limits -----------------------------------------------------------
+check "most negative int" "A=0-2147483647-1${NL}PRINT A${NL}" "${NL}-2147483648${NL}"
+check "literal too big"   "PRINT 99999999999${NL}" "ERROR: NUMBER TOO BIG"
+check "multiply overflow" "PRINT 65536*65536${NL}" "ERROR: NUMBER TOO BIG"
+check "add overflow"      "PRINT 2147483647+1${NL}" "ERROR: NUMBER TOO BIG"
+check "min / -1"          "A=0-2147483647-1${NL}PRINT A/(0-1)${NL}" "ERROR: NUMBER TOO BIG"
+check "for at int max"    "10 FOR I=2147483646 TO 2147483647${NL}20 PRINT 1+1${NL}30 NEXT I${NL}40 PRINT 3+3${NL}RUN${NL}" "${NL}2${NL}2${NL}6${NL}"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

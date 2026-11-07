@@ -61,19 +61,18 @@ void itoa(int val, char* buf) {
     char temp[16];
     int i = 0;
     int sign = 0;
+    // Work in unsigned so that -2147483648 (which has no positive int
+    // counterpart) converts correctly.
+    unsigned int u = (unsigned int)val;
 
     if (val < 0) {
         sign = 1;
-        val = -val;
+        u = 0u - u;
     }
-    if (val == 0) {
-        temp[i++] = '0';
-    } else {
-        while (val > 0) {
-            temp[i++] = (val % 10) + '0';
-            val /= 10;
-        }
-    }
+    do {
+        temp[i++] = (u % 10) + '0';
+        u /= 10;
+    } while (u > 0);
     if (sign) temp[i++] = '-';
     
     int j = 0;
