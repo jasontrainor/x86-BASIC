@@ -76,5 +76,9 @@ check "line max length"   "10 PRINT \"${A60:0:54}\"${NL}LIST${NL}" "!ERROR"
 check "string too long"   "A\$=\"${A60}${A60}\"${NL}" "ERROR: STRING TOO LONG"
 check "line number range" "0 PRINT 1${NL}99999999999 PRINT 1${NL}" "LINE NUMBER MUST BE 1-9999"
 
+FULL=""; for i in $(seq 1 256); do FULL+="$i PRINT 1${NL}"; done
+check "program full"      "${FULL}257 PRINT 1${NL}" "ERROR: PROGRAM FULL IN LINE 257"
+check "full: replace ok"  "${FULL}256 PRINT 2${NL}" "!PROGRAM FULL"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

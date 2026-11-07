@@ -382,7 +382,14 @@ const char* add_line(int num, const char* text) {
         if (program[i].num == num) {
             strcpy(program[i].text, text);
             return 0;
-        } else if (program[i].num > num) {
+        }
+    }
+    // Not a replacement, so a new slot is needed.
+    if (num_lines >= MAX_LINES) {
+        return "PROGRAM FULL";
+    }
+    for (int i = 0; i < num_lines; i++) {
+        if (program[i].num > num) {
             for (int j = num_lines; j > i; j--) {
                 program[j].num = program[j-1].num;
                 strcpy(program[j].text, program[j-1].text);
