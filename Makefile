@@ -32,5 +32,9 @@ os.img: boot.bin kernel.bin
 	# Pad to 1.44MB floppy size
 	dd if=/dev/zero of=os.img bs=512 seek=2880 count=0
 
+test:
+	tests/run_tests.sh
+
 clean:
 	rm -f *.bin *.o kernel/*.o boot/*.bin os.img
+	rm -rf tests/build
