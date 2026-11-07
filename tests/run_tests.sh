@@ -80,5 +80,12 @@ FULL=""; for i in $(seq 1 256); do FULL+="$i PRINT 1${NL}"; done
 check "program full"      "${FULL}257 PRINT 1${NL}" "ERROR: PROGRAM FULL IN LINE 257"
 check "full: replace ok"  "${FULL}256 PRINT 2${NL}" "!PROGRAM FULL"
 
+# --- Variable names are validated ------------------------------------------
+check "let digit var"     "LET 5=3${NL}" "ERROR: BAD VARIABLE NAME"
+check "let string digit"  "LET 5\$=\"X\"${NL}" "ERROR: BAD VARIABLE NAME"
+check "for no var"        "FOR =1 TO 5${NL}" "ERROR: BAD VARIABLE NAME"
+check "next no var"       "10 FOR I=1 TO 2${NL}20 NEXT${NL}RUN${NL}" "ERROR: BAD VARIABLE NAME IN LINE 20"
+check "lowercase var"     "let z=9*9${NL}PRINT Z${NL}" "${NL}81${NL}"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

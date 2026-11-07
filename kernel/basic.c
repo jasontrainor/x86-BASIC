@@ -146,11 +146,22 @@ int condition() {
     return 0;
 }
 
+// Parse a variable name (a single letter A-Z, either case) and return
+// its index 0-25. Anything else is an error, so callers can safely use
+// the result to index vars[] and strs[].
+int parse_var() {
+    skip_space();
+    if (!isalpha(*p)) {
+        error("BAD VARIABLE NAME");
+        return 0;
+    }
+    return (*p++ & ~32) - 'A';
+}
+
 // [LET] var = expr   or   [LET] var$ = "text"   (the LET keyword already consumed)
 void assignment() {
-    skip_space();
-    int var_idx = (*p & ~32) - 'A';
-    p++;
+    int var_idx = parse_var();
+    if (error_msg) return;
     int is_str = 0;
     if (*p == '$') { is_str = 1; p++; }
     skip_space();
@@ -236,9 +247,8 @@ void execute_statement() {
         }
     } else if (strncmp(p, "FOR", 3) == 0 || strncmp(p, "for", 3) == 0) {
         p += 3;
-        skip_space();
-        int var_idx = (*p & ~32) - 'A';
-        p++;
+        int var_idx = parse_var();
+        if (error_msg) return;
         skip_space();
         if (*p != '=') { error("SYNTAX ERROR"); return; }
         p++;
@@ -275,9 +285,8 @@ void execute_statement() {
         for_sp++;
     } else if (strncmp(p, "NEXT", 4) == 0 || strncmp(p, "next", 4) == 0) {
         p += 4;
-        skip_space();
-        int var_idx = (*p & ~32) - 'A';
-        p++;
+        int var_idx = parse_var();
+        if (error_msg) return;
         // Find the matching loop; any inner loops left unfinished are dropped.
         int i = for_sp - 1;
         while (i >= 0 && for_stack[i].var_idx != var_idx) i--;
