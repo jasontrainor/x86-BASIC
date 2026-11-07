@@ -6,3 +6,5 @@ os.img
 
 # Host test harness build
 tests/build/
+__pycache__/
+*.pyc
