@@ -1,7 +1,6 @@
 [bits 16]
 [extern main]
-
-STACK_TOP equ 0x9000
+[extern __stack_top]       ; defined in linker.ld, with the memory map
 
 ; Placed first in the image by linker.ld, so this is at 0x1000.
 section .text.entry progbits alloc exec nowrite align=1
@@ -16,7 +15,7 @@ _start:
     mov ds, ax
     mov es, ax
     mov ss, ax
-    mov esp, STACK_TOP
+    mov esp, __stack_top
     xor ebp, ebp
     sti
     cld                    ; GCC assumes the direction flag is clear
