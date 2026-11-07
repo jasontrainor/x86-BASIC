@@ -4,6 +4,44 @@ int cursor_x = 0;
 int cursor_y = 0;
 unsigned char current_color = 0x70; // Spectrum default: White paper (7<<4), Black ink (0)
 
+/*
+ * Text-mode video memory lives at physical 0xB8000. This code runs in
+ * 16-bit real mode, where an address is segment*16 + offset and the
+ * offset must stay below 64KB, so 0xB8000 can't be reached through the
+ * zero-based DS that the C code uses. Instead, load FS (which GCC never
+ * uses) with segment 0xB800 and access cells as small FS-relative offsets.
+ * QEMU doesn't enforce the 64KB limit, but real CPUs fault on it.
+ */
+#define VGA_SEGMENT 0xB800
+#define VGA_COLS 80
+#define VGA_ROWS 25
+
+static void vga_put(int cell, unsigned short value) {
+    __asm__ __volatile__ (
+        "mov %w2, %%fs\n\t"
+        "movw %w0, %%fs:(%1)"
+        :
+        : "r" (value), "r" (cell * 2), "r" (VGA_SEGMENT)
+        : "memory"
+    );
+}
+
+static unsigned short vga_get(int cell) {
+    unsigned short value;
+    __asm__ __volatile__ (
+        "mov %w2, %%fs\n\t"
+        "movw %%fs:(%1), %w0"
+        : "=r" (value)
+        : "r" (cell * 2), "r" (VGA_SEGMENT)
+        : "memory"
+    );
+    return value;
+}
+
+static unsigned short vga_cell(char c) {
+    return (unsigned char)c | (current_color << 8);
+}
+
 // Map Spectrum colors (0-7) to VGA text colors
 unsigned char spec_to_vga(int color) {
     switch (color) {
@@ -33,6 +71,7 @@ void set_border(int c) {
         "int $0x10"
         :
         : "a" (0x0B00), "b" (vga_col)
+        : "cc"
     );
 }
 
@@ -41,14 +80,13 @@ void update_cursor() {
         "int $0x10"
         :
         : "a" (0x0200), "b" (0x0000), "d" ((cursor_y << 8) | cursor_x)
+        : "cc"
     );
 }
 
 void clear_screen() {
-    unsigned char* vga = (unsigned char*)0xB8000;
-    for (int i = 0; i < 80 * 25; i++) {
-        vga[i * 2] = ' ';
-        vga[i * 2 + 1] = current_color;
+    for (int i = 0; i < VGA_COLS * VGA_ROWS; i++) {
+        vga_put(i, vga_cell(' '));
     }
     cursor_x = 0;
     cursor_y = 0;
@@ -56,16 +94,13 @@ void clear_screen() {
 }
 
 void scroll() {
-    unsigned char* vga = (unsigned char*)0xB8000;
-    for (int i = 0; i < 80 * 24; i++) {
-        vga[i * 2] = vga[(i + 80) * 2];
-        vga[i * 2 + 1] = vga[(i + 80) * 2 + 1];
+    for (int i = 0; i < VGA_COLS * (VGA_ROWS - 1); i++) {
+        vga_put(i, vga_get(i + VGA_COLS));
     }
-    for (int i = 80 * 24; i < 80 * 25; i++) {
-        vga[i * 2] = ' ';
-        vga[i * 2 + 1] = current_color;
+    for (int i = VGA_COLS * (VGA_ROWS - 1); i < VGA_COLS * VGA_ROWS; i++) {
+        vga_put(i, vga_cell(' '));
     }
-    cursor_y = 24;
+    cursor_y = VGA_ROWS - 1;
 }
 
 void print_char(char c) {
@@ -77,23 +112,17 @@ void print_char(char c) {
     } else if (c == 8) {
         if (cursor_x > 0) {
             cursor_x--;
-            unsigned char* vga = (unsigned char*)0xB8000;
-            int offset = (cursor_y * 80 + cursor_x) * 2;
-            vga[offset] = ' ';
-            vga[offset + 1] = current_color;
+            vga_put(cursor_y * VGA_COLS + cursor_x, vga_cell(' '));
         }
     } else {
-        unsigned char* vga = (unsigned char*)0xB8000;
-        int offset = (cursor_y * 80 + cursor_x) * 2;
-        vga[offset] = c;
-        vga[offset + 1] = current_color;
+        vga_put(cursor_y * VGA_COLS + cursor_x, vga_cell(c));
         cursor_x++;
-        if (cursor_x >= 80) {
+        if (cursor_x >= VGA_COLS) {
             cursor_x = 0;
             cursor_y++;
         }
     }
-    if (cursor_y >= 25) {
+    if (cursor_y >= VGA_ROWS) {
         scroll();
     }
     update_cursor();
@@ -115,6 +144,7 @@ char get_char() {
         "int $0x16"
         : "=a" (ax)
         : "a" (0x0000)
+        : "cc"
     );
     return (char)(ax & 0xFF);
 }
@@ -140,11 +170,15 @@ void beep() {
 }
 
 void init_video() {
-    // Hide cursor using standard INT 10h trick (set start line > end line)
-    // Actually, Spectrum has a block cursor. Let's make it a block cursor!
-    __asm__ __volatile__ (
-        "int $0x10"
-        :
-        : "a" (0x0100), "c" (0x000F) // CH=0 (top), CL=15 (bottom) - full block
-    );
+    // Real BIOSes may leave a graphics or vendor-logo mode active, so
+    // explicitly select 80x25 colour text mode (this also clears it).
+    __asm__ __volatile__ ("int $0x10" : : "a" (0x0003) : "cc", "memory");
+
+    // Attribute bit 7 means "blink" by default on real VGA hardware, which
+    // would make bright paper colours (e.g. white, 15) flash. Switch it to
+    // mean "bright background" so all 16 paper colours are usable.
+    __asm__ __volatile__ ("int $0x10" : : "a" (0x1003), "b" (0x0000) : "cc");
+
+    // Spectrum-style full block cursor: CH=0 (top line), CL=15 (bottom).
+    __asm__ __volatile__ ("int $0x10" : : "a" (0x0100), "c" (0x000F) : "cc");
 }
