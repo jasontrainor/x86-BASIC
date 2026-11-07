@@ -168,24 +168,50 @@ int check_break() {
     }
 }
 
+static void outb(unsigned short port, unsigned char val) {
+    __asm__ __volatile__ ("outb %0, %1" : : "a" (val), "Nd" (port));
+}
+
+static unsigned char inb(unsigned short port) {
+    unsigned char val;
+    __asm__ __volatile__ ("inb %1, %0" : "=a" (val) : "Nd" (port));
+    return val;
+}
+
+// BIOS timer tick count at 0040:006C, incremented ~18.2 times a second
+// by the BIOS timer interrupt. Lies inside segment 0, so DS can reach it.
+// (Read via asm: GCC warns about dereferencing constant addresses < 4KB.)
+static unsigned int bios_ticks() {
+    unsigned int t;
+    __asm__ __volatile__ ("movl 0x046C, %0" : "=r" (t) : : "memory");
+    return t;
+}
+
+// Wait for the given number of timer ticks (~55ms each). This is
+// independent of CPU speed, unlike a busy loop. If the timer interrupt
+// isn't running, the tick count never changes, so give up after a
+// bounded number of polls rather than hanging.
+static void wait_ticks(int n) {
+    unsigned int last = bios_ticks();
+    unsigned long polls = 0;
+    while (n > 0 && polls < 100000000UL) {
+        unsigned int now = bios_ticks();
+        if (now != last) {
+            last = now;
+            n--;
+        }
+        polls++;
+    }
+}
+
 void beep() {
-    __asm__ __volatile__ (
-        "mov $0xB6, %%al \n"
-        "out %%al, $0x43 \n"
-        "mov $0xA9, %%al \n"
-        "out %%al, $0x42 \n"
-        "mov $0x04, %%al \n"
-        "out %%al, $0x42 \n"
-        "in $0x61, %%al \n"
-        "or $0x03, %%al \n"
-        "out %%al, $0x61 \n"
-        "mov $0x5FFFF, %%ecx \n"
-        "1: loop 1b \n"
-        "in $0x61, %%al \n"
-        "and $0xFC, %%al \n"
-        "out %%al, $0x61 \n"
-        : : : "eax", "ecx"
-    );
+    // PIT channel 2, square wave, divisor 1193 -> ~1kHz tone.
+    outb(0x43, 0xB6);
+    outb(0x42, 1193 & 0xFF);
+    outb(0x42, 1193 >> 8);
+    outb(0x61, inb(0x61) | 0x03);    // gate the speaker on
+    wait_ticks(4);                   // ~0.2 seconds
+    outb(0x61, inb(0x61) & ~0x03);   // and off
 }
 
 void init_video() {

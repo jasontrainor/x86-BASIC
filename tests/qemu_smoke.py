@@ -35,6 +35,7 @@ SESSION = [
      ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE']),
     ('IF 1<>2 THEN PRINT "NOT EQUAL"\n', ['NOT EQUAL']),
     ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
+    ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
 ]
 
