@@ -87,5 +87,13 @@ check "for no var"        "FOR =1 TO 5${NL}" "ERROR: BAD VARIABLE NAME"
 check "next no var"       "10 FOR I=1 TO 2${NL}20 NEXT${NL}RUN${NL}" "ERROR: BAD VARIABLE NAME IN LINE 20"
 check "lowercase var"     "let z=9*9${NL}PRINT Z${NL}" "${NL}81${NL}"
 
+# --- Comparisons ----------------------------------------------------------
+# Each line prints 1+1 when the condition holds, right after its echo.
+T=" THEN PRINT 1+1${NL}"
+check "true comparisons"  "IF 1=1${T}IF 1<>2${T}IF 1<2${T}IF 2<=2${T}IF 3>2${T}IF 2>=2${T}" \
+    "1=1${T}2${NL}" "1<>2${T}2${NL}" "1<2${T}2${NL}" "2<=2${T}2${NL}" "3>2${T}2${NL}" "2>=2${T}2${NL}"
+check "false comparisons" "IF 1=2 THEN PRINT 1+1${NL}IF 2<>2 THEN PRINT 1+1${NL}IF 2<1 THEN PRINT 1+1${NL}IF 3<=2 THEN PRINT 1+1${NL}IF 2>3 THEN PRINT 1+1${NL}IF 1>=2 THEN PRINT 1+1${NL}" "!${NL}2${NL}"
+check "no comparison"     "IF 1${NL}" "ERROR: COMPARISON EXPECTED"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

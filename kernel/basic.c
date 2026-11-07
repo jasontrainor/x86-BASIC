@@ -128,22 +128,32 @@ int expr() {
     return val;
 }
 
+// expr ( = | <> | < | <= | > | >= ) expr
 int condition() {
     int v1 = expr();
+    if (error_msg) return 0;
     skip_space();
-    char op = *p++;
-    int has_equal = 0;
-    if (*p == '=') { has_equal = 1; p++; }
-    else if (*p == '>' || *p == '<') {
-        if (p[0] == '=') { has_equal = 1; p++; }
+
+    int lt = 0, eq = 0, gt = 0;   // which outcomes make the condition true
+    if (*p == '=') {
+        eq = 1; p++;
+    } else if (*p == '<') {
+        lt = 1; p++;
+        if (*p == '=') { eq = 1; p++; }
+        else if (*p == '>') { gt = 1; p++; }
+    } else if (*p == '>') {
+        gt = 1; p++;
+        if (*p == '=') { eq = 1; p++; }
+    } else {
+        // Don't consume anything: *p may be the string terminator.
+        error("COMPARISON EXPECTED");
+        return 0;
     }
-    
+
     int v2 = expr();
-    
-    if (op == '=') return v1 == v2;
-    if (op == '>') return has_equal ? v1 >= v2 : v1 > v2;
-    if (op == '<') return has_equal ? v1 <= v2 : v1 < v2;
-    return 0;
+    if (v1 < v2) return lt;
+    if (v1 > v2) return gt;
+    return eq;
 }
 
 // Parse a variable name (a single letter A-Z, either case) and return
