@@ -130,6 +130,31 @@ int condition() {
     return 0;
 }
 
+// [LET] var = expr   or   [LET] var$ = "text"   (the LET keyword already consumed)
+void assignment() {
+    skip_space();
+    int var_idx = (*p & ~32) - 'A';
+    p++;
+    int is_str = 0;
+    if (*p == '$') { is_str = 1; p++; }
+    skip_space();
+    if (*p == '=') {
+        p++;
+        skip_space();
+        if (is_str) {
+            if (*p == '"') {
+                p++;
+                int i = 0;
+                while (*p && *p != '"' && i < 63) strs[var_idx][i++] = *p++;
+                strs[var_idx][i] = '\0';
+                if (*p == '"') p++;
+            }
+        } else {
+            vars[var_idx] = expr();
+        }
+    }
+}
+
 void execute_statement() {
     skip_space();
     if (strncmp(p, "PRINT", 5) == 0 || strncmp(p, "print", 5) == 0) {
@@ -157,31 +182,9 @@ void execute_statement() {
             skip_space();
         }
         print_string("\n");
-    } else if (strncmp(p, "LET", 3) == 0 || strncmp(p, "let", 3) == 0 || isalpha(*p)) {
-        if (strncmp(p, "LET", 3) == 0 || strncmp(p, "let", 3) == 0) {
-            p += 3;
-            skip_space();
-        }
-        int var_idx = (*p & ~32) - 'A';
-        p++;
-        int is_str = 0;
-        if (*p == '$') { is_str = 1; p++; }
-        skip_space();
-        if (*p == '=') {
-            p++;
-            skip_space();
-            if (is_str) {
-                if (*p == '"') {
-                    p++;
-                    int i = 0;
-                    while (*p && *p != '"' && i < 63) strs[var_idx][i++] = *p++;
-                    strs[var_idx][i] = '\0';
-                    if (*p == '"') p++;
-                }
-            } else {
-                vars[var_idx] = expr();
-            }
-        }
+    } else if (strncmp(p, "LET", 3) == 0 || strncmp(p, "let", 3) == 0) {
+        p += 3;
+        assignment();
     } else if (strncmp(p, "GOTO", 4) == 0 || strncmp(p, "goto", 4) == 0) {
         p += 4;
         int target = expr();
@@ -265,6 +268,9 @@ void execute_statement() {
         set_border(c);
     } else if (strncmp(p, "END", 3) == 0 || strncmp(p, "end", 3) == 0) {
         current_line = num_lines;
+    } else if (isalpha(*p)) {
+        // Must come last: every keyword above also starts with a letter.
+        assignment();
     }
 }
 

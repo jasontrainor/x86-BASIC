@@ -40,5 +40,16 @@ check "string variable"  "A\$=\"HI\"${NL}PRINT A\$;A\$${NL}" "HIHI"
 check "list sorts lines" "20 PRINT 2${NL}10 PRINT 1${NL}LIST${NL}" "LIST${NL}10 PRINT 1${NL}20 PRINT 2${NL}"
 check "delete line"      "10 PRINT 1${NL}20 PRINT 2${NL}10${NL}LIST${NL}" "LIST${NL}20 PRINT 2${NL}"
 
+# --- Keywords are dispatched (not swallowed as assignments) --------------
+check "for/next loop"    "10 FOR I=1 TO 3${NL}20 PRINT I*11${NL}30 NEXT I${NL}RUN${NL}" "${NL}11${NL}22${NL}33${NL}"
+check "for step"         "10 FOR I=10 TO 1 STEP 0-3${NL}20 PRINT I*11${NL}30 NEXT I${NL}RUN${NL}" "${NL}110${NL}77${NL}44${NL}11${NL}"
+check "goto"             "10 GOTO 30${NL}20 PRINT 1+1${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}"
+check "if then true"     "IF 1=1 THEN PRINT 2*21${NL}" "${NL}42${NL}"
+check "if then false"    "IF 1=2 THEN PRINT 2*21${NL}" "!42"
+check "end stops"        "10 PRINT 1+1${NL}20 END${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}2${NL}" "!${NL}3${NL}"
+check "cls"              "CLS${NL}" "[CLS]"
+check "colours"          "INK 2${NL}PAPER 5${NL}BORDER 1${NL}" "[INK 2]" "[PAPER 5]" "[BORDER 1]"
+check "beep"             "BEEP${NL}" "[BEEP]"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))
