@@ -2,7 +2,9 @@ ASM = nasm
 CC = gcc
 LD = ld
 
-CFLAGS = -m16 -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib -Os -Wall -Ikernel
+CFLAGS = -m16 -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib -Os -Wall -Ikernel \
+         -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
+         -mgeneral-regs-only
 
 all: os.img
 
