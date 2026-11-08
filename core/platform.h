@@ -66,4 +66,25 @@ void plat_tone(int freq, int ms);
 int plat_disk_read(unsigned int lba, void *buf);
 int plat_disk_write(unsigned int lba, const void *buf);
 
+/*
+ * The chooser (machines/chooser/), which starts first and picks the
+ * machine to run, and getting back to it.
+ *
+ * Pressing F10 twice (within 2 seconds) in any machine restarts into the
+ * chooser with its menu showing: plat_read_key() handles those keys
+ * itself (the first press beeps). plat_restart_menu() does the same.
+ */
+void plat_restart_menu(void);              // doesn't return
+
+// Should the chooser show its menu rather than start the usual machine?
+// Yes after F10 twice, or if Shift is held (BIOS) or a key pressed while
+// it starts. (Only the chooser asks, once.)
+int plat_menu_wanted(void);
+
+// The chooser only (machines/chooser/start.c): start the machine whose
+// kernel is X86BASIC/ID.SYS (BIOS) or X86BASIC/ID.EFI (UEFI). Returns an
+// error message if it can't; on UEFI it also returns when the machine
+// goes back to the chooser.
+const char *plat_start_machine(const char *id);
+
 #endif

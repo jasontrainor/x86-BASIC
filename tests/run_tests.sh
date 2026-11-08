@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Icore -Imachines/spectrum -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c machines/spectrum/*.c core/storage.c core/fat.c core/string.c core/num.c || exit 1
+    -o "$BIN" tests/host_stub.c machines/spectrum/*.c core/storage.c core/fat.c core/string.c core/num.c core/font.c || exit 1
 
 # Saved files go on the disk's FAT partition, so tests start with a blank
 # disk that has one (each test gets a fresh copy; DISK_OUT keeps the result).

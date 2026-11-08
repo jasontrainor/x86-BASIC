@@ -24,7 +24,7 @@
 #define SCREEN_HEIGHT 192
 #define PLOT_HEIGHT 176       // PLOT y runs 0-175 (bottom two rows: text)
 
-extern const unsigned char font[96][8];   // font.c: characters 32-127
+#include "font.h"                         // the character set
 
 void screen_init(void);
 

@@ -147,6 +147,46 @@ enter_unreal:
     popfd                  ; restores the interrupt flag
     retd                   ; 32-bit return, as GCC -m16 code expects
 
+; ---------------------------------------------------------------------------
+; start_image(src, len): start another kernel image (the chooser starting
+; a machine). Copies len bytes from linear address src to 0x1000, where
+; the boot sector would have loaded it, and jumps there as the boot
+; sector does: CS = 0, DL = the boot drive. src must be above 0x1000 (the
+; copy goes upwards). Uses no memory but the copy, which overwrites this
+; kernel's data and stack; the code here (at 0x80000) is only replaced
+; once the new kernel moves its own code up, by which time this is done.
+; ---------------------------------------------------------------------------
+global start_image
+start_image:
+    cli
+    cld
+    mov esi, [esp + 4]
+    mov ecx, [esp + 8]
+    mov dl, [boot_drive]
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov edi, 0x1000
+    a32 rep movsb          ; (32-bit addresses: unreal mode)
+    mov ss, ax
+    mov sp, 0x1000         ; the boot sector's stack, below the image
+    jmp 0x0000:0x1000
+
+; ---------------------------------------------------------------------------
+; restart_boot(): run the boot sector again, which the caller has put at
+; 0x7C00, as the BIOS would: CS = 0, DL = the boot drive.
+; ---------------------------------------------------------------------------
+global restart_boot
+restart_boot:
+    cli
+    mov dl, [boot_drive]
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x7C00
+    jmp 0x0000:0x7C00
+
 section .data
 align 8
 gdt:

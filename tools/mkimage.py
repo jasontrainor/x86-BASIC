@@ -1,33 +1,51 @@
 #!/usr/bin/env python3
 """
-Build os.img: a 1.44MB disk image that boots on both kinds of PC.
+Build a disk image (os.img) that boots on both kinds of PC, with one or
+more machines on it.
 
-    tools/mkimage.py boot.bin kernel.bin BOOTX64.EFI os.img [listing...]
+    tools/mkimage.py OUT.img [--machines spectrum,...] [--default NAME]
+                     [--menu auto|always|never] [--timeout SECONDS]
+                     [--sectors N] [--build build] [listing ...]
 
-Any listings (text files with DOS 8.3 names, such as game.bas) go in the
-root directory of the EFI system partition, where LOAD "GAME.BAS" finds
-them.
+Each machine NAME is taken from build/NAME/ (kernel.bin and BOOTX64.EFI)
+and called what machines/NAME/title.txt says. The first is the default
+unless --default says otherwise. Listings (text files or .SAV files with
+DOS 8.3 names, such as game.bas) go in the first machine's folder, where
+LOAD "GAME.BAS" finds them.
 
-Layout (512-byte sectors):
+Layout (512-byte sectors), with F = 256 for a 1.44MB image (so it also
+works as a floppy) and 2048 for a bigger one:
 
     0           boot sector: BIOS boot code, BPB, MBR partition table
-    1-255       the 16-bit kernel, loaded by the boot sector     \\ partition 1
-    256-2047    saved files (core/storage.h)                    / (type 0xDA)
-    2048-2879   EFI system partition: FAT12 with                  partition 2
-                EFI/BOOT/BOOTX64.EFI, the 64-bit UEFI kernel      (type 0xEF)
+    1-(F-1)     the BIOS chooser, loaded by the boot sector     partition 1
+                                                                (type 0xDA)
+    F-end       FAT partition (the EFI system partition):       partition 2
+                  EFI/BOOT/BOOTX64.EFI   the UEFI chooser        (type 0xEF)
+                  X86BASIC/NAME.SYS      each machine's kernels:
+                  X86BASIC/NAME.EFI        BIOS and UEFI
+                  BOOT.CFG               which to start (see
+                                         machines/chooser/chooser.c)
+                  NAME/                  each machine's files
 
 A BIOS (or UEFI firmware with legacy "CSM" boot) runs the boot sector;
-UEFI firmware finds the EFI system partition and runs BOOTX64.EFI. The
-FAT filesystem is written here directly, so no extra tools are needed.
+UEFI firmware finds the EFI system partition and runs BOOTX64.EFI. Both
+start the chooser, which starts a machine. The FAT filesystem is written
+here directly, so no extra tools are needed. The size is 1.44MB if
+everything fits with room to spare, else 16MB, or --sectors.
 """
+import os
 import struct
 import sys
 
 SECTOR = 512
 IMAGE_SECTORS = 2880             # 1.44MB, so it also works as a floppy image
-KERNEL_MAX = 255                 # sectors 1-255
-ESP_START = 2048                 # must match boot/boot.asm
+BIG_SECTORS = 32768              # 16MB, when that's too small
+KERNEL_MAX = 0x1F000             # a kernel is loaded at 0x1000, below 0x20000
+SPARE = 384 * 1024               # room to leave for saved files (else: bigger)
+ESP_START = 2048                 # (where tests/make_disk.py puts the partition)
 ESP_SECTORS = IMAGE_SECTORS - ESP_START
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+
 
 
 def fat_image(files, sectors, hidden):
@@ -149,7 +167,6 @@ def fat_image(files, sectors, hidden):
 
 def dos_name(path):
     """The 8.3 name for a listing file, or exit with an error."""
-    import os
     name = os.path.basename(path).upper()
     base, dot, ext = name.partition('.')
     ok = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&\'()-@^_`{}~')
@@ -159,23 +176,88 @@ def dos_name(path):
     return name
 
 
-def main():
-    boot_path, kernel_path, efi_path, out_path = sys.argv[1:5]
-    listings = {'SPECTRUM/' + dos_name(p): open(p, 'rb').read() for p in sys.argv[5:]}
-    boot = open(boot_path, 'rb').read()
-    kernel = open(kernel_path, 'rb').read()
-    efi = open(efi_path, 'rb').read()
-    assert len(boot) == SECTOR, 'boot sector must be 512 bytes'
-    assert len(kernel) <= KERNEL_MAX * SECTOR, 'kernel too big for sectors 1-255'
+def chs(lba):
+    """CHS address of an LBA, with the usual 255-head, 63-sector translation
+    (the largest there is, for LBAs beyond it)."""
+    cyl, rest = divmod(lba, 255 * 63)
+    if cyl > 1023:
+        return bytes([254, 0xFF, 0xFF])
+    head, sec = divmod(rest, 63)
+    return bytes([head, (sec + 1) | ((cyl >> 2) & 0xC0), cyl & 0xFF])
 
-    img = bytearray(IMAGE_SECTORS * SECTOR)
+
+def partition(active, ptype, start, count):
+    return bytes([0x80 if active else 0]) + chs(start) + bytes([ptype]) + \
+        chs(start + count - 1) + struct.pack('<II', start, count)
+
+
+def boot_cfg(machines, titles, default, menu, timeout):
+    lines = ['# x86 BASIC: which machine to start (see the README).',
+             'DEFAULT=%s' % default.upper(),
+             'MENU=%s' % menu.upper(),
+             'TIMEOUT=%d' % timeout,
+             '# The menu\'s names for X86BASIC/NAME.SYS and NAME.EFI:']
+    lines += ['%s=%s' % (m.upper(), titles[m]) for m in machines]
+    return ('\r\n'.join(lines) + '\r\n').encode()
+
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(description='Build a disk image.')
+    ap.add_argument('out')
+    ap.add_argument('listings', nargs='*')
+    ap.add_argument('--machines', default='spectrum')
+    ap.add_argument('--default')
+    ap.add_argument('--menu', default='auto', choices=['auto', 'always', 'never'])
+    ap.add_argument('--timeout', type=int, default=5)
+    ap.add_argument('--sectors', type=int)
+    ap.add_argument('--build', default=os.path.join(ROOT, 'build'))
+    a = ap.parse_args()
+    machines = [m for m in a.machines.split(',') if m]
+    if not machines:
+        sys.exit('no machines')
+    default = a.default or machines[0]
+    if default not in machines:
+        sys.exit('--default %s: not one of the machines' % default)
+
+    def read(path, limit=None):
+        data = open(path, 'rb').read()
+        if limit is not None and len(data) > limit:
+            sys.exit('%s: too big (%d bytes, at most %d)' % (path, len(data), limit))
+        return data
+
+    boot = read(os.path.join(a.build, 'boot.bin'))
+    assert len(boot) == SECTOR, 'boot sector must be 512 bytes'
+    chooser = read(os.path.join(a.build, 'chooser', 'kernel.bin'), KERNEL_MAX)
+    files = {'EFI/BOOT/BOOTX64.EFI': read(os.path.join(a.build, 'chooser', 'BOOTX64.EFI'))}
+    titles = {}
+    for m in machines:
+        if len(m) > 8 or dos_name(m + '.SYS') != m.upper() + '.SYS':
+            sys.exit('%s: machine names must be DOS names of up to 8 characters' % m)
+        files['X86BASIC/%s.SYS' % m.upper()] = read(os.path.join(a.build, m, 'kernel.bin'),
+                                                    KERNEL_MAX)
+        files['X86BASIC/%s.EFI' % m.upper()] = read(os.path.join(a.build, m, 'BOOTX64.EFI'))
+        title_file = os.path.join(ROOT, 'machines', m, 'title.txt')
+        titles[m] = (open(title_file).read().strip() if os.path.exists(title_file)
+                     else m.upper())[:26]
+    files['BOOT.CFG'] = boot_cfg(machines, titles, default, a.menu, a.timeout)
+    for p in a.listings:
+        files['%s/%s' % (machines[0].upper(), dos_name(p))] = read(p)
+
+    used = sum(len(d) for d in files.values()) + SPARE
+    sectors = a.sectors or (IMAGE_SECTORS if used <= (IMAGE_SECTORS - 256 - 40) * SECTOR
+                            else BIG_SECTORS)
+    fat_start = 256 if sectors <= IMAGE_SECTORS else 2048
+    if (len(chooser) + SECTOR - 1) // SECTOR > fat_start - 1:
+        sys.exit('the chooser is too big for sectors 1-%d' % (fat_start - 1))
+
+    img = bytearray(sectors * SECTOR)
     img[:SECTOR] = boot
-    img[SECTOR:SECTOR + len(kernel)] = kernel
-    files = {'EFI/BOOT/BOOTX64.EFI': efi}
-    files.update(listings)
-    esp = fat_image(files, ESP_SECTORS, ESP_START)
-    img[ESP_START * SECTOR:] = esp
-    with open(out_path, 'wb') as f:
+    img[446:510] = (partition(True, 0xDA, 1, fat_start - 1) +
+                    partition(False, 0xEF, fat_start, sectors - fat_start) + bytes(32))
+    img[SECTOR:SECTOR + len(chooser)] = chooser
+    img[fat_start * SECTOR:] = fat_image(files, sectors - fat_start, fat_start)
+    with open(a.out, 'wb') as f:
         f.write(img)
 
 

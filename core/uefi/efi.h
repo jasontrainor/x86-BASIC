@@ -48,6 +48,7 @@ typedef struct {
 #define SCAN_END    0x06
 #define SCAN_DELETE 0x08
 #define SCAN_ESC    0x17
+#define SCAN_F10    0x14
 
 typedef struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL {
     EFI_STATUS (EFIAPI *Reset)(struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL *, BOOLEAN);
@@ -76,7 +77,11 @@ typedef struct {
     void *RegisterProtocolNotify, *LocateHandle;
     EFI_STATUS (EFIAPI *LocateDevicePath)(EFI_GUID *, void **, EFI_HANDLE *);
     void *InstallConfigurationTable;
-    void *LoadImage, *StartImage, *Exit, *UnloadImage, *ExitBootServices;
+    EFI_STATUS (EFIAPI *LoadImage)(BOOLEAN boot_policy, EFI_HANDLE parent, void *path,
+                                   void *source, UINTN size, EFI_HANDLE *image);
+    EFI_STATUS (EFIAPI *StartImage)(EFI_HANDLE image, UINTN *exit_size, CHAR16 **exit_data);
+    EFI_STATUS (EFIAPI *Exit)(EFI_HANDLE image, EFI_STATUS status, UINTN size, CHAR16 *data);
+    void *UnloadImage, *ExitBootServices;
     void *GetNextMonotonicCount;
     EFI_STATUS (EFIAPI *Stall)(UINTN microseconds);
     EFI_STATUS (EFIAPI *SetWatchdogTimer)(UINTN timeout, UINT64 code, UINTN size, CHAR16 *data);
@@ -185,5 +190,6 @@ typedef struct {
 #define DEVICE_PATH_END_SUBTYPE    0xFF
 #define MEDIA_DEVICE_PATH          0x04
 #define MEDIA_HARDDRIVE_DP         0x01
+#define MEDIA_FILEPATH_DP          0x04
 
 #endif

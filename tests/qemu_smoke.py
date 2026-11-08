@@ -203,9 +203,9 @@ def screen_text(mon, tmpdir):
     return '\n'.join(lines)
 
 
-def ready(mon, tmpdir):
-    """True once the kernel's banner is on screen."""
-    return 'x86 BASIC' in screen_text(mon, tmpdir)
+def ready(mon, tmpdir, marker='x86 BASIC for PCs'):
+    """True once the marker (the Spectrum machine's banner) is on screen."""
+    return marker in screen_text(mon, tmpdir)
 
 
 MODES = ['floppy', 'hdd', 'usb', 'uefi', 'uefi-hdd']

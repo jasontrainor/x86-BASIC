@@ -1,14 +1,15 @@
 [bits 16]
 ; The BIOS loads this sector at 0x7C00, but the first thing it does is
-; copy itself down to 0x0600, so that the kernel can be loaded from
-; 0x1000 up without overwriting the code doing the loading.
+; copy itself down to 0x0600, so that the kernel - the chooser, which
+; starts the machines (machines/chooser/) - can be loaded from 0x1000 up
+; without overwriting the code doing the loading.
 [org 0x0600]
 
 RELOCATED     equ 0x0600
 KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
 MAX_KERNEL_SECTORS equ (0x20000 - KERNEL_OFFSET) / 512   ; as core/bios.ld
 
-; The Makefile passes the kernel's size in sectors (-DKERNEL_SECTORS=n).
+; The Makefile passes the chooser's size in sectors (-DKERNEL_SECTORS=n).
 %ifndef KERNEL_SECTORS
   %error "KERNEL_SECTORS not defined; build with make"
 %endif
@@ -98,48 +99,18 @@ load_kernel:
 
 BOOT_DRIVE      db 0
 MSG_REAL_MODE   db "Started in 16-bit Real Mode", 0x0D, 0x0A, 0
-MSG_LOAD_KERNEL db "Loading BASIC kernel...", 0x0D, 0x0A, 0
+MSG_LOAD_KERNEL db "Loading x86 BASIC...", 0x0D, 0x0A, 0
 
 ; ---------------------------------------------------------------------------
-; MBR partition table (the layout is described in tools/mkimage.py)
-;
-; Partition 1 is what the BIOS boots: in hard-disk emulation ("USB-HDD")
-; mode - the default on most machines for USB sticks - many BIOSes only
-; boot a disk whose partition table has an active entry. It holds the
-; kernel and saved programs, and has type 0xDA ("non-filesystem data") so
-; that operating systems leave it alone.
-;
-; Partition 2 is the EFI system partition (type 0xEF), a FAT filesystem
-; holding the UEFI kernel, which is what UEFI firmware boots.
-;
-; CHS fields use the usual 255-head, 63-sector translation.
+; MBR partition table: written by tools/mkimage.py, which decides the
+; layout. Partition 1 (active, type 0xDA "non-filesystem data", from LBA
+; 1) holds the chooser, so that BIOSes that only boot a disk with an
+; active partition boot this one; partition 2 is the FAT partition (type
+; 0xEF, the EFI system partition) with everything else.
 ; ---------------------------------------------------------------------------
-IMAGE_SECTORS equ 2880
-ESP_START     equ 2048
-
-%macro chs 1               ; CHS address of LBA %1 (cylinder < 256 here)
-    db (%1) / 63 % 255     ; head
-    db (%1) % 63 + 1       ; sector
-    db (%1) / (63 * 255)   ; cylinder
-%endmacro
-
 times 0x1B8-($-$$) db 0    ; (assembly fails here if the code is too big)
     dd 0x42534958          ; disk signature
     dw 0
-; Partition 1: active, LBA 1 .. ESP_START-1
-    db 0x80                ; status: active
-    chs 1
-    db 0xDA                ; type: non-filesystem data
-    chs ESP_START - 1
-    dd 1                   ; first sector (LBA)
-    dd ESP_START - 1       ; number of sectors
-; Partition 2: EFI system partition, LBA ESP_START .. IMAGE_SECTORS-1
-    db 0x00
-    chs ESP_START
-    db 0xEF                ; type: EFI system partition
-    chs IMAGE_SECTORS - 1
-    dd ESP_START
-    dd IMAGE_SECTORS - ESP_START
-    times 2 * 16 db 0      ; partitions 3-4: unused
+    times 4 * 16 db 0      ; the four partitions
 
 dw 0xaa55

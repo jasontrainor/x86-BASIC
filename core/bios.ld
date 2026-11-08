@@ -23,8 +23,10 @@
  * function pointers, switch tables) are offsets within it, while data
  * addresses are linear. Nothing reads the code as data.
  *
- * The boot sector loads kernel.bin, start-up code and data followed by
- * the code, to 0x1000; kernel_entry.asm moves the code up to 0x80000.
+ * The boot sector (for the chooser) or the chooser (for a machine: see
+ * start_image in kernel_entry.asm) loads kernel.bin, start-up code and
+ * data followed by the code, to 0x1000; kernel_entry.asm moves the code
+ * up to 0x80000.
  * The .bss then reuses the space the code was loaded into.
  *
  * The ASSERTs below fail the build if anything doesn't fit, instead of

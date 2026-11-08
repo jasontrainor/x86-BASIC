@@ -149,6 +149,8 @@ void plat_init(void) {
  * Keyboard: BIOS INT 16h
  * --------------------------------------------------------------------- */
 
+static int f10_pressed(void);
+
 int plat_read_key(void) {
     for (;;) {
         unsigned char no_key;
@@ -165,6 +167,10 @@ int plat_read_key(void) {
         __asm__ __volatile__ ("int $0x16" : "=a" (ax) : "a" (0x0000) : "cc");
         enter_unreal();
         unsigned char ascii = ax & 0xFF, scan = ax >> 8;
+        if (ascii == 0 && scan == 0x44) {      // F10
+            if (f10_pressed()) plat_restart_menu();
+            continue;
+        }
         if (ascii != 0 && ascii != 0xE0) return ascii;
         switch (scan) {                   // keys without a character
         case 0x48: return KEY_UP;
@@ -227,6 +233,49 @@ static void wait_ticks(int n) {
         }
         polls++;
     }
+}
+
+/* ------------------------------------------------------------------------
+ * Back to the chooser: F10 twice
+ *
+ * The chooser is started by the boot sector, so the way back is to run
+ * the boot sector again, after leaving a note in the BIOS data area's
+ * "intra-applications communication area" (0x4F0-0x4FF, which the BIOS
+ * leaves alone) that the menu is wanted.
+ * --------------------------------------------------------------------- */
+
+void restart_boot(void);                  // kernel_entry.asm
+#define MENU_NOTE 0x554E454DU            // "MENU"
+
+static unsigned long f10_time;
+static int f10_once;
+
+// F10 was pressed: is it the second time running?
+static int f10_pressed(void) {
+    unsigned long now = plat_timer_ms();
+    if (f10_once && now - f10_time < 2000) return 1;
+    f10_once = 1;
+    f10_time = now;
+    plat_tone(1200, 50);
+    return 0;
+}
+
+void plat_restart_menu(void) {
+    unsigned int note = MENU_NOTE;
+    __asm__ __volatile__ ("movl %0, 0x04F0" : : "r" (note) : "memory");
+    if (plat_disk_read(0, (void *)0x7C00) < 0) return;
+    restart_boot();
+}
+
+int plat_menu_wanted(void) {
+    unsigned int note;
+    unsigned char shift;
+    __asm__ __volatile__ ("movl 0x04F0, %0" : "=r" (note) : : "memory");
+    __asm__ __volatile__ ("movb 0x0417, %0" : "=q" (shift) : : "memory");
+    __asm__ __volatile__ ("movl $0, 0x04F0" : : : "memory");
+    int wanted = note == MENU_NOTE || (shift & 3);   // (bits 0, 1: right, left Shift)
+    while (plat_read_key() >= 0) wanted = 1;          // a key pressed while starting
+    return wanted;
 }
 
 /* ------------------------------------------------------------------------

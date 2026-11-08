@@ -115,10 +115,16 @@ void plat_border(int c) {
  * Keyboard
  * --------------------------------------------------------------------- */
 
+static int f10_pressed(void);
+
 int plat_read_key(void) {
     EFI_INPUT_KEY key;
     for (;;) {
         if (st->ConIn->ReadKeyStroke(st->ConIn, &key) != EFI_SUCCESS) return -1;
+        if (key.ScanCode == SCAN_F10) {
+            if (f10_pressed()) plat_restart_menu();
+            continue;
+        }
         switch (key.ScanCode) {
         case SCAN_UP:     return KEY_UP;
         case SCAN_DOWN:   return KEY_DOWN;
@@ -195,10 +201,10 @@ void plat_tone(int freq, int ms) {
 
 /* ------------------------------------------------------------------------
  * Disk. We are loaded from a partition (the EFI system partition), but
- * saved programs live outside it, at fixed sectors of the whole disk
- * (see core/storage.h). So find the disk the partition is on: take the
- * partition's device path, drop its last (hard drive partition) node,
- * and ask for the Block I/O protocol of the device that path names.
+ * the shared code reads the whole disk, partition table and all, as the
+ * BIOS kernel does (core/fat.c). So find the disk the partition is on:
+ * take the partition's device path, drop its last (hard drive partition)
+ * node, and ask for the Block I/O protocol of the device that path names.
  * --------------------------------------------------------------------- */
 
 static EFI_BLOCK_IO_PROTOCOL *disk;
@@ -263,11 +269,42 @@ int plat_disk_write(unsigned int lba, const void *buf) {
     return 0;
 }
 
+/* ------------------------------------------------------------------------
+ * Back to the chooser: F10 twice. The chooser started this kernel with
+ * StartImage(), so leaving with Exit() returns to it (and if the firmware
+ * started it, to the firmware's boot menu).
+ * --------------------------------------------------------------------- */
+
+EFI_HANDLE uefi_image;
+EFI_SYSTEM_TABLE *uefi_st;
+static unsigned long f10_time;
+static int f10_once;
+
+static int f10_pressed(void) {
+    unsigned long now = plat_timer_ms();
+    if (f10_once && now - f10_time < 2000) return 1;
+    f10_once = 1;
+    f10_time = now;
+    plat_tone(1200, 50);
+    return 0;
+}
+
+void plat_restart_menu(void) {
+    bs->Exit(uefi_image, EFI_SUCCESS, 0, 0);
+}
+
+int plat_menu_wanted(void) {
+    int wanted = 0;
+    while (plat_read_key() >= 0) wanted = 1;  // a key pressed while starting
+    return wanted;
+}
+
 /* ------------------------------------------------------------------------ */
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
-    st = system_table;
+    st = uefi_st = system_table;
     bs = st->BootServices;
+    uefi_image = image;
     // The firmware resets the machine after 5 minutes in a boot
     // application unless told otherwise.
     bs->SetWatchdogTimer(0, 0, 0, 0);
