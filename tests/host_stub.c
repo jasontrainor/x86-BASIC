@@ -32,7 +32,8 @@ void host_echo(char c) {
 void host_trace(const char *fmt, int a, int b) { printf(fmt, a, b); }
 
 void plat_init(void) {}
-void plat_draw_cell(int col, int row, const unsigned char *bits, int ink, int paper) {}
+void plat_video(const struct video *v) {}
+void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels) {}
 void plat_border(int colour) {}
 
 /*

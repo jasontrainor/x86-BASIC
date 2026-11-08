@@ -7,16 +7,34 @@
  * is shared code built on these.
  */
 
-// Set up the display. The screen is a 256x192 picture (32x24 cells of
-// 8x8 pixels) inside a border, like the ZX Spectrum's.
+// Get ready: timers, input and anything else the platform needs. The
+// machine then sets up the display with plat_video().
 void plat_init(void);
 
-// Draw one 8x8 character cell. bits: 8 rows, top first, bit 7 = left
-// pixel; set bits in colour ink, clear ones in paper. Colours are 0-15:
-// the Spectrum's 8 colours, plus 8 for their BRIGHT versions.
-void plat_draw_cell(int col, int row, const unsigned char *bits, int ink, int paper);
+/*
+ * The display: a picture of width x height pixels (width a multiple of
+ * 8) in up to 16 colours, centred in a border. Each pixel is `tall`
+ * times as tall as it is wide (1, or 2 for a picture like 560x192 that
+ * a TV shows twice as tall). frame_width x frame_height (in the same
+ * units as width and height*tall) is the picture plus the least border
+ * the machine wants; the platform scales the picture by the largest
+ * whole number that fits the frame on the screen.
+ *
+ * The BIOS kernel uses VGA mode 13h (320x200) for pictures that fit in
+ * it, and mode 12h (640x480, 16 colours) for bigger ones.
+ */
+struct video {
+    int width, height, tall;
+    int frame_width, frame_height;
+    unsigned char palette[16][3];         // red, green, blue: 0-255
+};
+void plat_video(const struct video *v);
 
-// Colour the border (0-7).
+// Draw a w x h block of the picture at (x, y), from w*h colours (0-15),
+// row by row. x and w must be multiples of 8.
+void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels);
+
+// Fill the border with colour (0-15).
 void plat_border(int colour);
 
 // The next key typed, or -1 if there is none (doesn't wait). Printable

@@ -34,25 +34,19 @@ static void halt(const char *why) {
 }
 
 /* ------------------------------------------------------------------------
- * Display. The 256x192 screen is drawn at the largest whole-number scale
- * that leaves room for a border (the same rule tests/qemu_smoke.py uses
- * to find it), centred, with the border colour filling the rest.
+ * Display. The picture is drawn at the largest whole-number scale at
+ * which its frame (the picture and the least border the machine wants)
+ * fits on the screen - the same rule tests/qemu_smoke.py uses to find
+ * it - centred, with the border colour filling the rest.
  * --------------------------------------------------------------------- */
 
 static EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
-static unsigned int screen_w, screen_h, scale, win_x, win_y;
+static unsigned int screen_w, screen_h, scale_x, scale_y, win_x, win_y, win_w, win_h;
+static EFI_GRAPHICS_OUTPUT_BLT_PIXEL palette[16];
 
 #define MAX_SCALE 8
-static EFI_GRAPHICS_OUTPUT_BLT_PIXEL cell_px[8 * MAX_SCALE * 8 * MAX_SCALE];
-
-// Spectrum colours 0-7 (bit 0 blue, bit 1 red, bit 2 green) and BRIGHT 8-15.
-static EFI_GRAPHICS_OUTPUT_BLT_PIXEL colour(int c) {
-    UINT8 level = (c & 8) ? 0xFF : 0xD0;
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = {
-        (c & 1) ? level : 0, (c & 4) ? level : 0, (c & 2) ? level : 0, 0
-    };
-    return px;
-}
+#define BLOCK_PIXELS (128 * 1024)
+static EFI_GRAPHICS_OUTPUT_BLT_PIXEL block_px[BLOCK_PIXELS];
 
 void plat_init(void) {
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
@@ -60,25 +54,48 @@ void plat_init(void) {
         halt("x86 BASIC: no graphics output available\n");
     screen_w = gop->Mode->Info->HorizontalResolution;
     screen_h = gop->Mode->Info->VerticalResolution;
-    scale = screen_w / 320 < screen_h / 240 ? screen_w / 320 : screen_h / 240;
-    if (scale < 1) scale = 1;
-    if (scale > MAX_SCALE) scale = MAX_SCALE;
-    if (screen_w < 256 * scale || screen_h < 192 * scale)
-        halt("x86 BASIC: the screen is too small\n");
-    win_x = (screen_w - 256 * scale) / 2;
-    win_y = (screen_h - 192 * scale) / 2;
 }
 
-void plat_draw_cell(int col, int row, const unsigned char *bits, int ink, int paper) {
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL fg = colour(ink), bg = colour(paper);
-    unsigned int size = 8 * scale;
-    for (unsigned int y = 0; y < size; y++) {
-        unsigned char b = bits[y / scale];
-        for (unsigned int x = 0; x < size; x++)
-            cell_px[y * size + x] = (b & (0x80 >> (x / scale))) ? fg : bg;
+void plat_video(const struct video *v) {
+    unsigned int sx = screen_w / v->frame_width, sy = screen_h / v->frame_height;
+    unsigned int scale = sx < sy ? sx : sy;
+    if (scale < 1) scale = 1;
+    if (scale > MAX_SCALE) scale = MAX_SCALE;
+    scale_x = scale;
+    scale_y = scale * v->tall;
+    win_w = v->width * scale_x;
+    win_h = v->height * scale_y;
+    if (screen_w < win_w || screen_h < win_h || win_w * scale_y > BLOCK_PIXELS)
+        halt("x86 BASIC: the screen is too small\n");
+    win_x = (screen_w - win_w) / 2;
+    win_y = (screen_h - win_h) / 2;
+    for (int i = 0; i < 16; i++) {
+        EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = {
+            v->palette[i][2], v->palette[i][1], v->palette[i][0], 0
+        };
+        palette[i] = px;
     }
-    gop->Blt(gop, cell_px, EfiBltBufferToVideo, 0, 0,
-             win_x + col * size, win_y + row * size, size, size, 0);
+}
+
+void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels) {
+    unsigned int row_w = w * scale_x;
+    // As many whole (scaled) rows of the block at a time as fit in block_px.
+    int rows = BLOCK_PIXELS / (row_w * scale_y);
+    for (int j0 = 0; j0 < h; j0 += rows) {
+        int n = h - j0 < rows ? h - j0 : rows;
+        EFI_GRAPHICS_OUTPUT_BLT_PIXEL *q = block_px;
+        for (int j = j0; j < j0 + n; j++) {
+            EFI_GRAPHICS_OUTPUT_BLT_PIXEL *first = q;
+            for (int i = 0; i < w; i++) {
+                EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = palette[pixels[j * w + i] & 15];
+                for (unsigned int k = 0; k < scale_x; k++) *q++ = px;
+            }
+            for (unsigned int k = 1; k < scale_y; k++, q += row_w)
+                memcpy(q, first, row_w * sizeof(*q));
+        }
+        gop->Blt(gop, block_px, EfiBltBufferToVideo, 0, 0, win_x + x * scale_x,
+                 win_y + (y + j0) * scale_y, row_w, n * scale_y, 0);
+    }
 }
 
 static void fill(unsigned int x, unsigned int y, unsigned int w, unsigned int h,
@@ -87,8 +104,7 @@ static void fill(unsigned int x, unsigned int y, unsigned int w, unsigned int h,
 }
 
 void plat_border(int c) {
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = colour(c);
-    unsigned int win_w = 256 * scale, win_h = 192 * scale;
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL px = palette[c & 15];
     fill(0, 0, screen_w, win_y, px);
     fill(0, win_y + win_h, screen_w, screen_h - win_y - win_h, px);
     fill(0, win_y, win_x, win_h, px);

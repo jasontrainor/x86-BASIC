@@ -3,9 +3,8 @@
  * platform.
  *
  * The picture is kept here as a 1-bit-per-pixel bitmap plus one colour
- * attribute per 8x8 cell, just as the Spectrum stores it; the platform
- * layer only has to draw cells (plat_draw_cell). Text is drawn with the
- * font in font.c.
+ * attribute per 8x8 cell, just as the Spectrum stores it, and drawn a
+ * cell at a time (plat_put_block). Text is drawn with the font in font.c.
  */
 #include "screen.h"
 #include "platform.h"
@@ -86,7 +85,10 @@ static void draw(int c, int r) {
     int swap = (a & 0x80) && flash_on;
     if (cursor_on && c == cur->col && r == abs_row(cur, cur->row)) swap = !swap;
     if (swap) { int t = ink; ink = paper; paper = t; }
-    plat_draw_cell(c, r, bits, ink, paper);
+    unsigned char px[64];
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++) px[y * 8 + x] = (bits[y] & (0x80 >> x)) ? ink : paper;
+    plat_put_block(c * 8, r * 8, 8, 8, px);
     dirty[r][c] = 0;
 }
 
@@ -593,7 +595,24 @@ char get_char(void) {
 unsigned long timer_ms(void) { return plat_timer_ms(); }
 void tone(int freq, int ms)  { plat_tone(freq, ms); }
 
+// The picture: 256x192, with a border of at least 32 pixels each side
+// (the BIOS kernel has less above and below: VGA mode 13h is 200 high).
+// Colours 0-7 are the Spectrum's: black, blue, red, magenta, green,
+// cyan, yellow, white - bit 0 blue, bit 1 red, bit 2 green; 8-15 are
+// their BRIGHT versions.
+static void video_init(void) {
+    struct video v = { SCREEN_WIDTH, SCREEN_HEIGHT, 1, 320, 240, { { 0 } } };
+    for (int i = 0; i < 16; i++) {
+        int level = (i & 8) ? 0xFF : 0xD0;
+        v.palette[i][0] = (i & 2) ? level : 0;
+        v.palette[i][1] = (i & 4) ? level : 0;
+        v.palette[i][2] = (i & 1) ? level : 0;
+    }
+    plat_video(&v);
+}
+
 void screen_init(void) {
+    video_init();
     struct colours spectrum = { 0x38, 0, 0, 0, 0, 0 };   // black ink on white paper
     upper.colour = spectrum;
     cur = &upper;
