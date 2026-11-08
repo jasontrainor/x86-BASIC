@@ -5,7 +5,7 @@
  *                         sectors, name
  *   SAVE, LOAD, RUN name  programs (saved as listings); LOAD and RUN
  *                         also take a listing from a PC (GAME.BAS)
- *   DELETE name, RENAME old,new, LOCK and UNLOCK name (*: locked)
+ *   DELETE name, RENAME old,new; LOCK and UNLOCK (files aren't locked)
  *   BSAVE name,A addr,L len   memory; BLOAD name[,A addr]; BRUN loads
  *                         it, but machine code isn't run
  *   OPEN name[,L len]     a text file (made if it isn't there)

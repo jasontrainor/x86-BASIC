@@ -21,6 +21,11 @@ new implementation, and the character set was drawn for this project.
   disk
 - One disk image that boots on both old (BIOS) and new (UEFI) PCs, from
   a USB stick, hard disk or floppy
+- Three more machines, for listings written for the Apple I, II, II Plus
+  and IIe: Integer BASIC on the 1976 terminal computer and on the 1977
+  colour one, and the floating-point BASIC of 1978–83 (for Applesoft
+  listings), with their graphics and DOS 3.3-style disk commands (see
+  [The Apple-style machines](#the-apple-style-machines))
 
 ## Build and run
 
@@ -39,12 +44,22 @@ qemu-system-x86 ovmf`.
 ## Machines and the chooser
 
 x86 BASIC is built to hold more than one kind of computer ("machine"),
-each in `machines/NAME/`. So far there is one, the Spectrum. When the PC
-starts, a small chooser comes first and starts a machine: straight away
-if the image has only one, or from a menu if it has several.
+each in `machines/NAME/`:
+
+| Machine    | The menu calls it         | For listings written for              |
+|------------|---------------------------|---------------------------------------|
+| `spectrum` | Spectrum BASIC            | the ZX Spectrum (48K and 128K BASIC)  |
+| `a1basic`  | Integer BASIC (1976)      | the Apple I's Integer BASIC           |
+| `a2int`    | Integer BASIC II (1977)   | the Apple II's Integer BASIC          |
+| `a2fp`     | FP BASIC (1978-83)        | Applesoft, on an Apple II Plus or IIe |
+
+When the PC starts, a small chooser comes first and starts a machine:
+straight away if the image has only one, or from a menu if it has
+several.
 
     make                              # os.img, with every machine
     make image-spectrum               # build/images/spectrum.img: one machine
+    make image-a2fp                   # ... or any other
     make IMAGE_MACHINES="spectrum" DEFAULT=spectrum MENU=always TIMEOUT=10
 
 On the stick, each machine is a pair of kernels in the `X86BASIC` folder
@@ -267,48 +282,170 @@ keeps its last 64KB). The pound sign, © and block graphics come out as
 their Unicode characters, and UDGs as the letters they start as. `COPY`
 prints the text on the screen; pictures don't come out.
 
-## The Apple II-style machines (in progress)
+## The Apple-style machines
 
-Machines for listings written for the 1976–1983 Integer and
-floating-point BASICs of the Apple I, II, II Plus and IIe are being
-built. Their hardware is shared, in `machines/apple/`; the BASICs aren't
-there yet. What is:
+Three machines run listings written for Apple's BASICs of 1976–83. As
+with the Spectrum, they aren't emulators: they don't run 6502 machine
+code, and nothing in them comes from an Apple ROM, character set, disk
+or manual text. The BASICs were written for this project from how the
+originals behave, the characters are this project's own font, and the
+colours were worked out for it. "Apple", "Apple II" and "Applesoft" are
+trademarks of Apple Inc., used here only to say what listings these
+machines are for; the machines themselves have neutral names.
 
-- **Memory and soft switches:** 64KB of memory, plus the IIe's 64KB of
-  auxiliary memory, with the I/O switches at `$C000`–`$C0FF` (the
-  keyboard, the speaker, text/graphics, mixed, page 2, high resolution,
-  and the IIe's 80STORE, RAMRD, RAMWRT, ALTZP, 80COL, ALTCHARSET and
-  double resolution). PEEK and POKE see what programs expect there,
-  including the bytes that tell the models apart. There is no ROM: those
-  addresses read as 0.
-- **The screen,** drawn from memory as the video hardware does it:
-  - text: 40 or 80 columns, inverse and flashing characters, the IIe's
-    lower case, and MouseText symbols drawn for this project;
-  - low resolution (40×48 in 16 colours) and high resolution (280×192),
-    with the colours a TV makes of the dot patterns;
-  - the IIe's double low and high resolution;
-  - mixed text and graphics, and page 2.
+Each starts at its prompt, with no banner: `>` for Integer BASIC, `]`
+for FP BASIC. Its files go in its own folder on the stick (`A1BASIC/`,
+`A2INT/`, `A2FP/`).
 
-  It's a 560×192 picture, shown twice as tall. On the BIOS that's VGA
-  mode 12h (640×480 in 16 colours).
-- **The firmware's screen handling:** the text window, cursor and
-  inverse mode live in zero page (`POKE 32,10` moves the window's left
-  edge), with scrolling and the IIe's 80-column control characters.
-- **The keyboard:** the key latch at `$C000`, with typed-ahead keys
-  queued behind it. Before the IIe the keyboard types upper case only.
-- **Line input as the monitor reads it:** the left arrow backs up, the
-  right arrow copies the character on the screen, Esc then I J K M (or
-  the arrows) moves the cursor around, and Ctrl+X cancels the line.
+### Keys
 
-None of it comes from an Apple ROM, character set or manual text. The
-characters are this project's own font, the colours were worked out for
-it, and the menu names are neutral. "Apple", "Apple II" and "Applesoft"
-are trademarks of Apple Inc., and are used here only to say what
-listings these machines are for.
+- **Typing a line** (on the 1977 and later machines) works as their
+  monitor reads it: the left
+  arrow backs up, the right arrow copies the character under the cursor
+  from the screen, Esc then I J K M (or the arrows) moves the cursor
+  around the screen without typing, and Ctrl+X cancels the line.
+- **Ctrl+C** stops a program (BREAK, STOPPED AT); CONT or CON carries on.
+- **Paddles and buttons:** a PC has no paddles, so the arrow keys move
+  paddle 0 (left, right) and paddle 1 (up, down), 16 steps at a time,
+  for `PDL`. The buttons (`PEEK(-16287)` to `-16285`) are the left Alt,
+  right Alt (AltGr) and Shift keys, on BIOS PCs only: UEFI firmware
+  doesn't say when they're held.
+- **F10 twice** goes back to the chooser, as in every machine.
 
-`make image-a2video` builds an image with a test machine for all this
-(`machines/a2video/`): a `]` prompt that takes commands such as `HGR`,
-`BARS`, `80`, `CHARS` and `POKE`, listed at the top of its source.
+### What the three share
+
+The hardware programs see, in `machines/apple/`:
+
+- **Memory and soft switches:** 64KB, plus the IIe's 64KB of auxiliary
+  memory, with the I/O switches at `$C000`–`$C0FF`: the keyboard
+  (`PEEK(-16384)`, cleared by `POKE -16368,0`), the speaker click
+  (`-16336`), text/graphics, mixed, page 2, high resolution, and the
+  IIe's 80STORE, RAMRD, RAMWRT, ALTZP, 80COL, ALTCHARSET and double
+  resolution. The bytes programs read to tell the models apart (`$FBB3`,
+  `$FBC0`) are there; the rest of the ROM's addresses read as 0.
+- **The screen,** drawn from memory as the video hardware does it: 40
+  or 80 columns of text (inverse, flashing, the IIe's lower case and
+  MouseText symbols drawn for this project), low resolution (40×48, 16
+  colours), high resolution (280×192, with the colours a TV makes of
+  the dot patterns), the IIe's double resolution, mixed text and
+  graphics, and page 2. It's a 560×192 picture shown twice as tall; on
+  the BIOS that's VGA mode 12h (640×480, 16 colours).
+- **The text window** lives in zero page, as on the originals: `POKE
+  32,10` moves its left edge, `PEEK(36)` is the cursor's column.
+- **CALL:** the firmware routines programs call are done here instead:
+  `CALL -936` (clear the screen), `-958`, `-868`, `-922`, `-912`, `-198`
+  (the bell), `-1008`, `-998`, `-1036`, `-384`/`-380` (inverse/normal),
+  `-1998`/`-1994` (clear low resolution), `-1216`, `-1233`, `-756`
+  (wait for a key), and in FP BASIC `62450`/`62454` (clear or fill high
+  resolution). A CALL to anything else, such as machine code a program
+  POKEd in, does nothing, and the program carries on: games that make
+  their sound that way run silently.
+
+### Integer BASIC
+
+`a2int` is the 1977 colour machine's Integer BASIC; `a1basic` is the
+same language on the 1976 terminal computer.
+
+- Numbers are integers from -32767 to 32767; going outside that is
+  `*** >32767 ERR`. `/` truncates; `MOD`; `#` and `<>` both mean not
+  equal; comparisons are 1 or 0.
+- Names are a letter then letters and digits, all significant. Strings
+  are DIMmed with the longest they may be (`DIM A$(20)`, up to 255), and
+  `A$(3)`, `A$(3,5)` are parts of them; there's no `+` for strings:
+  `A$(LEN(A$)+1)="MORE"` adds to the end. Arrays have one subscript,
+  from 0.
+- Lines are checked as they're typed (`*** SYNTAX ERR`, and the line
+  isn't kept). Errors in a program show `STOPPED AT n` too.
+- Things programs depend on are kept: when IF's condition is false only
+  the statement after THEN is skipped, and statements after it on the
+  line still run; a program must END (`*** NO END ERR`); GOSUBs and FOR
+  loops nest 8 deep; INPUT of a number takes an expression; GOTO and
+  GOSUB take expressions.
+- Statements and functions: LET PRINT INPUT IF THEN GOTO GOSUB RETURN
+  FOR TO STEP NEXT END REM DIM POKE CALL TAB CLR NEW RUN LIST DEL AUTO
+  MAN CON HIMEM: LOMEM: PR# IN#, ABS SGN RND PEEK LEN, AND OR NOT MOD;
+  and on the 1977 machine also GR COLOR= PLOT HLIN VLIN SCRN( TEXT VTAB
+  PDL ASC POP DSP TRACE NOTRACE.
+
+The **1976 terminal** (`a1basic`) shows 40×24 upper-case characters that
+only scroll, with a flashing `@` for a cursor, at the original's 60
+characters a second; **Tab** switches between that and as fast as it
+goes. `_` or Backspace rubs out a character (showing a `_`), and Esc or
+Ctrl+X cancels the line. Its keyboard and display are at `$D010`–`$D013`
+(`PEEK(-12271)` is 128 while a key is waiting); it has no graphics, no
+cursor moves and no soft switches.
+
+### FP BASIC
+
+`a2fp` is the floating-point BASIC (for Applesoft listings), on the
+later model: lower case, and 80 columns after `PR#3`.
+
+- Numbers have 32 significant bits and print with up to 9 digits, as on
+  the original: `1/3` is `.333333333`, `1E9` is `1E+09`, `.001` is
+  `1E-03`. `A%` is an integer (-32767 to 32767), `A$` a string (up to
+  255 characters).
+- Only the first two characters of a name count, and keywords are found
+  anywhere in a line as it's typed, even inside names, as on the
+  original: `SCORE` is `SC OR E` (a SYNTAX ERROR when assigned to), and
+  `FORI=ATOB` is `FOR I = A TO B`. Spaces are taken out, except in
+  strings, REM and DATA; LIST puts them back around keywords and
+  operators.
+- Lines aren't checked until they run (`?SYNTAX ERROR IN 20`).
+- The language: arrays of any shape (11 elements a subscript if not
+  DIMmed), the string functions, DEF FN, ON GOTO/GOSUB, READ/DATA/
+  RESTORE, INPUT (with `?REENTER` and `?EXTRA IGNORED`), GET, ONERR GOTO
+  and RESUME (`PEEK(222)` is the error's number, `PEEK(218)+256*PEEK(219)`
+  its line, `POKE 216,0` turns it off), STOP/CONT, TRACE, WAIT, SPEED=,
+  HOME, HTAB, VTAB, INVERSE, FLASH, NORMAL, TAB(, SPC(, POS, FRE.
+- Graphics: GR, COLOR=, PLOT, HLIN, VLIN, SCRN( and HGR, HGR2, HCOLOR=,
+  HPLOT ... TO, and shapes from a shape table (DRAW, XDRAW, ROT=,
+  SCALE=). The eight HCOLORs behave as on the original: green plotted
+  on an even column comes out black.
+
+### Disk commands
+
+Both BASICs have DOS 3.3-style commands, typed at the prompt or printed
+by a program after a Ctrl+D (`PRINT CHR$(4);"CATALOG"`):
+
+- CATALOG, SAVE, LOAD, RUN *name*, DELETE, RENAME *old*,*new* (LOCK
+  and UNLOCK are accepted, but files aren't locked);
+- text files: OPEN, READ, WRITE, APPEND, POSITION, CLOSE (with `,R`,
+  `,B` and `,L`; INPUT and GET read from the file, PRINT writes to it);
+- EXEC (a file's lines, as if typed), BSAVE *name*`,A`*addr*`,L`*len*,
+  BLOAD and BRUN (which loads, but can't run machine code);
+- MON, NOMON, MAXFILES, VERIFY and INIT are accepted; INT and FP say
+  `LANGUAGE NOT AVAILABLE` for the other BASIC, since each is its own
+  machine here.
+
+Errors are DOS's (`FILE NOT FOUND`, `END OF DATA` ...), and FP BASIC's
+ONERR catches them with DOS's numbers. Names can be up to 15 characters
+(DOS allowed 30). Files are saved files in the machine's folder, so
+they can be copied between sticks; a listing or text file copied there
+from a PC can be RUN, EXECed or OPENed by its 8.3 name (`RUN GAME.BAS`).
+
+Programs, text files and binary files on DOS 3.3 disk images (140KB
+`.dsk` or `.do` files) can be copied out for the stick:
+
+    tools/dsk.py list games.dsk
+    tools/dsk.py extract games.dsk out/     # then copy out/*.SAV to A2FP/
+
+FP BASIC programs become listings; Integer BASIC programs on disk images
+aren't converted yet.
+
+### Not the same as the originals
+
+- No 6502: machine code a program POKEs in and CALLs doesn't run, and
+  `&` and `USR` are errors. Sound made by clicking the speaker
+  (`PEEK(-16336)` in a loop) works, at the pitch the interpreter's speed
+  gives it.
+- No cassette tape: LOAD, SAVE, SHLOAD, STORE and RECALL without a name
+  do nothing.
+- ROT= turns shapes to the nearest quarter turn.
+- Undimensioned Integer BASIC strings can be up to 255 characters, and
+  arrays 0–10.
+- `make image-a2video` builds a test machine for the screen and keyboard
+  (`machines/a2video/`), with commands such as `HGR`, `BARS`, `80` and
+  `CHARS`.
 
 ## Booting a real PC from a USB stick
 
@@ -359,8 +496,10 @@ The two versions look and behave the same.
     make boot-test    # boot os.img in QEMU and type a BASIC session,
                       # then try the chooser's menu
 
-`make test` runs about 330 tests of the interpreter and the Apple layer, including a program
-written the way Spectrum listings are (`tests/listings/demo.bas`).
+`make test` runs about 430 tests: the Spectrum's interpreter, including
+a program written the way Spectrum listings are
+(`tests/listings/demo.bas`), the Apple layer, both Integer BASICs, FP
+BASIC and the disk commands.
 `make boot-test` boots the image five ways: BIOS floppy, BIOS hard disk,
 BIOS USB stick, UEFI USB stick and UEFI hard disk. It reads the text back
 from screenshots. It uses KVM when available, because QEMU's emulator
@@ -368,7 +507,9 @@ doesn't enforce some CPU rules that real PCs do. Then
 `tests/qemu_menu.py` boots images with two machines, BIOS and UEFI: the
 menu, choosing, F10 twice back to it, `MENU=NEVER`, and Shift held at
 start. `tests/qemu_apple.py` boots the Apple test machine and reads its
-screen back (`tests/apple_screen.py`): line input, colours, 80 columns.
+screen back (`tests/apple_screen.py`): line input, colours, 80 columns;
+then each Apple-style BASIC, BIOS and UEFI, saving to and loading from
+the image's disk.
 `make test` also runs the Apple layer on the host, checking the text and
 colours of the picture it draws. The same tests run on
 GitHub Actions for every push (`.github/workflows/ci.yml`).
@@ -377,7 +518,8 @@ GitHub Actions for every push (`.github/workflows/ci.yml`).
 prints what's on the screen, for trying things out.
 `make run-listing LISTING=game.bas` boots the image with that listing on
 it, runs it, and saves the screen as `game.png` (`MODE=uefi`, `WAIT=20`
-to change how it boots and how long it runs first).
+to change how it boots and how long it runs first); `MACHINE=a2fp`
+(or `a2int`, `a1basic`) runs it on that machine instead.
 
 ## How it works
 
@@ -386,9 +528,16 @@ to change how it boots and how long it runs first).
                            partition table)
     machines/chooser/      the chooser: BOOT.CFG, the menu, and starting
                            a machine's kernel (start.c)
-    machines/apple/        the Apple II-style hardware the Apple machines
-                           share: memory.c, video.c, text.c
-    machines/a2video/      a test machine for it
+    machines/apple/        the Apple-style hardware the Apple machines share:
+      memory.c             the memory map and soft switches
+      video.c              the picture, drawn from memory
+      text.c               the firmware's text output, keyboard, line input
+      lores.c, hires.c     low and high resolution graphics, shapes
+      calls.c              the firmware routines programs CALL
+      dos.c                the DOS 3.3-style disk commands
+    machines/intbasic/     Integer BASIC (used by a1basic and a2int)
+    machines/a2fp/         FP BASIC
+    machines/a2video/      a test machine for the Apple screen
     core/                  shared by every machine:
       kernel_entry.asm     16-bit start-up: moves the code to its segment
                            and sets up "unreal mode" so the real-mode
@@ -410,6 +559,7 @@ to change how it boots and how long it runs first).
       font.c               the character set (generated by tools/mkfont.py)
     tools/mkimage.py       builds disk images, including the FAT partition
     tools/savefile.py      .SAV files on a PC; converts old saves
+    tools/dsk.py           files from DOS 3.3 disk images
     tools/write_usb.py     writes an image to a USB stick, carefully
 
 Each machine (`machines/NAME/`) is built, with `core/`, into its own
