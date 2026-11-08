@@ -176,7 +176,7 @@ doesn't use) runs at full speed; `POKE 23681,0` goes back.
   so `IN` counts a key as held for a moment after each press (or repeat),
   and `INKEY$` returns each press (and repeat) once.
 - No printer, microdrives or other Interface 1 commands; `OPEN #`,
-  `CLOSE #`, `FORMAT`, `MOVE` and `SAVE ... DATA` aren't there.
+  `CLOSE #`, `FORMAT` and `MOVE` aren't there.
 - Speed is matched on average, statement by statement, not exactly.
 
 ## Saving programs
@@ -186,7 +186,8 @@ the disk the computer booted from and `LOAD "name"` reads it back (`LOAD
 ""` loads the first program). `SAVE "name" LINE 10` makes `LOAD` run it
 from line 10. `SAVE "name" CODE start,length` and `SAVE "name" SCREEN$`
 save memory or the screen, loaded back with `LOAD "name" CODE [start]`
-and `LOAD "name" SCREEN$`. `VERIFY` checks a save, `MERGE` adds a saved
+and `LOAD "name" SCREEN$`. `SAVE "name" DATA a()` (or `a$()`) saves an
+array, and `LOAD "name" DATA b()` loads it back, under any name. `VERIFY` checks a save, `MERGE` adds a saved
 program's lines to the one in memory, `CAT` lists what's saved, and how much
 room is left, and `ERASE "name"` deletes one. There's room for 127
 files, about 890KB in all, with names of up to 15 characters.

@@ -2110,6 +2110,37 @@ static void st_input() {
         use_lower(0);
     }
 }
+// Make array name (replacing any old one) with nd dimensions dims and
+// count elements in all, cleared (to 0, or spaces). 0 after an error.
+static struct array *new_array(const char *name, int is_str, int nd, const int *dims,
+                               int count) {
+    int esize = is_str ? 1 : (int)sizeof(double);
+    struct array *a = find_array(name, is_str);
+    if (!a) {
+        int i = 0;
+        while (i < num_arrays && arrays[i].name[0]) i++;
+        if (i == MAX_ARRAYS) { error("4 Out of memory"); return 0; }
+        if (i == num_arrays) num_arrays++;
+        a = &arrays[i];
+        strcpy(a->name, name);
+        a->is_str = is_str;
+        a->data = 0;
+    }
+    a->data = 0;                  // (any old elements are now garbage)
+    char *data = heap_alloc(count * esize, 1, a - arrays);
+    if (!data) { a->name[0] = '\0'; return 0; }
+    a->data = data;
+    a->ndims = nd;
+    a->count = count;
+    for (int i = 0; i < nd; i++) a->dims[i] = dims[i];
+    memset(a->data, is_str ? ' ' : 0, count * esize);
+    if (is_str) {                 // A string array replaces a simple string
+        struct var *v = lookup_var(name, 1);
+        if (v) delete_var(v);
+    }
+    return a;
+}
+
 static void st_dim() {
     do {
         char name[NAME_LEN];
@@ -2135,29 +2166,7 @@ static void st_dim() {
         if (error_msg) return;
         if (checking) continue;
         if (count > room) { error("4 Out of memory"); return; }
-        struct array *a = find_array(name, is_str);
-        if (!a) {
-            int i = 0;
-            while (i < num_arrays && arrays[i].name[0]) i++;
-            if (i == MAX_ARRAYS) { error("4 Out of memory"); return; }
-            if (i == num_arrays) num_arrays++;
-            a = &arrays[i];
-            strcpy(a->name, name);
-            a->is_str = is_str;
-            a->data = 0;
-        }
-        a->data = 0;              // (any old elements are now garbage)
-        char *data = heap_alloc(count * esize, 1, a - arrays);
-        if (!data) { a->name[0] = '\0'; return; }
-        a->data = data;
-        a->ndims = nd;
-        a->count = count;
-        for (int i = 0; i < nd; i++) a->dims[i] = dims[i];
-        memset(a->data, is_str ? ' ' : 0, count * esize);
-        if (is_str) {             // A string array replaces a simple string
-            struct var *v = lookup_var(name, 1);
-            if (v) delete_var(v);
-        }
+        if (!new_array(name, is_str, nd, dims, count)) return;
     } while (accept_char(','));
 }
 
@@ -2293,10 +2302,18 @@ static int file_name(char *name) {
     return 1;
 }
 
-// What follows the name: CODE [start[,len]], SCREEN$ or nothing (a
-// program). Returns FILE_BYTES or FILE_PROGRAM; for bytes, *start and
-// *len are set if given (otherwise left as they are).
-static int file_kind(unsigned int *start, unsigned int *len) {
+// What follows the name: CODE [start[,len]], SCREEN$, DATA a() or DATA
+// a$(), or nothing (a program). Returns FILE_BYTES, FILE_NUMBERS,
+// FILE_CHARS or FILE_PROGRAM; for bytes, *start and *len are set if given
+// (otherwise left as they are); for an array, its name goes in aname.
+static int file_kind(unsigned int *start, unsigned int *len, char *aname) {
+    if (accept(T_DATA)) {
+        int is_str;
+        if (!read_name(aname, &is_str)) return FILE_NUMBERS;
+        expect_char('(', "C Nonsense in BASIC");
+        expect_char(')', "C Nonsense in BASIC");
+        return is_str ? FILE_CHARS : FILE_NUMBERS;
+    }
     if (accept(T_SCREENS)) {
         *start = 16384;
         *len = 6912;
@@ -2313,6 +2330,65 @@ static int file_kind(unsigned int *start, unsigned int *len) {
 HIGH_MEM unsigned char load_buf[PROG_SIZE];
 
 /*
+ * SAVE "name" DATA a(): an array, saved as its number of dimensions (a
+ * byte), each dimension (2 bytes), then its elements: doubles, or the
+ * characters of a string array. The file's param is the array's letter.
+ */
+#define TEXT_SIZE (64 * 1024)
+#define DATA_SIZE TEXT_SIZE
+HIGH_MEM unsigned char text_buf[TEXT_SIZE];  // (text files and arrays)
+
+__attribute__((noinline, noclone))   // (text_buf is HIGH_MEM: see mem.h)
+static int array_to_bytes(struct array *a, unsigned char *out) {
+    int n = 0, size = a->count * (a->is_str ? 1 : (int)sizeof(double));
+    if (1 + 2 * a->ndims + size > DATA_SIZE) return -1;
+    out[n++] = a->ndims;
+    for (int i = 0; i < a->ndims; i++) {
+        out[n++] = a->dims[i];
+        out[n++] = a->dims[i] >> 8;
+    }
+    memcpy(out + n, a->data, size);
+    return n + size;
+}
+
+// The dimensions saved in data (len bytes); the number of elements, or
+// -1 if it isn't a well-formed array of that kind.
+__attribute__((noinline, noclone))   // (text_buf is HIGH_MEM: see mem.h)
+static int array_dims(const unsigned char *data, int len, int is_str, int *nd, int *dims) {
+    if (len < 1 || data[0] < 1 || data[0] > MAX_DIMS || len < 1 + 2 * data[0]) return -1;
+    *nd = data[0];
+    long count = 1;
+    for (int i = 0; i < *nd; i++) {
+        dims[i] = data[1 + 2 * i] | (data[2 + 2 * i] << 8);
+        if (dims[i] < 1) return -1;
+        count *= dims[i];
+        if (count > DATA_SIZE) return -1;
+    }
+    if (1 + 2 * *nd + count * (is_str ? 1 : (long)sizeof(double)) != len) return -1;
+    return count;
+}
+
+// LOAD (or VERIFY: t) the array saved in data into array name.
+__attribute__((noinline, noclone))   // (text_buf is HIGH_MEM: see mem.h)
+static void bytes_to_array(int t, const char *name, int is_str, const unsigned char *data,
+                           int len) {
+    int nd, dims[MAX_DIMS];
+    int count = array_dims(data, len, is_str, &nd, dims);
+    if (count < 0) { error("R Bad program file"); return; }
+    const unsigned char *elements = data + 1 + 2 * nd;
+    int size = count * (is_str ? 1 : (int)sizeof(double));
+    if (t == T_VERIFY) {
+        struct array *a = find_array(name, is_str);
+        if (!a || a->ndims != nd || memcmp(a->dims, dims, nd * sizeof(int)) != 0 ||
+            memcmp(a->data, elements, size) != 0)
+            error("R Tape loading error");
+        return;
+    }
+    struct array *a = new_array(name, is_str, nd, dims, count);
+    if (a) memcpy(a->data, elements, size);
+}
+
+/*
  * Listings as text files, on the FAT partition (see fat.c): a name ending
  * .BAS or .TXT is one. The text is as LIST shows it, one line per line,
  * with the characters a PC can't show written as escapes (see escape()),
@@ -2326,8 +2402,6 @@ HIGH_MEM unsigned char load_buf[PROG_SIZE];
 // EDIT and text files; kept out of the stack).
 HIGH_MEM char list_buf[MAX_TEXT * 4], list_kw[MAX_TEXT * 4];
 
-#define TEXT_SIZE (64 * 1024)
-HIGH_MEM unsigned char text_buf[TEXT_SIZE];
 HIGH_MEM char text_line[MAX_TEXT * 8];
 HIGH_MEM unsigned char text_tokens[MAX_TEXT + 1];
 
@@ -2511,7 +2585,8 @@ static void st_save() {
     if (!file_name(name)) return;
     if (!name[0] && !checking) { error("F Invalid file name"); return; }
     unsigned int start = 0, len = 0;
-    int kind = file_kind(&start, &len), param = 0;
+    char aname[NAME_LEN];
+    int kind = file_kind(&start, &len, aname), param = 0;
     if (kind == FILE_PROGRAM && accept(T_LINE)) param = expr_int(1, 9999);
     if (error_msg || checking) return;
     if (is_text_name(name)) {
@@ -2520,7 +2595,13 @@ static void st_save() {
         return;
     }
     const char *err;
-    if (kind == FILE_BYTES) {
+    if (kind == FILE_NUMBERS || kind == FILE_CHARS) {
+        struct array *a = find_array(aname, kind == FILE_CHARS);
+        if (!a) { error("2 Variable not found"); return; }
+        int n = array_to_bytes(a, text_buf);
+        if (n < 0) { error("4 Out of memory"); return; }
+        err = storage_save(name, text_buf, n, aname[0], kind);
+    } else if (kind == FILE_BYTES) {
         if (len > PROG_SIZE) { error("4 Out of memory"); return; }
         for (unsigned int i = 0; i < len; i++) load_buf[i] = mem_peek(start + i);
         err = storage_save(name, load_buf, len, start, FILE_BYTES);
@@ -2553,9 +2634,10 @@ static void st_load(int t) {
     char name[STORE_NAME_LEN + 1];
     if (!file_name(name)) return;
     unsigned int start = 0, want = 0;
-    int kind = file_kind(&start, &want);
+    char aname[NAME_LEN];
+    int kind = file_kind(&start, &want, aname);
     if (error_msg) return;
-    if (kind == FILE_BYTES && t == T_MERGE) { error("C Nonsense in BASIC"); return; }
+    if (kind != FILE_PROGRAM && t == T_MERGE) { error("C Nonsense in BASIC"); return; }
     if (checking) return;
     if (is_text_name(name)) {
         if (kind == FILE_PROGRAM) text_file(t, name);
@@ -2563,6 +2645,12 @@ static void st_load(int t) {
         return;
     }
     int len, param;
+    if (kind == FILE_NUMBERS || kind == FILE_CHARS) {
+        const char *err = storage_load(name, kind, text_buf, DATA_SIZE, &len, &param);
+        if (err) error(err);
+        else bytes_to_array(t, aname, kind == FILE_CHARS, text_buf, len);
+        return;
+    }
     const char *err = storage_load(name, kind, load_buf, PROG_SIZE, &len, &param);
     if (!err && kind == FILE_PROGRAM && !valid_program(load_buf, len)) err = "R Bad program file";
     if (err) { error(err); return; }
@@ -2626,6 +2714,13 @@ static void cat_entry(const char *name, int len, int param, int type) {
     for (int i = strlen(name); i < 16; i++) print_char(' ');
     if (type == FILE_BYTES && param == 16384 && len == 6912) {
         print_string("SCREEN$");
+    } else if (type == FILE_NUMBERS || type == FILE_CHARS) {
+        char a[2] = { param >= 'A' && param <= 'Z' ? param + 'a' - 'A' : param, 0 };
+        itoa(len, buf);
+        print_string(buf);
+        print_string(" DATA ");
+        print_string(a);
+        print_string(type == FILE_CHARS ? "$()" : "()");
     } else {
         itoa(len, buf);
         print_string(buf);
