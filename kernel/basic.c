@@ -35,6 +35,7 @@ enum {
     T_ERASE, T_EDIT, T_AT, T_TAB, T_LINE, T_AND, T_OR, T_NOT, T_PI, T_ABS,
     T_INT, T_SGN, T_SQR, T_SIN, T_COS, T_TAN, T_ATN, T_ASN, T_ACS, T_LN,
     T_EXP, T_RND, T_LEN, T_VAL, T_CODE, T_CHRS, T_STRS, T_INKEYS, T_POINT,
+    T_DEFFN, T_FN,
     T_LE, T_GE, T_NE,
     T_END_OF_TOKENS
 };
@@ -48,6 +49,7 @@ static const char *const token_names[] = {
     "ERASE", "EDIT", "AT", "TAB", "LINE", "AND", "OR", "NOT", "PI", "ABS",
     "INT", "SGN", "SQR", "SIN", "COS", "TAN", "ATN", "ASN", "ACS", "LN",
     "EXP", "RND", "LEN", "VAL", "CODE", "CHR$", "STR$", "INKEY$", "POINT",
+    "DEF FN", "FN",
     "<=", ">=", "<>",
 };
 _Static_assert(sizeof(token_names) / sizeof(token_names[0]) == T_END_OF_TOKENS - T_PRINT,
@@ -67,6 +69,7 @@ static int find_token(const char *word) {
     }
     if (strcmp(word, "GOTO") == 0) return T_GOTO;
     if (strcmp(word, "GOSUB") == 0) return T_GOSUB;
+    if (strcmp(word, "DEFFN") == 0) return T_DEFFN;
     return 0;
 }
 
@@ -95,8 +98,8 @@ static int is_word(const char *s, const char *word) {
  * that matches one, in any case, so names may contain keywords
  * (TOTAL, FORM) and keywords may be followed directly by digits
  * (GOTO10). Spaces around keywords are dropped; LIST puts them back.
- * The two-word keywords GO TO and GO SUB are recognised with or without
- * the space. Names are kept as typed (LIST shows them that way) but
+ * The two-word keywords GO TO, GO SUB and DEF FN are recognised with or
+ * without the space. Names are kept as typed (LIST shows them that way) but
  * compared in any case. The text of strings and of REM comments is kept
  * exactly.
  */
@@ -137,6 +140,11 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
                 while (*q == ' ') q++;
                 if (is_word(q, "TO"))  { t = T_GOTO; len = q + 2 - src; }
                 if (is_word(q, "SUB")) { t = T_GOSUB; len = q + 3 - src; }
+            }
+            if (len == 3 && is_word(src, "DEF")) {
+                const char *q = src + 3;     // DEF FN
+                while (*q == ' ') q++;
+                if (is_word(q, "FN")) { t = T_DEFFN; len = q + 2 - src; }
             }
             if (t) {
                 while (n > 0 && dst[n - 1] == ' ') n--;
@@ -199,6 +207,18 @@ int prog_len = 0;
 static int line_num(int off) { return prog[off] | (prog[off + 1] << 8); }
 static int line_next(int off) { return off + 3 + prog[off + 2]; }
 static unsigned char *line_text(int off) { return prog + off + 3; }
+
+// The first token t at or after q in a line, outside strings and REM
+// comments (which can hold any character); 0 if there isn't one.
+static unsigned char *find_token_in(unsigned char *q, int t) {
+    int in_str = 0;
+    for (; *q; q++) {
+        if (*q == '"') in_str = !in_str;
+        else if (!in_str && *q == T_REM) return 0;
+        else if (!in_str && *q == t) return q;
+    }
+    return 0;
+}
 
 // Offset of the first line numbered >= num (prog_len if none).
 static int line_find(int num) {
@@ -809,11 +829,15 @@ static struct value numeric_function(int t) {
     return num_value(0);
 }
 
+static struct value *fn_param(const char *name, int is_str);
+
 static struct value variable_value() {
     char name[NAME_LEN];
     int is_str;
     if (!read_name(name, &is_str)) return num_value(0);
     skip_space();
+    struct value *param = fn_param(name, is_str);
+    if (param) return *param;
     if (is_str) {
         struct array *a = find_array(name, 1);
         if (a) {
@@ -911,6 +935,110 @@ static struct value string_function(int t) {
     return num_value(0);
 }
 
+/*
+ * DEF FN and FN. A call FN F(args) finds the DEF FN F in the program,
+ * gives its parameters the argument values and works out its expression.
+ * While it does, the parameters hide any variables of the same names.
+ */
+#define MAX_PARAMS 8
+#define MAX_FN_DEPTH 32
+
+struct fn_frame {
+    int count;
+    char name[MAX_PARAMS][NAME_LEN];
+    char is_str[MAX_PARAMS];
+    struct value val[MAX_PARAMS];
+};
+HIGH_MEM struct fn_frame fn_frames[MAX_FN_DEPTH];
+int fn_depth;             // frames in use; the innermost one is visible
+
+// A parameter of the function being worked out, or 0.
+static struct value *fn_param(const char *name, int is_str) {
+    if (!fn_depth) return 0;
+    struct fn_frame *f = &fn_frames[fn_depth - 1];
+    for (int i = 0; i < f->count; i++)
+        if (f->is_str[i] == is_str && strcmp(f->name[i], name) == 0) return &f->val[i];
+    return 0;
+}
+
+// Find DEF FN name: p is left just after its name. Returns 0 if none.
+static int find_def_fn(const char *name, int is_str) {
+    for (int off = 0; off < prog_len; off = line_next(off)) {
+        unsigned char *q = line_text(off);
+        while ((q = find_token_in(q, T_DEFFN)) != 0) {
+            p = (char *)q + 1;
+            char n[NAME_LEN];
+            int s;
+            if (read_name(n, &s) && s == is_str && strcmp(n, name) == 0) return 1;
+            error_msg = 0;
+            q++;
+        }
+    }
+    return 0;
+}
+
+static struct value fn_call() {
+    char name[NAME_LEN];
+    int is_str;
+    if (!read_name(name, &is_str)) return num_value(0);
+    if (fn_depth == MAX_FN_DEPTH) {
+        error("OUT OF MEMORY");
+        return num_value(0);
+    }
+    struct fn_frame *f = &fn_frames[fn_depth];
+    // The arguments, worked out here (before the frame is in use).
+    struct value args[MAX_PARAMS];
+    int nargs = 0;
+    expect_char('(', "SYNTAX ERROR");
+    skip_space();
+    if (*p != ')') {
+        do {
+            if (nargs == MAX_PARAMS) { error("PARAMETER ERROR"); break; }
+            args[nargs++] = expr();
+        } while (!error_msg && accept_char(','));
+    }
+    expect_char(')', "MISSING )");
+    if (error_msg) return num_value(0);
+
+    char *saved = p;
+    if (!find_def_fn(name, is_str)) {
+        p = saved;
+        error("FN WITHOUT DEF");
+        return num_value(0);
+    }
+    // DEF FN F(A, B$)=expression
+    f->count = 0;
+    expect_char('(', "SYNTAX ERROR");
+    skip_space();
+    if (*p != ')') {
+        do {
+            int s;
+            if (f->count == MAX_PARAMS) { error("PARAMETER ERROR"); break; }
+            if (!read_name(f->name[f->count], &s)) break;
+            f->is_str[f->count] = s;
+            if (f->count >= nargs || args[f->count].is_str != s) {
+                error("PARAMETER ERROR");
+                break;
+            }
+            f->val[f->count] = args[f->count];
+            f->count++;
+        } while (accept_char(','));
+    }
+    expect_char(')', "SYNTAX ERROR");
+    if (!error_msg && f->count != nargs) error("PARAMETER ERROR");
+    expect_char('=', "SYNTAX ERROR");
+    struct value v = num_value(0);
+    if (!error_msg) {
+        fn_depth++;
+        v = expr();
+        fn_depth--;
+        if (!error_msg && v.is_str != is_str)
+            error(is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
+    }
+    p = saved;
+    return v;
+}
+
 static struct value primary();
 
 static struct value factor() {
@@ -966,6 +1094,9 @@ static struct value primary() {
         int y = expr_int(0, PLOT_HEIGHT - 1);
         expect_char(')', "MISSING )");
         return num_value(error_msg ? 0 : point(x, y));
+    } else if (c == T_FN) {
+        p++;
+        return fn_call();
     } else if (isalpha(c)) {
         return variable_value();
     }
@@ -1566,11 +1697,9 @@ static int find_data() {
     if (in_data) return 1;
     if (data_line >= prog_len) return 0;
     unsigned char *q = data_pos ? (unsigned char *)data_pos : line_text(data_line);
-    // DATA is a token byte, which can't occur inside strings or comments
-    // (they only hold typed characters), so a plain search finds it.
     for (;;) {
-        while (*q && *q != T_DATA) q++;
-        if (*q) {
+        q = find_token_in(q, T_DATA);
+        if (q) {
             data_pos = (char *)q + 1;
             in_data = 1;
             return 1;
@@ -1598,7 +1727,7 @@ static void st_read() {
     } while (!error_msg && accept_char(','));
 }
 
-// DATA is only read by READ; running it does nothing.
+// DATA is only read by READ (and DEF FN by FN); running it does nothing.
 static void st_data() {
     while (!at_statement_end()) {
         if (*p++ == '"') {
@@ -1869,6 +1998,7 @@ static void execute_statement() {
     case T_DIM:    st_dim(); break;
     case T_READ:   st_read(); break;
     case T_DATA:   st_data(); break;
+    case T_DEFFN:  st_data(); break;      // only used by FN
     case T_RESTORE:
         restore(at_statement_end() ? 0 : expr_int(1, 9999));
         break;
@@ -2027,6 +2157,7 @@ static void run() {
         }
         error_msg = 0;
         pool_used = 0;
+        fn_depth = 0;
         jumped = 0;
         stmt_line = cur_line;
         stmt_pos = p;
