@@ -371,8 +371,9 @@ static const char *open_path(const char *name, unsigned int *dir, unsigned char 
 
 /* ------------------------------------------------------------------------ */
 
-static const char *read_file(const char *name, unsigned char *buf, int cap, int *len,
-                             int partial) {
+// Read the file's bytes from skip on into buf. *len: how many there are.
+static const char *read_file(const char *name, unsigned int skip, unsigned char *buf, int cap,
+                             int *len, int partial) {
     unsigned char sname[11];
     unsigned int dir;
     const char *err = open_path(name, &dir, sname, 0);
@@ -380,20 +381,24 @@ static const char *read_file(const char *name, unsigned char *buf, int cap, int 
     int i = find(dir, sname, 0);
     if (i < 0) return failed ? disk_error : "R Program not found";
     unsigned char *e = entry(dir, i, 0);
-    unsigned int size = get32(e + 28), c = get16(e + 26), done = 0;
+    unsigned int size = get32(e + 28), c = get16(e + 26), pos = 0;
+    if (size < skip) return "R Bad program file";
+    size -= skip;
     *len = size;
     if (size > (unsigned int)cap) {
         if (!partial) return "4 Out of memory";
         size = cap;
     }
     unsigned char *sector = buffer(DATA_BUF);
-    while (done < size) {
+    unsigned int end = skip + size;           // (pos counts from the start of the file)
+    while (pos < end) {
         if (!is_cluster(c)) return "R Bad program file";
-        for (unsigned int s = 0; s < per_cluster && done < size; s++) {
+        for (unsigned int s = 0; s < per_cluster && pos < end; s++, pos += 512) {
+            if (pos + 512 <= skip) continue;
             if (plat_disk_read(cluster_lba(c) + s, sector) < 0) return disk_error;
-            unsigned int n = size - done < 512 ? size - done : 512;
-            memcpy(buf + done, sector, n);
-            done += n;
+            unsigned int from = pos < skip ? skip - pos : 0;
+            unsigned int n = (end - pos < 512 ? end - pos : 512) - from;
+            memcpy(buf + pos + from - skip, sector + from, n);
         }
         c = get_fat(c);
     }
@@ -401,14 +406,24 @@ static const char *read_file(const char *name, unsigned char *buf, int cap, int 
 }
 
 const char *fat_read(const char *name, unsigned char *buf, int cap, int *len) {
-    return read_file(name, buf, cap, len, 0);
+    return read_file(name, 0, buf, cap, len, 0);
 }
 
 const char *fat_read_start(const char *name, unsigned char *buf, int n, int *len) {
-    return read_file(name, buf, n, len, 1);
+    return read_file(name, 0, buf, n, len, 1);
+}
+
+const char *fat_read_from(const char *name, int skip, unsigned char *buf, int cap, int *len) {
+    return read_file(name, skip, buf, cap, len, 0);
 }
 
 const char *fat_write(const char *name, const unsigned char *data, int len) {
+    return fat_write_header(name, 0, 0, data, len);
+}
+
+const char *fat_write_header(const char *name, const unsigned char *head, int head_len,
+                             const unsigned char *data, int data_len) {
+    int len = head_len + data_len;
     unsigned char sname[11];
     unsigned int dir;
     const char *err = open_path(name, &dir, sname, 1);
@@ -443,7 +458,8 @@ const char *fat_write(const char *name, const unsigned char *data, int len) {
         for (unsigned int s = 0; s < per_cluster; s++) {
             int off = k * bytes + s * 512;
             memset(sector, 0, 512);
-            if (off < len) memcpy(sector, data + off, len - off < 512 ? len - off : 512);
+            for (int b = 0; b < 512 && off + b < len; b++)   // (the header, then the data)
+                sector[b] = off + b < head_len ? head[off + b] : data[off + b - head_len];
             if (plat_disk_write(cluster_lba(c) + s, sector) < 0) return disk_error;
         }
     }

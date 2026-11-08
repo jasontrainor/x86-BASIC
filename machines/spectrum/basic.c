@@ -2955,6 +2955,7 @@ static void cat_entry(const char *name, int len, int param, int type) {
 
 static void cat_text(const char *name, int len) {
     char buf[12];
+    if (storage_file(name)) return;       // (listed already, by its own name)
     print_string(name);
     for (int i = strlen(name); i < 16; i++) print_char(' ');
     itoa(len, buf);
@@ -2964,12 +2965,12 @@ static void cat_text(const char *name, int len) {
 
 static void st_cat() {
     if (checking) return;
-    int free_files, free_kb;
-    const char *err = storage_list(cat_entry, &free_files, &free_kb);
+    int free_kb;
+    const char *err = storage_list(cat_entry, &free_kb);
     if (err) { error(err); return; }
-    fat_list(cat_text);                   // (none, if there's no FAT partition)
+    fat_list(cat_text);
     char buf[8];
-    itoa(free_files ? free_kb : 0, buf);  // (no room in the directory: none)
+    itoa(free_kb, buf);
     print_string(buf);
     print_string("K FREE\n");
 }

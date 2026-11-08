@@ -190,14 +190,23 @@ the disk the computer booted from and `LOAD "name"` reads it back (`LOAD
 from line 10. `SAVE "name" CODE start,length` and `SAVE "name" SCREEN$`
 save memory or the screen, loaded back with `LOAD "name" CODE [start]`
 and `LOAD "name" SCREEN$`. `SAVE "name" DATA a()` (or `a$()`) saves an
-array, and `LOAD "name" DATA b()` loads it back, under any name. `VERIFY` checks a save, `MERGE` adds a saved
-program's lines to the one in memory, `CAT` lists what's saved, and how much
-room is left, and `ERASE "name"` deletes one. There's room for 127
-files, about 890KB in all, with names of up to 15 characters.
+array, and `LOAD "name" DATA b()` loads it back, under any name.
+`VERIFY` checks a save, `MERGE` adds a saved program's lines to the one
+in memory, `CAT` lists what's saved, and how much room is left, and
+`ERASE "name"` deletes one. Names are up to 15 characters.
 
-Files are kept in a reserved area of the disk image, so they persist on a
-USB stick, and the BIOS and UEFI versions share them. Rebuilding
-`os.img` with `make` starts with an empty save area.
+Each saved file is a file of its own in the `SPECTRUM` folder of the
+stick's FAT partition, so saves persist, the BIOS and UEFI versions share
+them, and they can be backed up or copied to another stick on any PC.
+The file's name comes from the saved name: its first 8 letters and
+digits, with `.SAV` (`SAVE "my game"` makes `MY_GAME.SAV`; names that
+would clash get `~1`, `~2` ...). `tools/savefile.py info FILE.SAV` says
+what one holds. Rebuilding `os.img` with `make` starts with no saves.
+
+Files saved before saves moved into the FAT partition can be copied out
+of an old image with `tools/savefile.py convert old.img DIR`, then
+copied into `SPECTRUM/` on the stick (or onto a new image with
+`make LISTINGS="DIR/*.SAV"`).
 
 ### Listings as text files
 

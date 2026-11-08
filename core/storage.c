@@ -1,34 +1,29 @@
 /*
- * Saving programs and bytes on the boot disk (SAVE, LOAD, CAT, ERASE...).
+ * Saved files: each one a file in the machine's folder on the FAT
+ * partition (see core/fat.h), so they can be copied to and from other
+ * computers, backed up, and moved between sticks.
  *
- * Files are kept in a reserved area of the disk image, as raw sectors
- * (see core/storage.h): a directory, then the files' data, each file
- * in consecutive sectors wherever there is room for it. That's simple,
- * needs no filesystem driver, and the BIOS and UEFI kernels share it.
+ * A saved file is the 48-byte header below, then the data:
+ *   0-7    "X86BSAV1"
+ *   8-23   the name it was saved with (up to 15 characters, NUL-padded)
+ *   24-27  the length of the data
+ *   28-29  param (see storage.h)
+ *   30     the kind of file (FILE_PROGRAM ...)
+ *   32-35  a checksum of the data (FNV-1a)
  *
- * Directory (STORE_DIR_SECTORS sectors):
- *   0-15   magic "X86BASIC-SAVES3"
- *   32-..  STORE_FILES entries of 32 bytes:
- *            0-15  name, NUL-padded (empty: the entry is free)
- *            16-19 length in bytes
- *            20-21 programs: the line to RUN after loading (SAVE ...
- *                  LINE n), or 0; bytes: the address they came from;
- *                  arrays: the array's name
- *            22-25 checksum of the bytes
- *            26    the kind of file (FILE_PROGRAM ...)
- *            28-29 the first sector, counted from the end of the directory
+ * Its name on the disk comes from the saved name: its first 8 letters and
+ * digits (others become _), in capitals, and .SAV: "my game" is
+ * MY_GAME.SAV. Names that would be the same file ("Game" and "GAME 2",
+ * say) go in NAME~1.SAV to NAME~Z.SAV. Names are matched ignoring case.
+ * tools/savefile.py makes and reads these files on a PC.
  */
 #include "storage.h"
-#include "platform.h"
+#include "fat.h"
 #include "string.h"
-#include "mem.h"
 
-#define DATA_LBA      (STORE_LBA + STORE_DIR_SECTORS)
-#define DATA_SECTORS  (STORE_END - DATA_LBA)
-#define MAGIC         "X86BASIC-SAVES3"
-#define ENTRY(i)      (dir + 32 + (i) * 32)
-
-HIGH_MEM static unsigned char dir[STORE_DIR_SECTORS * 512];
+#define HEADER    48
+#define MAGIC     "X86BSAV1"
+#define CANDIDATES 36                       // NAME.SAV, NAME~1.SAV ... NAME~Z.SAV
 
 static unsigned int get16(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static void put16(unsigned char *p, unsigned int v) { p[0] = v; p[1] = v >> 8; }
@@ -41,162 +36,158 @@ static unsigned int checksum(const unsigned char *data, int len) {
     return h;
 }
 
-static int sectors_for(unsigned int len) { return (len + 511) / 512; }
-static int entry_start(const unsigned char *e) { return get16(e + 28); }
-static int entry_sectors(const unsigned char *e) { return sectors_for(get32(e + 16)); }
-
-// Read the directory; a disk that has never been saved to has none yet,
-// which is the same as an empty one.
-static const char *read_dir(void) {
-    for (int i = 0; i < STORE_DIR_SECTORS; i++)
-        if (plat_disk_read(STORE_LBA + i, dir + i * 512) < 0) return "R Disk error";
-    if (memcmp(dir, MAGIC, 16) != 0) {
-        memset(dir, 0, sizeof(dir));
-        memcpy(dir, MAGIC, 16);
-    }
-    return 0;
-}
-
-// Write back the directory sector holding entry i (and the first, with
-// the magic, in case this is a new directory).
-static const char *write_dir(int i) {
-    int s = (32 + i * 32) / 512;
-    if (plat_disk_write(STORE_LBA, dir) < 0) return "R Disk error";
-    if (s && plat_disk_write(STORE_LBA + s, dir + s * 512) < 0) return "R Disk error";
-    return 0;
-}
-
-static int same_name(const unsigned char *entry, const char *name) {
-    for (int i = 0; i < STORE_NAME_LEN; i++) {
-        if (toupper(entry[i]) != toupper(name[i])) return 0;
-        if (!name[i]) return 1;
-    }
-    return 1;
-}
-
-static int find(const char *name) {
-    for (int i = 0; i < STORE_FILES; i++) {
-        if (ENTRY(i)[0] && same_name(ENTRY(i), name)) return i;
-    }
-    return -1;
-}
-
-// The first run of n free sectors (ignoring entry skip's), or -1.
-static int find_room(int n, int skip) {
-    int start = 0;
-    for (;;) {
-        if (start + n > DATA_SECTORS) return -1;
-        int clash = 0;
-        for (int i = 0; i < STORE_FILES; i++) {
-            unsigned char *e = ENTRY(i);
-            if (i == skip || !e[0]) continue;
-            int s = entry_start(e), m = entry_sectors(e);
-            if (m && s < start + n && start < s + m) {
-                start = s + m;
-                clash = 1;
-                break;
-            }
-        }
-        if (!clash) return start;
-    }
-}
-
 static const char *check_name(const char *name) {
     int n = strlen(name);
     if (n == 0 || n > STORE_NAME_LEN) return "F Invalid file name";
     return 0;
 }
 
+static int same_name(const unsigned char *saved, const char *name) {
+    for (int i = 0; i < STORE_NAME_LEN; i++) {
+        if (toupper(saved[i]) != toupper(name[i])) return 0;
+        if (!name[i]) return 1;
+    }
+    return 1;
+}
+
+static int ends_with_sav(const char *s) {
+    int n = strlen(s);
+    return n > 4 && strcmp(s + n - 4, ".SAV") == 0;
+}
+
+int storage_file(const char *disk_name) {
+    return ends_with_sav(disk_name);
+}
+
+// The disk name of candidate k (0-35) for a saved name.
+static void disk_name(const char *name, int k, char *out) {
+    int n = 0;
+    for (int i = 0; name[i] && n < 8; i++)
+        out[n++] = isalnum(name[i]) ? toupper(name[i]) : '_';
+    if (k) {
+        if (n > 6) n = 6;
+        out[n++] = '~';
+        out[n++] = k < 10 ? '0' + k : 'A' + k - 10;
+    }
+    strcpy(out + n, ".SAV");
+}
+
+/* ------------------------------------------------------------------------
+ * Finding a file: one look through the folder, reading the header of
+ * each file that could be it.
+ * --------------------------------------------------------------------- */
+
+static struct {
+    const char *name;                      // the saved name, or "": the first of type
+    int type;
+    unsigned long exists;                  // bit k: candidate k is on the disk
+    int found;
+    char file[13];                         // where it is
+    unsigned char head[HEADER];
+} look;
+
+static void look_at(const char *file, int len) {
+    if (look.found || !ends_with_sav(file)) return;
+    if (look.name[0]) {
+        int k;
+        char cand[13];
+        for (k = 0; k < CANDIDATES; k++) {
+            disk_name(look.name, k, cand);
+            if (strcmp(cand, file) == 0) break;
+        }
+        if (k == CANDIDATES) return;
+        look.exists |= 1UL << k;
+    }
+    int n;
+    if (fat_read_start(file, look.head, HEADER, &n) || n < HEADER ||
+        memcmp(look.head, MAGIC, 8) != 0)
+        return;
+    if (look.name[0] ? same_name(look.head + 8, look.name) : look.head[30] == look.type) {
+        look.found = 1;
+        strcpy(look.file, file);
+    }
+}
+
+static const char *find(const char *name, int type) {
+    look.name = name;
+    look.type = type;
+    look.exists = 0;
+    look.found = 0;
+    const char *err = fat_list(look_at);
+    // (A folder that isn't there yet: nothing has been saved.)
+    if (err && strcmp(err, "R Program not found") != 0) return err;
+    return 0;
+}
+
+/* ------------------------------------------------------------------------ */
+
 const char *storage_save(const char *name, const unsigned char *data, int len, int param,
                          int type) {
     const char *err = check_name(name);
-    if (!err) err = read_dir();
+    if (!err) err = find(name, 0);
     if (err) return err;
-    int slot = find(name);
-    if (slot < 0) {
-        for (slot = 0; slot < STORE_FILES && ENTRY(slot)[0]; slot++) {}
-        if (slot == STORE_FILES) return "R Disk full";
+    if (!look.found) {
+        int k;
+        for (k = 0; k < CANDIDATES && (look.exists >> k & 1); k++) {}
+        if (k == CANDIDATES) return "R Disk full";
+        disk_name(name, k, look.file);
     }
-    // Somewhere new if there's room, so the old file survives a failed
-    // save; otherwise over the old one.
-    int start = find_room(sectors_for(len), -1);
-    if (start < 0 && ENTRY(slot)[0]) start = find_room(sectors_for(len), slot);
-    if (start < 0) return "R Disk full";
-    unsigned char sector[512];
-    for (int i = 0; i * 512 < len; i++) {
-        int n = len - i * 512 < 512 ? len - i * 512 : 512;
-        memset(sector, 0, sizeof(sector));
-        memcpy(sector, data + i * 512, n);
-        if (plat_disk_write(DATA_LBA + start + i, sector) < 0) return "R Disk error";
-    }
-    unsigned char *e = ENTRY(slot);
-    memset(e, 0, 32);
-    memcpy(e, name, strlen(name));
-    put32(e + 16, len);
-    put16(e + 20, param);
-    put32(e + 22, checksum(data, len));
-    e[26] = type;
-    put16(e + 28, start);
-    return write_dir(slot);
+    unsigned char *h = look.head;
+    memset(h, 0, HEADER);
+    memcpy(h, MAGIC, 8);
+    memcpy(h + 8, name, strlen(name));
+    put32(h + 24, len);
+    put16(h + 28, param);
+    h[30] = type;
+    put32(h + 32, checksum(data, len));
+    return fat_write_header(look.file, h, HEADER, data, len);
 }
 
 const char *storage_load(const char *name, int type, unsigned char *data, int cap, int *len,
                          int *param) {
     const char *err = name[0] ? check_name(name) : 0;
-    if (!err) err = read_dir();
+    if (!err) err = find(name, type);
     if (err) return err;
-    int slot = -1;
-    if (name[0]) {
-        slot = find(name);
-    } else {                              // LOAD "": the first of its kind
-        for (int i = 0; i < STORE_FILES && slot < 0; i++)
-            if (ENTRY(i)[0] && ENTRY(i)[26] == type) slot = i;
-    }
-    if (slot < 0) return "R Program not found";
-    unsigned char *e = ENTRY(slot);
-    if (e[26] != type) return "R Wrong kind of file";
-    unsigned int n = get32(e + 16);
+    if (!look.found) return "R Program not found";
+    if (look.head[30] != type) return "R Wrong kind of file";
+    unsigned int n = get32(look.head + 24);
     if (n > (unsigned int)cap) return "4 Out of memory";
-    if (entry_start(e) + sectors_for(n) > DATA_SECTORS) return "R Bad program file";
-    unsigned char sector[512];
-    for (unsigned int i = 0; i * 512 < n; i++) {
-        if (plat_disk_read(DATA_LBA + entry_start(e) + i, sector) < 0) return "R Disk error";
-        memcpy(data + i * 512, sector, n - i * 512 < 512 ? n - i * 512 : 512);
-    }
-    if (checksum(data, n) != get32(e + 22)) return "R Bad program file";
+    int got;
+    err = fat_read_from(look.file, HEADER, data, cap, &got);
+    if (err) return err;
+    if ((unsigned int)got != n || checksum(data, n) != get32(look.head + 32))
+        return "R Bad program file";
     *len = n;
-    *param = get16(e + 20);
+    *param = get16(look.head + 28);
     return 0;
 }
 
 const char *storage_erase(const char *name) {
     const char *err = check_name(name);
-    if (!err) err = read_dir();
+    if (!err) err = find(name, 0);
     if (err) return err;
-    int slot = find(name);
-    if (slot < 0) return "R Program not found";
-    memset(ENTRY(slot), 0, 32);
-    return write_dir(slot);
+    if (!look.found) return "R Program not found";
+    return fat_erase(look.file);
+}
+
+static void (*list_each)(const char *name, int len, int param, int type);
+
+static void list_one(const char *file, int len) {
+    unsigned char h[HEADER];
+    int n;
+    if (!ends_with_sav(file) || fat_read_start(file, h, HEADER, &n) || n < HEADER ||
+        memcmp(h, MAGIC, 8) != 0)
+        return;
+    char name[STORE_NAME_LEN + 1];
+    memcpy(name, h + 8, STORE_NAME_LEN);
+    name[STORE_NAME_LEN] = '\0';
+    list_each(name, get32(h + 24), get16(h + 28), h[30]);
 }
 
 const char *storage_list(void (*each)(const char *name, int len, int param, int type),
-                         int *free_files, int *free_kb) {
-    const char *err = read_dir();
-    if (err) return err;
-    int used = 0;
-    *free_files = 0;
-    for (int i = 0; i < STORE_FILES; i++) {
-        unsigned char *e = ENTRY(i);
-        if (!e[0]) {
-            (*free_files)++;
-            continue;
-        }
-        used += entry_sectors(e);
-        char name[STORE_NAME_LEN + 1];
-        memcpy(name, e, STORE_NAME_LEN);
-        name[STORE_NAME_LEN] = '\0';
-        each(name, get32(e + 16), get16(e + 20), e[26]);
-    }
-    *free_kb = (DATA_SECTORS - used) / 2;
-    return 0;
+                         int *free_kb) {
+    list_each = each;
+    const char *err = fat_list(list_one);
+    if (err && strcmp(err, "R Program not found") != 0) return err;
+    return fat_free_kb(free_kb);
 }

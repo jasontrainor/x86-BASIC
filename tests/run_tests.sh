@@ -10,6 +10,11 @@ gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Icore -Imachines/spectrum -DHOST_TEST \
     -o "$BIN" tests/host_stub.c machines/spectrum/*.c core/storage.c core/fat.c core/string.c core/num.c || exit 1
 
+# Saved files go on the disk's FAT partition, so tests start with a blank
+# disk that has one (each test gets a fresh copy; DISK_OUT keeps the result).
+python3 tests/make_disk.py tests/build/blank.img || exit 1
+export DISK_IMAGE=tests/build/blank.img
+
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
 #   Each EXPECTED is a fixed string that must appear in the output.
@@ -338,8 +343,8 @@ check "input not history" "10 INPUT A\$${NL}RUN${NL}SECRET${NL}${UP}${NL}" "\"SE
 
 # --- Saving programs -----------------------------------------------------------
 check "save load"         "10 PRINT 6*7${NL}SAVE \"answer\"${NL}NEW${NL}LOAD \"ANSWER\"${NL}LIST${NL}RUN${NL}" "LIST${NL}  10 PRINT 6*7${NL}" "${NL}42${NL}"
-check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             7${NL}TWO             14 LINE 20${NL}891K FREE${NL}"
-check "save replaces"     "10 PRINT 1${NL}SAVE \"P\"${NL}10 PRINT 2${NL}SAVE \"P\"${NL}NEW${NL}LOAD \"P\"${NL}LIST${NL}CAT${NL}" "LIST${NL}  10 PRINT 2${NL}" "891K FREE"
+check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             7${NL}TWO             14 LINE 20${NL}400K FREE${NL}"
+check "save replaces"     "10 PRINT 1${NL}SAVE \"P\"${NL}10 PRINT 2${NL}SAVE \"P\"${NL}NEW${NL}LOAD \"P\"${NL}LIST${NL}CAT${NL}" "LIST${NL}  10 PRINT 2${NL}" "401K FREE"
 check "load autorun"      "10 PRINT 6*7${NL}SAVE \"GO\" LINE 10${NL}NEW${NL}LOAD \"GO\"${NL}" "LOAD \"GO\"${NL}42${NL}"
 check "load missing"      "LOAD \"NOPE\"${NL}" "R Program not found, 0:"
 check "erase"             "10 PRINT 1${NL}SAVE \"X\"${NL}ERASE \"X\"${NL}LOAD \"X\"${NL}" "R Program not found, 0:"
@@ -357,12 +362,29 @@ check "save data chars"   "DIM n\$(3,5): LET n\$(2)=\"BOB\": SAVE \"names\" DATA
 check "data errors"       "DIM a(2): SAVE \"n\" DATA a(): LOAD \"n\" DATA x\$()${NL}SAVE \"x\" DATA z()${NL}LOAD \"n\" DATA b(): VERIFY \"n\" DATA b(): LET b(1)=1: VERIFY \"n\" DATA b()${NL}" "R Wrong kind of file, 0:3" "2 Variable not found, 0:1" "R Tape loading error, 0:4"
 check "data syntax"       "MERGE \"n\" DATA a()${NL}${ESC}SAVE \"x\" DATA a${NL}" "[ERR]MERGE \"n\" DATA a()?${NL}" "[ERR]SAVE \"x\" DATA a?${NL}"
 check "load clears vars"  "10 PRINT 1${NL}SAVE \"V\"${NL}A=5${NL}LOAD \"V\"${NL}PRINT A${NL}" "2 Variable not found, 0:"
-check "disk full"         "FOR i=1 TO 30: SAVE STR\$ i CODE 0,32768: NEXT i${NL}PRINT i${NL}CAT${NL}" "R Disk full, 0:2" "${NL}28${NL}" "27              32768 CODE 0${NL}28K FREE${NL}"
+check "disk full"         "FOR i=1 TO 30: SAVE STR\$ i CODE 0,32768: NEXT i${NL}PRINT i${NL}CAT${NL}" "R Disk full, 0:2" "${NL}13${NL}" "12              32768 CODE 0${NL}11K FREE${NL}"
 check "erase frees room"  "FOR i=1 TO 28: SAVE STR\$ i CODE 0,32768: NEXT i${NL}ERASE \"5\": SAVE \"x\" CODE 0,32768: LOAD \"x\" CODE: PRINT \"done\"${NL}" "R Disk full, 0:2" "${NL}done${NL}"
-check "directory full"    "10 PRINT 1${NL}FOR i=1 TO 130: SAVE STR\$ i: NEXT i${NL}PRINT i${NL}SAVE \"1\": PRINT \"replaced\"${NL}" "R Disk full, 0:2" "${NL}128${NL}" "${NL}replaced${NL}"
+check "many files"        "10 PRINT 1${NL}FOR i=1 TO 150: LET a\$=STR\$ i: SAVE a\$ LINE i: NEXT i${NL}PRINT i${NL}LOAD \"77\"${NL}CAT${NL}" "${NL}151${NL}" "${NL}77              7 LINE 77${NL}" "150             7 LINE 150${NL}" "![ERR]"
+# Saved names that make the same DOS name share it, with ~1, ~2 ...
+DISK_OUT=tests/build/names.img check "save names" "10 PRINT \"first\"${NL}SAVE \"my game 1\"${NL}10 PRINT \"second\"${NL}SAVE \"My Game 2\"${NL}10 PRINT \"third\"${NL}SAVE \"MY GAME 1\"${NL}NEW${NL}LOAD \"My Game 2\"${NL}RUN${NL}LOAD \"my game 1\"${NL}RUN${NL}ERASE \"my game 1\"${NL}LOAD \"my game 2\"${NL}RUN${NL}LOAD \"my game 3\"${NL}" "${NL}second${NL}" "${NL}third${NL}" "R Program not found, 0:1" "![ERR]C"
+if [[ "$(python3 tests/fatfile.py tests/build/names.img --ls SPECTRUM)" == "MY_GAM~1.SAV 62" ]]; then pass=$((pass+1)); echo "PASS save names on disk"
+else fail=$((fail+1)); echo "FAIL save names on disk"; python3 tests/fatfile.py tests/build/names.img --ls SPECTRUM | sed 's/^/    | /'; fi
 BIG=""; for i in $(seq 1 150); do BIG+="$i REM ${A200}${NL}"; done
 check "big program"       "${BIG}SAVE \"BIG\"${NL}NEW${NL}LOAD \"BIG\"${NL}LIST 97${NL}" "LIST 97${NL}  97>REM" "![ERR]"
 check "save in program"   "10 SAVE \"SELF\"${NL}20 PRINT 6*7${NL}RUN${NL}CAT${NL}" "${NL}42${NL}" "SELF "
+
+# Old saves (from before they moved into the FAT partition) converted to
+# .SAV files with tools/savefile.py, and loaded from a new disk.
+SD=tests/build/saves; mkdir -p "$SD/out"
+DISK_OUT="$SD/new.img" check "old saves made" "10 PRINT \"old one\"${NL}SAVE \"first prog\" LINE 10${NL}SAVE \"bytes\" CODE 16384,10${NL}" "![ERR]"
+python3 tests/fatfile.py "$SD/new.img" SPECTRUM/FIRST_PR.SAV > "$SD/a.sav"
+python3 tests/fatfile.py "$SD/new.img" SPECTRUM/BYTES.SAV > "$SD/b.sav"
+python3 tests/old_image.py "$SD/old.img" "$SD/a.sav" "$SD/b.sav"
+if python3 tools/savefile.py convert "$SD/old.img" "$SD/out" > "$SD/convert.out" 2>&1 &&
+   cmp -s "$SD/a.sav" "$SD/out/FIRST_PR.SAV" && cmp -s "$SD/b.sav" "$SD/out/BYTES.SAV"; then pass=$((pass+1)); echo "PASS old saves converted"
+else fail=$((fail+1)); echo "FAIL old saves converted"; sed 's/^/    | /' "$SD/convert.out"; fi
+python3 tests/make_disk.py "$SD/conv.img" FIRST_PR.SAV="$SD/out/FIRST_PR.SAV" BYTES.SAV="$SD/out/BYTES.SAV"
+DISK_IMAGE="$SD/conv.img" check "old saves load" "CAT${NL}LOAD \"first prog\"${NL}" "first prog      15 LINE 10${NL}bytes           10 CODE 16384${NL}" "${NL}old one${NL}" "!TEXT" "![ERR]"
 
 # --- Text listings on the FAT partition ---------------------------------------
 TD=tests/build/text
@@ -421,8 +443,8 @@ DISK_IMAGE="$TD/fat16.img" DISK_OUT="$TD/fat16b.img" check "fat16" "${BIGT}SAVE 
 if [[ "$(python3 tests/fatfile.py "$TD/fat16b.img" --ls SPECTRUM)" == "BIG.BAS "* ]] &&
    python3 tests/fatfile.py "$TD/fat16b.img" --fsck > "$TD/fsck.out" 2>&1; then pass=$((pass+1)); echo "PASS fat16 fsck"
 else fail=$((fail+1)); echo "FAIL fat16 fsck"; sed 's/^/    | /' "$TD/fsck.out"; fi
-unset DISK_IMAGE
-check "text no fat"       "LOAD \"x.bas\"${NL}" "R No FAT partition, 0:1"
+export DISK_IMAGE=tests/build/blank.img
+DISK_IMAGE= check "text no fat"       "LOAD \"x.bas\"${NL}" "R No FAT partition, 0:1"
 
 # --- BREAK --------------------------------------------------------------------
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "L BREAK into program, 10:" "${NL}25${NL}"

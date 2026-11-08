@@ -96,8 +96,9 @@ static void save_disk(void) {
 
 int main(int argc, char **argv) {
     input = argc > 1 ? argv[1] : "";
-    if (getenv("DISK_IMAGE")) {
-        FILE *f = fopen(getenv("DISK_IMAGE"), "rb");
+    const char *image = getenv("DISK_IMAGE");
+    if (image && *image) {
+        FILE *f = fopen(image, "rb");
         if (!f || fseek(f, 0, SEEK_END) != 0) {
             perror("DISK_IMAGE");
             return 1;
