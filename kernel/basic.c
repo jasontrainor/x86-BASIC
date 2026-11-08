@@ -275,123 +275,13 @@ static int at_statement_end() {
 }
 
 /* ------------------------------------------------------------------------
- * Variables
- * --------------------------------------------------------------------- */
-
-#define NAME_LEN 32       // including the terminating 0
-#define MAX_STR 255
-#define MAX_VARS 128
-
-struct var {
-    char name[NAME_LEN];
-    char is_str;
-    unsigned char len;    // strings
-    double num;           // numbers
-    char str[MAX_STR];
-};
-HIGH_MEM struct var vars[MAX_VARS];
-int num_vars = 0;
-
-// Read a name at p: a letter, then letters and digits, then an optional
-// $ for a string. As on the Spectrum, spaces within a name are ignored
-// (LET hi score=0 sets HISCORE) and case doesn't matter. Returns 0 (with
-// an error) if there isn't one.
-static int read_name(char *name, int *is_str) {
-    skip_space();
-    if (!isalpha(*p)) {
-        error("BAD VARIABLE NAME");
-        return 0;
-    }
-    int n = 0;
-    for (;;) {
-        while (isalnum(*p)) {
-            if (n == NAME_LEN - 1) {
-                error("NAME TOO LONG");
-                return 0;
-            }
-            name[n++] = toupper(*p++);
-        }
-        char *q = p;
-        while (*q == ' ') q++;
-        if (q == p || !isalnum(*q)) break;
-        p = q;
-    }
-    name[n] = '\0';
-    *is_str = (*p == '$');
-    if (*is_str) p++;
-    return 1;
-}
-
-static struct var *lookup_var(const char *name, int is_str) {
-    for (int i = 0; i < num_vars; i++) {
-        if (vars[i].is_str == is_str && strcmp(vars[i].name, name) == 0)
-            return &vars[i];
-    }
-    return 0;
-}
-
-static struct var *find_var(const char *name, int is_str, int create) {
-    struct var *found = lookup_var(name, is_str);
-    if (found) return found;
-    if (!create) {
-        error("VARIABLE NOT FOUND");
-        return 0;
-    }
-    if (num_vars == MAX_VARS) {
-        error("TOO MANY VARIABLES");
-        return 0;
-    }
-    struct var *v = &vars[num_vars++];
-    strcpy(v->name, name);
-    v->is_str = is_str;
-    v->len = 0;
-    v->num = 0;
-    return v;
-}
-
-/*
- * Arrays (DIM). Subscripts run from 1, as on the Spectrum. Array names
- * are separate from simple variable names, so A and A() can both exist.
- * Elements live in a heap that is emptied by CLEAR, RUN and NEW. String
- * elements hold up to 255 characters each.
- */
-#define MAX_ARRAYS 32
-#define MAX_DIMS 3
-#define HEAP_SIZE (192 * 1024)
-#define STR_SLOT (MAX_STR + 1)      // a string element: length, then text
-
-struct array {
-    char name[NAME_LEN];
-    char is_str;
-    int ndims;
-    int dims[MAX_DIMS];
-    unsigned char *data;
-};
-struct array arrays[MAX_ARRAYS];
-int num_arrays = 0;
-HIGH_MEM unsigned char heap[HEAP_SIZE];
-int heap_used = 0;
-
-static struct array *find_array(const char *name, int is_str) {
-    for (int i = 0; i < num_arrays; i++) {
-        if (arrays[i].is_str == is_str && strcmp(arrays[i].name, name) == 0)
-            return &arrays[i];
-    }
-    return 0;
-}
-
-static void clear_variables() {
-    num_vars = 0;
-    num_arrays = 0;
-    heap_used = 0;
-}
-
-/* ------------------------------------------------------------------------
  * Expression values
  *
  * Strings produced while evaluating (by +, CHR$ etc.) live in a scratch
  * pool that is emptied at the start of every statement.
  * --------------------------------------------------------------------- */
+
+#define MAX_STR 65535     // the longest string
 
 struct value {
     int is_str;
@@ -400,15 +290,15 @@ struct value {
     int len;
 };
 
-#define POOL_SIZE 8192
+#define POOL_SIZE (64 * 1024)
 HIGH_MEM char str_pool[POOL_SIZE];
 int pool_used;
 
 static char *pool_alloc(int len) {
-    static char dummy[MAX_STR + 1];
+    static char dummy[16];
     if (pool_used + len > POOL_SIZE) {
         error("OUT OF MEMORY");
-        return dummy;
+        return len <= (int)sizeof(dummy) ? dummy : 0;
     }
     char *s = str_pool + pool_used;
     pool_used += len;
@@ -454,8 +344,235 @@ static int expr_int(int lo, int hi) {
     return error_msg ? lo : to_int(v, lo, hi);
 }
 
-// Parse the subscripts "i, j, ...)" of an element of a (the "(" already
-// consumed). Returns the element number, or -1 after an error.
+/* ------------------------------------------------------------------------
+ * Variables
+ *
+ * Simple variables are kept in a table. The text of strings, and the
+ * elements of arrays, live in a heap of blocks. Each block records which
+ * variable or array owns it; a block its owner no longer points to is
+ * garbage, and when the heap fills up the live blocks are slid down
+ * over it (compact()).
+ * --------------------------------------------------------------------- */
+
+#define NAME_LEN 32       // including the terminating 0
+#define MAX_VARS 256
+
+struct var {
+    char name[NAME_LEN];  // "" for a free slot
+    char is_str;
+    char is_for;          // numbers: the control variable of a FOR loop
+    double num;           // numbers
+    char *str;            // strings: the text, in the heap (cap bytes)
+    int len, cap;
+    double limit, step;   // FOR: the loop's limit and step,
+    int loop_line;        //   the line number it's on (-1: typed line)
+    int loop_stmt;        //   and the statement number of the FOR
+};
+HIGH_MEM struct var vars[MAX_VARS];
+int num_vars = 0;
+
+/*
+ * Arrays (DIM). Subscripts run from 1, as on the Spectrum. Numeric array
+ * names are separate from simple variable names, so A and A() can both
+ * exist. A string array is the Spectrum's: DIM A$(5,10) makes five
+ * strings of exactly ten characters (the last subscript is the length),
+ * and it replaces any simple string A$.
+ */
+#define MAX_ARRAYS 64
+#define MAX_DIMS 8
+
+struct array {
+    char name[NAME_LEN];  // "" for a free slot
+    char is_str;
+    int ndims;
+    int dims[MAX_DIMS];
+    int count;            // elements (characters, for strings)
+    char *data;           // in the heap
+};
+HIGH_MEM struct array arrays[MAX_ARRAYS];
+int num_arrays = 0;
+
+#define HEAP_SIZE (192 * 1024)
+HIGH_MEM __attribute__((aligned(8))) unsigned char heap[HEAP_SIZE];
+int heap_used = 0;
+
+struct block {
+    unsigned int size;              // bytes of data that follow (a multiple of 8)
+    unsigned short owner_is_array;
+    unsigned short owner;           // index in vars[] or arrays[]
+};
+
+static char **block_owner(struct block *b) {
+    return b->owner_is_array ? &arrays[b->owner].data : &vars[b->owner].str;
+}
+
+static void compact() {
+    unsigned int src = 0, dst = 0;
+    while (src < (unsigned int)heap_used) {
+        struct block *b = (struct block *)(heap + src);
+        unsigned int total = sizeof(struct block) + b->size;
+        char **owner = block_owner(b);
+        if (*owner == (char *)(b + 1)) {          // still in use: keep it
+            if (dst != src) memmove(heap + dst, heap + src, total);
+            *owner = (char *)(heap + dst + sizeof(struct block));
+            dst += total;
+        }
+        src += total;
+    }
+    heap_used = dst;
+}
+
+static int in_heap(const char *s) {
+    return (const unsigned char *)s >= heap && (const unsigned char *)s < heap + HEAP_SIZE;
+}
+
+// A block of at least size bytes for vars[owner] or arrays[owner];
+// 0 (with an error) if there's no room. Moves other blocks.
+static char *heap_alloc(unsigned int size, int is_array, int owner) {
+    size = (size + 7) & ~7u;
+    unsigned int need = sizeof(struct block) + size;
+    if (heap_used + need > HEAP_SIZE) compact();
+    if (heap_used + need > HEAP_SIZE) {
+        error("OUT OF MEMORY");
+        return 0;
+    }
+    struct block *b = (struct block *)(heap + heap_used);
+    b->size = size;
+    b->owner_is_array = is_array;
+    b->owner = owner;
+    heap_used += need;
+    return (char *)(b + 1);
+}
+
+// Read a name at p: a letter, then letters and digits, then an optional
+// $ for a string. As on the Spectrum, spaces within a name are ignored
+// (LET hi score=0 sets HISCORE) and case doesn't matter. Returns 0 (with
+// an error) if there isn't one.
+static int read_name(char *name, int *is_str) {
+    skip_space();
+    if (!isalpha(*p)) {
+        error("BAD VARIABLE NAME");
+        return 0;
+    }
+    int n = 0;
+    for (;;) {
+        while (isalnum(*p)) {
+            if (n == NAME_LEN - 1) {
+                error("NAME TOO LONG");
+                return 0;
+            }
+            name[n++] = toupper(*p++);
+        }
+        char *q = p;
+        while (*q == ' ') q++;
+        if (q == p || !isalnum(*q)) break;
+        p = q;
+    }
+    name[n] = '\0';
+    *is_str = (*p == '$');
+    if (*is_str) p++;
+    return 1;
+}
+
+static struct var *lookup_var(const char *name, int is_str) {
+    for (int i = 0; i < num_vars; i++) {
+        if (vars[i].is_str == is_str && vars[i].name[0] == name[0] &&
+            strcmp(vars[i].name, name) == 0)
+            return &vars[i];
+    }
+    return 0;
+}
+
+static struct var *find_var(const char *name, int is_str, int create) {
+    struct var *found = lookup_var(name, is_str);
+    if (found) return found;
+    if (!create) {
+        error("VARIABLE NOT FOUND");
+        return 0;
+    }
+    int i = 0;
+    while (i < num_vars && vars[i].name[0]) i++;   // reuse a free slot
+    if (i == MAX_VARS) {
+        error("OUT OF MEMORY");
+        return 0;
+    }
+    if (i == num_vars) num_vars++;
+    struct var *v = &vars[i];
+    memset(v, 0, sizeof(*v));
+    strcpy(v->name, name);
+    v->is_str = is_str;
+    return v;
+}
+
+static void delete_var(struct var *v) {
+    v->name[0] = '\0';
+    v->str = 0;           // (its block is now garbage)
+}
+
+static struct array *find_array(const char *name, int is_str) {
+    for (int i = 0; i < num_arrays; i++) {
+        if (arrays[i].is_str == is_str && arrays[i].name[0] == name[0] &&
+            strcmp(arrays[i].name, name) == 0)
+            return &arrays[i];
+    }
+    return 0;
+}
+
+static void clear_variables() {
+    num_vars = 0;
+    num_arrays = 0;
+    heap_used = 0;
+}
+
+// Set a simple string variable.
+static void set_string(struct var *v, struct value val) {
+    if (val.len > v->cap) {
+        // Making room may move the heap, and the value could be in it.
+        if (in_heap(val.str)) {
+            char *copy = pool_alloc(val.len);
+            if (error_msg) return;
+            memcpy(copy, val.str, val.len);
+            val.str = copy;
+        }
+        char *s = heap_alloc(val.len, 0, v - vars);
+        if (!s) return;
+        v->str = s;
+        v->cap = (val.len + 7) & ~7;
+    }
+    memmove(v->str, val.str, val.len);
+    v->len = val.len;
+}
+
+/*
+ * Slicing, Spectrum style: the part inside the brackets of S$(3),
+ * S$(2 TO 4), S$(TO 3), S$(2 TO) or S$() for a string of length len.
+ * Sets *from and *to (1-based); from > to means an empty slice, which is
+ * allowed even out of range. Stops at the ")" (not consumed).
+ */
+static int slice_spec(int len, int *from, int *to) {
+    *from = 1;
+    *to = len;
+    skip_space();
+    if (*p == ')') return 1;
+    if (accept(T_TO)) {                   // (TO n), (TO)
+        skip_space();
+        if (*p != ')') *to = expr_int(0, 65535);
+    } else {
+        *from = expr_int(0, 65535);
+        if (!accept(T_TO)) *to = *from;   // (n)
+        else if (skip_space(), *p != ')') *to = expr_int(0, 65535);   // (n TO m)
+    }
+    if (error_msg) return 0;
+    if (*from <= *to && (*from < 1 || *to > len)) {
+        error("SUBSCRIPT OUT OF RANGE");
+        return 0;
+    }
+    return 1;
+}
+
+// Parse the subscripts "i, j, ...)" of an element of numeric array a
+// (the "(" already consumed). Returns the element number, or -1 after
+// an error.
 static int element_index(struct array *a) {
     int idx = 0;
     for (int k = 0; k < a->ndims; k++) {
@@ -480,46 +597,101 @@ static int element_index(struct array *a) {
 }
 
 /*
- * Something that can be assigned to: a variable or an array element.
- * A simple variable that doesn't exist yet is only created when the
- * value is stored, so LET A=A+1 with no A is still an error.
+ * The characters of string array a that A$, A$(i, j) or A$(i, j, slice)
+ * refers to (p is just after the name): all of them, one of its strings,
+ * or part of one. Returns 0 after an error.
+ */
+static int string_array_part(struct array *a, char **ptr, int *len) {
+    *ptr = a->data;
+    *len = a->count;
+    if (!accept_char('(')) return 1;
+    int last = a->ndims - 1;      // the last subscript is within a string
+    int idx = 0;
+    for (int k = 0; k < last; k++) {
+        if (k > 0 && !accept_char(',')) {
+            error("SUBSCRIPT OUT OF RANGE");
+            return 0;
+        }
+        int i = expr_int(1, a->dims[k]);
+        if (error_msg) return 0;
+        idx = idx * a->dims[k] + i - 1;
+    }
+    *ptr = a->data + idx * a->dims[last];
+    *len = a->dims[last];
+    if (last > 0 && accept_char(')')) return 1;   // a whole string
+    if (last > 0 && !accept_char(',')) {
+        error("SUBSCRIPT OUT OF RANGE");
+        return 0;
+    }
+    int from, to;
+    if (!slice_spec(*len, &from, &to)) return 0;
+    if (!accept_char(')')) {
+        error("SUBSCRIPT OUT OF RANGE");
+        return 0;
+    }
+    *ptr += from - 1;
+    *len = from > to ? 0 : to - from + 1;
+    return 1;
+}
+
+/*
+ * Something that can be assigned to: a numeric variable or element, a
+ * simple string variable, or a fixed-length string: part of a string
+ * (LET A$(2 TO 4)="XYZ") or of a string array. As on the Spectrum, a
+ * fixed-length string is filled with the value, cut short or padded with
+ * spaces. A simple variable that doesn't exist yet is only created when
+ * the value is stored, so LET A=A+1 with no A is still an error.
  */
 struct lvalue {
     int is_str;
     char name[NAME_LEN];
-    double *num;          // numbers: where the value goes
-    unsigned char *len;   // strings: where the length and text go
-    char *str;
+    double *num;          // numbers: where the value goes (0: a new variable)
+    struct var *var;      // simple strings (0: a new variable)
+    char *fixed;          // fixed-length strings: where the text goes
+    int fixed_len;        //   and its length; -1 if not one
 };
 
 static int parse_lvalue(struct lvalue *lv) {
     lv->num = 0;
-    lv->len = 0;
-    lv->str = 0;
+    lv->var = 0;
+    lv->fixed = 0;
+    lv->fixed_len = -1;
     if (!read_name(lv->name, &lv->is_str)) return 0;
     skip_space();
-    if (*p == '(') {
-        struct array *a = find_array(lv->name, lv->is_str);
-        if (!a) {
-            error("ARRAY NOT FOUND");
-            return 0;
-        }
-        p++;
-        int i = element_index(a);
-        if (i < 0) return 0;
-        if (a->is_str) {
-            lv->len = a->data + i * STR_SLOT;
-            lv->str = (char *)lv->len + 1;
-        } else {
+    if (!lv->is_str) {
+        if (*p == '(') {
+            struct array *a = find_array(lv->name, 0);
+            if (!a) {
+                error("VARIABLE NOT FOUND");
+                return 0;
+            }
+            p++;
+            int i = element_index(a);
+            if (i < 0) return 0;
             lv->num = (double *)a->data + i;
+        } else {
+            struct var *v = lookup_var(lv->name, 0);
+            if (v) lv->num = &v->num;
         }
         return 1;
     }
-    struct var *v = lookup_var(lv->name, lv->is_str);
-    if (v) {
-        lv->num = &v->num;
-        lv->len = &v->len;
-        lv->str = v->str;
+    struct array *a = find_array(lv->name, 1);
+    if (a) return string_array_part(a, &lv->fixed, &lv->fixed_len);
+    lv->var = lookup_var(lv->name, 1);
+    if (*p == '(') {                      // LET A$(2 TO 3)=...
+        if (!lv->var) {
+            error("VARIABLE NOT FOUND");
+            return 0;
+        }
+        p++;
+        int from, to;
+        if (!slice_spec(lv->var->len, &from, &to)) return 0;
+        if (!accept_char(')')) {
+            error("MISSING )");
+            return 0;
+        }
+        lv->fixed = lv->var->str + from - 1;
+        lv->fixed_len = from > to ? 0 : to - from + 1;
     }
     return 1;
 }
@@ -530,19 +702,21 @@ static void store(struct lvalue *lv, struct value val) {
         error(lv->is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
         return;
     }
-    if (!lv->num && !lv->len) {            // a new simple variable
-        struct var *v = find_var(lv->name, lv->is_str, 1);
-        if (!v) return;
-        lv->num = &v->num;
-        lv->len = &v->len;
-        lv->str = v->str;
-    }
-    if (lv->is_str) {
-        // memmove: the value may be part of the target (A$=A$(2 TO))
-        memmove(lv->str, val.str, val.len);
-        *lv->len = val.len;
-    } else {
+    if (!lv->is_str) {
+        if (!lv->num) {                    // a new simple variable
+            struct var *v = find_var(lv->name, 0, 1);
+            if (!v) return;
+            lv->num = &v->num;
+        }
         *lv->num = val.num;
+    } else if (lv->fixed_len >= 0) {
+        int n = val.len < lv->fixed_len ? val.len : lv->fixed_len;
+        // memmove: the value may overlap the target (A$(2 TO)=A$)
+        memmove(lv->fixed, val.str, n);
+        memset(lv->fixed + n, ' ', lv->fixed_len - n);
+    } else {
+        struct var *v = lv->var ? lv->var : find_var(lv->name, 1, 1);
+        if (v) set_string(v, val);
     }
 }
 
@@ -640,49 +814,38 @@ static struct value variable_value() {
     int is_str;
     if (!read_name(name, &is_str)) return num_value(0);
     skip_space();
-    if (*p == '(') {
-        struct array *a = find_array(name, is_str);
+    if (is_str) {
+        struct array *a = find_array(name, 1);
         if (a) {
-            p++;
-            int i = element_index(a);
-            if (i < 0) return num_value(0);
-            if (is_str) {
-                unsigned char *e = a->data + i * STR_SLOT;
-                return str_value((char *)e + 1, *e);
-            }
-            return num_value(((double *)a->data)[i]);
+            char *s;
+            int len;
+            if (!string_array_part(a, &s, &len)) return str_value("", 0);
+            return str_value(s, len);
         }
-        if (!is_str) {
-            error("ARRAY NOT FOUND");
+        // A simple string followed by ( is sliced: see factor().
+    } else if (*p == '(') {
+        struct array *a = find_array(name, 0);
+        if (!a) {
+            error("VARIABLE NOT FOUND");
             return num_value(0);
         }
-        // A string followed by ( is sliced: see factor().
+        p++;
+        int i = element_index(a);
+        if (i < 0) return num_value(0);
+        return num_value(((double *)a->data)[i]);
     }
     struct var *v = find_var(name, is_str, 0);
     if (!v) return num_value(0);
     return is_str ? str_value(v->str, v->len) : num_value(v->num);
 }
 
-// Slice a string, Spectrum style (the "(" not yet consumed):
-//   S$(3) S$(2 TO 4) S$(TO 3) S$(2 TO)
+// Slice a string value (the "(" not yet consumed).
 static struct value slice(struct value s) {
     p++;
-    int from = 1, to = s.len;
-    if (!accept(T_TO)) {
-        from = expr_int(0, 65535);
-        to = from;
-        if (accept(T_TO)) to = s.len;
-        else goto close;
-    }
-    skip_space();
-    if (*p != ')') to = expr_int(0, 65535);
-close:
+    int from, to;
+    if (!slice_spec(s.len, &from, &to)) return str_value("", 0);
     expect_char(')', "MISSING )");
     if (error_msg || from > to) return str_value("", 0);
-    if (from < 1 || to > s.len) {
-        error("SUBSCRIPT OUT OF RANGE");
-        return str_value("", 0);
-    }
     return str_value(s.str + from - 1, to - from + 1);
 }
 
@@ -694,11 +857,12 @@ static struct value str_arg() {
 
 // VAL: evaluate a string as a numeric expression.
 static double val(struct value s) {
-    char text[MAX_STR + 1];
-    unsigned char tokens[MAX_STR + 2];
+    char *text = pool_alloc(s.len + 1);
+    unsigned char *tokens = (unsigned char *)pool_alloc(s.len + 2);
+    if (error_msg) return 0;
     memcpy(text, s.str, s.len);
     text[s.len] = '\0';
-    if (tokenize(text, tokens, sizeof(tokens)) < 0) return invalid_argument();
+    if (tokenize(text, tokens, s.len + 2) < 0) return invalid_argument();
     char *saved = p;
     p = (char *)tokens;
     double v = expr_num();
@@ -863,8 +1027,9 @@ static struct value sum() {
             break;
         }
         if (v.is_str) {                    // concatenation
-            if (v.len + w.len > MAX_STR) { error("STRING TOO LONG"); break; }
+            if (v.len + w.len > MAX_STR) { error("OUT OF MEMORY"); break; }
             char *s = pool_alloc(v.len + w.len);
+            if (error_msg) break;
             memcpy(s, v.str, v.len);
             memcpy(s + v.len, w.str, w.len);
             v = str_value(s, v.len + w.len);
@@ -944,23 +1109,85 @@ static struct value expr() {
  * Statements
  * --------------------------------------------------------------------- */
 
-struct for_loop {
-    struct var *var;
-    double limit;
-    double step;
-    int line;             // where the loop body starts: line offset
-    char *pos;            //   and position in it
-};
-#define MAX_FOR 16
-struct for_loop for_stack[MAX_FOR];
-int for_sp = 0;
+/*
+ * Places in the program (for FOR loops, GO SUB, CONTINUE) are kept as a
+ * line number and a statement number, as on the Spectrum, so that they
+ * stay valid when the program is edited: STOP, change a line, CONTINUE.
+ * Line -1 is the typed command line. Statements are numbered from 1 and
+ * separated by ":" and by THEN.
+ */
+extern unsigned char typed_line[];
+
+// The end of the statement at q: the next ":" or THEN outside strings,
+// or the end of the line. (After REM, the rest of the line is a comment.)
+static char *statement_end(char *q) {
+    int in_str = 0;
+    for (; *q; q++) {
+        unsigned char c = *q;
+        if (c == '"') {
+            in_str = !in_str;
+        } else if (!in_str) {
+            if (c == ':' || c == T_THEN) return q;
+            if (c == T_REM) {
+                while (*q) q++;
+                return q;
+            }
+        }
+    }
+    return q;
+}
+
+// The text of the running line (or the typed line).
+static char *current_text() {
+    return cur_line >= 0 ? (char *)line_text(cur_line) : (char *)typed_line;
+}
+
+static int current_line_number() {
+    return cur_line >= 0 ? line_num(cur_line) : -1;
+}
+
+// The number of the statement that pos (in the current line) is in.
+static int statement_number(char *pos) {
+    int k = 1;
+    for (char *q = statement_end(current_text()); *q && q < pos; q = statement_end(q + 1))
+        k++;
+    return k;
+}
+
+/*
+ * Carry on at statement k of line num, or just after it if after is 1.
+ * As on the Spectrum, it's an error if the line has gone.
+ */
+static void resume(int num, int k, int after) {
+    if (num >= 0) {
+        int off = line_find(num);
+        if (off >= prog_len || line_num(off) != num) {
+            error("STATEMENT LOST");
+            return;
+        }
+        cur_line = off;
+    } else {
+        cur_line = -1;
+    }
+    char *q = current_text();
+    for (int i = 1; i < k && *q; i++) {
+        q = statement_end(q);
+        if (*q) q++;
+    }
+    if (after) {
+        p = statement_end(q);   // the run loop moves on to what follows
+        jumped = 0;
+    } else {
+        p = q;
+        jumped = 1;
+    }
+}
 
 struct gosub {
-    int line;             // where to RETURN to: line offset
-    char *pos;            //   and position after the GOSUB statement
+    int line, stmt;       // the GO SUB statement, to RETURN to
 };
-#define MAX_GOSUB 32
-struct gosub gosub_stack[MAX_GOSUB];
+#define MAX_GOSUB 1024
+HIGH_MEM struct gosub gosub_stack[MAX_GOSUB];
 int gosub_sp = 0;
 
 // Where READ takes its next item from: in the DATA statement at
@@ -970,10 +1197,9 @@ int data_line;
 char *data_pos;
 int in_data;
 
-// Where CONTINUE carries on: the statement at cont_pos (cont_next: the
-// one after it), if cont_ok.
-int cont_ok, cont_line, cont_next;
-char *cont_pos;
+// Where CONTINUE carries on: statement cont_stmt of line cont_line (or
+// the one after it, if cont_next), if cont_ok.
+int cont_ok, cont_line, cont_stmt, cont_next;
 
 // The statement being run, for errors and BREAK.
 int stmt_line;
@@ -986,9 +1212,32 @@ static void restore(int num) {
 }
 
 static void reset_run_state() {
-    for_sp = 0;
     gosub_sp = 0;
     restore(0);
+}
+
+// Editing the program moves lines about: data_mark() notes where READ
+// is up to as a line number and offset, and data_unmark() finds it again.
+static int data_num, data_off;
+
+static void data_mark() {
+    data_num = data_line < prog_len ? line_num(data_line) : -1;
+    data_off = data_pos ? data_pos - (char *)line_text(data_line) : -1;
+}
+
+static void data_unmark() {
+    if (data_num < 0) {
+        data_line = prog_len;
+        return;
+    }
+    data_line = line_find(data_num);
+    if (data_line < prog_len && line_num(data_line) == data_num && data_off >= 0 &&
+        data_off < prog[data_line + 2]) {
+        data_pos = (char *)line_text(data_line) + data_off;
+    } else {
+        data_pos = 0;
+        in_data = 0;
+    }
 }
 
 // Continue at the start of line number num or, as on the Spectrum, the
@@ -1141,6 +1390,8 @@ static int skip_to_next(struct var *v) {
     }
 }
 
+// FOR: as on the Spectrum, the loop is kept with its control variable
+// (so there's no limit on loops, and jumping out of one is harmless).
 static void st_for() {
     char name[NAME_LEN];
     int is_str;
@@ -1157,68 +1408,45 @@ static void st_for() {
     struct var *v = find_var(name, 0, 1);
     if (!v) return;
     v->num = start;
-
-    // Re-entering a FOR for a variable that is already looping (e.g.
-    // via GOTO) restarts that loop instead of stacking a duplicate.
-    for (int i = 0; i < for_sp; i++) {
-        if (for_stack[i].var == v) { for_sp = i; break; }
-    }
+    v->is_for = 1;
+    v->limit = limit;
+    v->step = step;
+    v->loop_line = current_line_number();
+    v->loop_stmt = statement_number(stmt_pos);
     // A loop that wouldn't run even once is skipped entirely, as on the
     // Spectrum: carry on after the matching NEXT.
     if ((step >= 0 && start > limit) || (step < 0 && start < limit)) {
         if (!skip_to_next(v)) error("FOR WITHOUT NEXT");
-        return;
     }
-    if (for_sp >= MAX_FOR) {
-        error("TOO MANY NESTED FOR LOOPS");
-        return;
-    }
-    struct for_loop *f = &for_stack[for_sp++];
-    f->var = v;
-    f->limit = limit;
-    f->step = step;
-    f->line = cur_line;
-    f->pos = p;
 }
 
 static void st_next() {
     char name[NAME_LEN];
     int is_str;
     if (!read_name(name, &is_str)) return;
-    // Find the matching loop; any inner loops left unfinished are dropped.
-    int i = for_sp - 1;
-    while (i >= 0 && (is_str || strcmp(for_stack[i].var->name, name) != 0)) i--;
-    if (i < 0) {
+    struct var *v = is_str ? 0 : lookup_var(name, 0);
+    if (!v || !v->is_for) {
         error("NEXT WITHOUT FOR");
         return;
     }
-    for_sp = i + 1;
-    struct for_loop *f = &for_stack[i];
-    double v = check(f->var->num + f->step);
+    double n = check(v->num + v->step);
     if (error_msg) return;
-    f->var->num = v;
-    if ((f->step >= 0 && v <= f->limit) || (f->step < 0 && v >= f->limit)) {
-        cur_line = f->line;   // back to just after the FOR statement
-        p = f->pos;
-    } else {
-        for_sp--;
-    }
+    v->num = n;
+    if ((v->step >= 0 && n <= v->limit) || (v->step < 0 && n >= v->limit))
+        resume(v->loop_line, v->loop_stmt, 1);    // just after the FOR
 }
 
 static void st_gosub() {
     int num = expr_int(0, 65535);
     if (error_msg) return;
     if (gosub_sp == MAX_GOSUB) {
-        error("TOO MANY GOSUBS");
+        error("OUT OF MEMORY");
         return;
     }
-    int line = cur_line;
-    char *pos = p;
+    gosub_stack[gosub_sp].line = current_line_number();
+    gosub_stack[gosub_sp].stmt = statement_number(stmt_pos);
     go_to_line(num);
-    if (error_msg) return;
-    gosub_stack[gosub_sp].line = line;
-    gosub_stack[gosub_sp].pos = pos;
-    gosub_sp++;
+    if (!error_msg) gosub_sp++;
 }
 
 static void st_return() {
@@ -1227,8 +1455,7 @@ static void st_return() {
         return;
     }
     gosub_sp--;
-    cur_line = gosub_stack[gosub_sp].line;
-    p = gosub_stack[gosub_sp].pos;        // just after the GOSUB
+    resume(gosub_stack[gosub_sp].line, gosub_stack[gosub_sp].stmt, 1);
 }
 
 static int read_line();
@@ -1295,8 +1522,8 @@ static void st_dim() {
         if (!read_name(name, &is_str)) return;
         if (!accept_char('(')) { error("SYNTAX ERROR"); return; }
         int dims[MAX_DIMS], nd = 0;
-        int esize = is_str ? STR_SLOT : (int)sizeof(double);
-        int room = (HEAP_SIZE - heap_used) / esize;   // elements that fit
+        int esize = is_str ? 1 : (int)sizeof(double);
+        int room = HEAP_SIZE / esize;     // more elements than could ever fit
         int count = 1;
         do {
             if (nd == MAX_DIMS) { error("TOO MANY DIMENSIONS"); return; }
@@ -1310,16 +1537,27 @@ static void st_dim() {
         if (count > room) { error("OUT OF MEMORY"); return; }
         struct array *a = find_array(name, is_str);
         if (!a) {
-            if (num_arrays == MAX_ARRAYS) { error("TOO MANY ARRAYS"); return; }
-            a = &arrays[num_arrays++];
+            int i = 0;
+            while (i < num_arrays && arrays[i].name[0]) i++;
+            if (i == MAX_ARRAYS) { error("OUT OF MEMORY"); return; }
+            if (i == num_arrays) num_arrays++;
+            a = &arrays[i];
             strcpy(a->name, name);
             a->is_str = is_str;
+            a->data = 0;
         }
+        a->data = 0;              // (any old elements are now garbage)
+        char *data = heap_alloc(count * esize, 1, a - arrays);
+        if (!data) { a->name[0] = '\0'; return; }
+        a->data = data;
         a->ndims = nd;
+        a->count = count;
         for (int i = 0; i < nd; i++) a->dims[i] = dims[i];
-        a->data = heap + heap_used;
-        heap_used += (count * esize + 7) & ~7;
-        memset(a->data, 0, count * esize);
+        memset(a->data, is_str ? ' ' : 0, count * esize);
+        if (is_str) {             // A string array replaces a simple string
+            struct var *v = lookup_var(name, 1);
+            if (v) delete_var(v);
+        }
     } while (accept_char(','));
 }
 
@@ -1497,10 +1735,7 @@ static int next_statement();
 
 static void st_continue() {
     if (!cont_ok) { error("CAN'T CONTINUE"); return; }
-    cur_line = cont_line;
-    p = cont_pos;
-    jumped = 1;
-    if (cont_next && !next_statement()) running = 0;
+    resume(cont_line, cont_stmt, cont_next);
 }
 
 static void st_colour(void (*set)(int), int max) {
@@ -1649,8 +1884,8 @@ static void execute_statement() {
     }
     case T_STOP:
         cont_ok = cur_line >= 0;
-        cont_line = cur_line;
-        cont_pos = p;
+        cont_line = current_line_number();
+        cont_stmt = statement_number(stmt_pos);
         cont_next = 1;
         if (cur_line >= 0) {
             char buf[8];
@@ -1783,8 +2018,8 @@ static void run() {
                 print_string(" IN LINE ");
                 print_string(buf);
                 cont_ok = 1;
-                cont_line = cur_line;
-                cont_pos = p;
+                cont_line = line_num(cur_line);
+                cont_stmt = statement_number(p);
                 cont_next = 0;
             }
             print_string("\n");
@@ -1800,8 +2035,11 @@ static void run() {
         if (error_msg) {
             print_error(error_msg, stmt_line >= 0 ? line_num(stmt_line) : -1);
             cont_ok = stmt_line >= 0;
-            cont_line = stmt_line;
-            cont_pos = stmt_pos;
+            if (cont_ok) {
+                cur_line = stmt_line;
+                cont_line = line_num(stmt_line);
+                cont_stmt = statement_number(stmt_pos);
+            }
             cont_next = 0;
             return;
         }
@@ -1854,15 +2092,16 @@ void basic_run() {
         }
         if (num > 0) {
             last_line = num;
-            // Editing the program invalidates any loops in progress.
-            reset_run_state();
-            cont_ok = 0;
+            // FOR loops, GO SUB and CONTINUE survive editing, as on the
+            // Spectrum (they refer to line numbers).
+            data_mark();
             if (len == 1) {
                 line_delete(num);         // just a number: delete the line
             } else {
                 const char *err = line_store(num, typed_line, len);
                 if (err) print_error(err, num);
             }
+            data_unmark();
         } else {
             cur_line = -1;
             p = (char *)typed_line;
