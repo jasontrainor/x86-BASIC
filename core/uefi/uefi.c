@@ -180,7 +180,7 @@ void plat_tone(int freq, int ms) {
 /* ------------------------------------------------------------------------
  * Disk. We are loaded from a partition (the EFI system partition), but
  * saved programs live outside it, at fixed sectors of the whole disk
- * (see kernel/storage.h). So find the disk the partition is on: take the
+ * (see core/storage.h). So find the disk the partition is on: take the
  * partition's device path, drop its last (hard drive partition) node,
  * and ask for the Block I/O protocol of the device that path names.
  * --------------------------------------------------------------------- */

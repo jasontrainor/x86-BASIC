@@ -1,7 +1,7 @@
 ; memcpy, memmove and memset for the 16-bit BIOS kernel.
 ;
 ; GCC's -m16 code uses 32-bit addresses throughout, so data can live
-; above 64KB (see linker.ld). But when GCC compiles a copy loop to a
+; above 64KB (see core/bios.ld). But when GCC compiles a copy loop to a
 ; string instruction such as movsb, the assembler leaves it using the
 ; 16-bit SI/DI registers, which only reach the first 64KB. So these are
 ; written here with the a32 prefix (ESI/EDI/ECX), and the Makefile

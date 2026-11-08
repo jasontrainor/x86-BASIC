@@ -2,7 +2,7 @@
 # Fail if a 16-bit kernel object file contains an instruction that uses
 # 16-bit addressing (SI, DI, BX or BP as an address).
 #
-# The kernel's data may live above 64KB ("unreal mode", see linker.ld),
+# The kernel's data may live above 64KB ("unreal mode", see core/bios.ld),
 # which only 32-bit addresses can reach. GCC's -m16 code always uses
 # them, except when it emits a string instruction (movs, stos, ...): the
 # assembler leaves those with 16-bit addressing. Such code works in

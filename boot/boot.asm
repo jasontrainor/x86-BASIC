@@ -6,7 +6,7 @@
 
 RELOCATED     equ 0x0600
 KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
-MAX_KERNEL_SECTORS equ (0x20000 - KERNEL_OFFSET) / 512   ; as linker.ld
+MAX_KERNEL_SECTORS equ (0x20000 - KERNEL_OFFSET) / 512   ; as core/bios.ld
 
 ; The Makefile passes the kernel's size in sectors (-DKERNEL_SECTORS=n).
 %ifndef KERNEL_SECTORS

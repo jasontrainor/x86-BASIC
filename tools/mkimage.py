@@ -12,7 +12,7 @@ Layout (512-byte sectors):
 
     0           boot sector: BIOS boot code, BPB, MBR partition table
     1-255       the 16-bit kernel, loaded by the boot sector     \\ partition 1
-    256-2047    saved files (kernel/storage.h)                    / (type 0xDA)
+    256-2047    saved files (core/storage.h)                    / (type 0xDA)
     2048-2879   EFI system partition: FAT12 with                  partition 2
                 EFI/BOOT/BOOTX64.EFI, the 64-bit UEFI kernel      (type 0xEF)
 

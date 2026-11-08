@@ -25,17 +25,19 @@ def main():
     ap.add_argument('listing')
     ap.add_argument('--mode', default='hdd', choices=q.MODES)
     ap.add_argument('--wait', type=float, default=10, help='seconds to let it run')
+    ap.add_argument('--machine', default='spectrum')
     ap.add_argument('--out', help='the PNG to write (default: next to the listing)')
     a = ap.parse_args()
     out = a.out or os.path.splitext(a.listing)[0] + '.png'
     name = os.path.basename(a.listing).upper()
     build = os.path.join(ROOT, 'build')
+    kernels = os.path.join(build, a.machine)
 
     with tempfile.TemporaryDirectory() as tmp:
         image = os.path.join(tmp, 'listing.img')
         subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'mkimage.py'),
-                        os.path.join(build, 'boot.bin'), os.path.join(build, 'kernel.bin'),
-                        os.path.join(build, 'BOOTX64.EFI'), image, a.listing], check=True)
+                        os.path.join(build, 'boot.bin'), os.path.join(kernels, 'kernel.bin'),
+                        os.path.join(kernels, 'BOOTX64.EFI'), image, a.listing], check=True)
         mon_path = os.path.join(tmp, 'mon.sock')
         proc = subprocess.Popen(q.qemu_args(a.mode, image, mon_path),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)

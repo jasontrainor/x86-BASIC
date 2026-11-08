@@ -1,14 +1,14 @@
 #!/bin/bash
 # Host-side tests for the BASIC interpreter.
-# Builds kernel/basic.c + kernel/string.c against tests/host_stub.c with
+# Builds the Spectrum machine (machines/spectrum/) and core/ against tests/host_stub.c with
 # AddressSanitizer/UBSan, feeds keystrokes in, and checks the output.
 set -u
 cd "$(dirname "$0")/.."
 mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
-    -Wall -Ikernel -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/storage.c kernel/fat.c kernel/string.c kernel/num.c kernel/memory.c || exit 1
+    -Wall -Icore -Imachines/spectrum -DHOST_TEST \
+    -o "$BIN" tests/host_stub.c machines/spectrum/*.c core/storage.c core/fat.c core/string.c core/num.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]

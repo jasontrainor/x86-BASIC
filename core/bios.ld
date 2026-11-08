@@ -14,7 +14,7 @@
  * set up in kernel_entry.asm), so data anywhere in memory can be reached
  * with 32-bit addresses. But GCC addresses a variable it can name
  * directly with a 16-bit address, so the small variables must stay below
- * 64KB; C code marks the big buffers HIGH_MEM (see kernel/mem.h) to put
+ * 64KB; C code marks the big buffers HIGH_MEM (see core/mem.h) to put
  * them above it. The stack is in the first 64KB too (SS = 0, SP).
  *
  * The code has a real-mode segment of its own, CS = 0x8000, so it can be

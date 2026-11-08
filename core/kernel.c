@@ -1,16 +1,14 @@
 #include "platform.h"
-#include "screen.h"
-#include "basic.h"
+#include "machine.h"
 
 // Common start-up, once the platform is ready to go.
 void kernel_start(void) {
     plat_init();
-    screen_init();   // Spectrum defaults: black ink on white paper, white border
-    basic_run();     // (which shows the banner at the bottom, as on the Spectrum)
+    machine_start();
 }
 
 #ifdef BIOS_KERNEL
-extern char __bss_start, __bss_end;     // see linker.ld
+extern char __bss_start, __bss_end;     // see core/bios.ld
 extern char __high_start, __high_end;
 
 static void zero(char *from, char *to) {

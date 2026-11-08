@@ -2,7 +2,7 @@
 #define MEMORY_H
 
 /*
- * The Spectrum's 64KB memory map, for PEEK and POKE (kernel/memory.c).
+ * The Spectrum's 64KB memory map, for PEEK and POKE (machines/spectrum/memory.c).
  *
  *   0-16383      "ROM": all 0, except the character set at 15616-16383
  *                (this project's own font, where the Spectrum keeps its

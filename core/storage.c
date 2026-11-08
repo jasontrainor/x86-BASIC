@@ -2,7 +2,7 @@
  * Saving programs and bytes on the boot disk (SAVE, LOAD, CAT, ERASE...).
  *
  * Files are kept in a reserved area of the disk image, as raw sectors
- * (see kernel/storage.h): a directory, then the files' data, each file
+ * (see core/storage.h): a directory, then the files' data, each file
  * in consecutive sectors wherever there is room for it. That's simple,
  * needs no filesystem driver, and the BIOS and UEFI kernels share it.
  *

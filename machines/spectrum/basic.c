@@ -1357,11 +1357,11 @@ static struct value primary();
 
 /*
  * Brackets and functions nest by recursion, and the BIOS kernel's stack
- * is small (see linker.ld), so deep nesting is stopped with an error
+ * is small (see core/bios.ld), so deep nesting is stopped with an error
  * rather than letting the stack overflow.
  */
 #if defined(BIOS_KERNEL)
-#define STACK_BUDGET (36 * 1024)      // of the 40KB in linker.ld
+#define STACK_BUDGET (36 * 1024)      // of the 40KB in core/bios.ld
 #elif defined(UEFI_KERNEL)
 #define STACK_BUDGET (64 * 1024)      // (UEFI promises at least 128KB)
 #else

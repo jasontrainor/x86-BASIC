@@ -1,7 +1,7 @@
 /*
- * The platform layer (kernel/platform.h) for running the BASIC
- * interpreter on Linux, with sanitizers, for tests. The shared screen
- * code (kernel/screen.c) runs as on a PC; this just doesn't draw.
+ * The platform layer (core/platform.h) for running a machine's BASIC
+ * interpreter on Linux, with sanitizers, for tests. The machine's screen
+ * code runs as on a PC; this just doesn't draw.
  *
  * Keyboard input comes from argv[1]. When the interpreter waits for a
  * key and the input has run out, the process exits.
@@ -13,9 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "platform.h"
-
-void basic_run(void);
-void screen_init(void);
+#include "machine.h"
 
 static const char *input;
 int host_scroll_prompt;             /* ask "scroll?" (env SCROLL_PROMPT) */
@@ -105,7 +103,6 @@ int main(int argc, char **argv) {
     }
     if (getenv("DISK_OUT")) atexit(save_disk);
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;
-    screen_init();                  /* as kernel_start() does */
-    basic_run();
+    machine_start();                /* as kernel_start() does */
     return 0;
 }

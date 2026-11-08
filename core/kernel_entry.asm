@@ -1,13 +1,13 @@
 [bits 16]
 [extern main]
-[extern __stack_top]       ; these are defined in linker.ld, with the memory map
+[extern __stack_top]       ; these are defined in core/bios.ld, with the memory map
 [extern __code_load]
 [extern __code_size]
 
-CODE_SEGMENT equ 0x8000    ; the code runs at 0x80000 (linker.ld: CODE_BASE)
+CODE_SEGMENT equ 0x8000    ; the code runs at 0x80000 (core/bios.ld: CODE_BASE)
 MIN_MEMORY_KB equ 576      ; ... so it needs memory up to 0x90000
 
-; Placed first in the image by linker.ld, so this is at 0x1000, and runs
+; Placed first in the image by core/bios.ld, so this is at 0x1000, and runs
 ; with CS = 0 as the boot sector left it.
 section .text.entry progbits alloc exec nowrite align=1
 
@@ -108,7 +108,7 @@ section .text
 ; 64KB: GCC uses EBP as an ordinary register, and an address formed with
 ; EBP uses SS, so a pointer into high memory held in EBP goes through SS.
 ; The descriptor is 16-bit (B=0), so the stack still uses SP. Code (CS)
-; is left alone: it has a real-mode segment of its own (see linker.ld).
+; is left alone: it has a real-mode segment of its own (see core/bios.ld).
 ;
 ; A BIOS routine that switches to protected mode itself could leave the
 ; limits at 64KB again, so this is called again after each BIOS call.

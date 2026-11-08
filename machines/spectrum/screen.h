@@ -2,7 +2,7 @@
 #define SCREEN_H
 
 /*
- * The Spectrum-style screen (kernel/screen.c), the keyboard queue and
+ * The Spectrum-style screen (machines/spectrum/screen.c), the keyboard queue and
  * other services BASIC uses, built on the platform layer (platform.h).
  *
  * The screen is 32 columns by 24 rows of 8x8 characters, a 256x192
