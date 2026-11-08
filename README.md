@@ -206,8 +206,8 @@ partition, the one any PC shows when the stick is plugged in. So a
 listing can be typed or fixed up in a PC's text editor, copied onto the
 stick, and loaded: `LOAD "game.bas"` (or `MERGE`). `SAVE "game.bas"`
 writes the program out as text, to take back to a PC, and `VERIFY`,
-`ERASE` and `CAT` work too. Names are DOS 8.3 names, in the partition's
-top folder.
+`ERASE` and `CAT` work too. Names are DOS 8.3 names, in the `SPECTRUM`
+folder (which is made when it's first saved to).
 
 The text is as `LIST` shows it, a line per line, with the characters a
 PC can't show written as the escapes above (zmakebas's). Reading one,
@@ -217,12 +217,12 @@ the first that doesn't make sense is reported and put in the editor,
 with its `?`, to be put right.
 
 `make LISTINGS="game.bas other.bas"` puts listings on the image when it's
-built.
+built. The FAT partition can be FAT12 or FAT16, of any size.
 
 ### The printer
 
 `LPRINT`, `LLIST` and `COPY` print on a pretend ZX Printer: the text
-file `PRINTOUT.TXT` on the FAT partition, 32 characters to a line. Each
+file `SPECTRUM/PRINTOUT.TXT` on the FAT partition, 32 characters to a line. Each
 command or program adds what it printed to the end of the file (which
 keeps its last 64KB). The pound sign, © and block graphics come out as
 their Unicode characters, and UDGs as the letters they start as. `COPY`

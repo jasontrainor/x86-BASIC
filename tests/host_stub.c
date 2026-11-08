@@ -69,15 +69,17 @@ unsigned long plat_timer_ms(void) { static unsigned long t; return t += 20; }
 
 void plat_tone(int f, int ms) { printf("[TONE %d %d]", f, ms); }
 
-/* A blank 1.44MB disk in memory. Sector 2879 always fails, for tests. */
-static unsigned char disk[2880][512];
+/* A blank 1.44MB disk in memory (or DISK_IMAGE, of any size). Its last
+   sector always fails, for tests. */
+static unsigned char (*disk)[512];
+static unsigned int disk_sectors = 2880;
 int plat_disk_read(unsigned int lba, void *buf) {
-    if (lba >= 2879) return -1;
+    if (lba >= disk_sectors - 1) return -1;
     memcpy(buf, disk[lba], 512);
     return 0;
 }
 int plat_disk_write(unsigned int lba, const void *buf) {
-    if (lba >= 2879) return -1;
+    if (lba >= disk_sectors - 1) return -1;
     memcpy(disk[lba], buf, 512);
     return 0;
 }
@@ -87,7 +89,7 @@ int plat_disk_write(unsigned int lba, const void *buf) {
 static void save_disk(void) {
     FILE *f = fopen(getenv("DISK_OUT"), "wb");
     if (f) {
-        fwrite(disk, 1, sizeof(disk), f);
+        fwrite(disk, 512, disk_sectors, f);
         fclose(f);
     }
 }
@@ -96,11 +98,20 @@ int main(int argc, char **argv) {
     input = argc > 1 ? argv[1] : "";
     if (getenv("DISK_IMAGE")) {
         FILE *f = fopen(getenv("DISK_IMAGE"), "rb");
-        if (!f || fread(disk, 1, sizeof(disk), f) == 0) {
+        if (!f || fseek(f, 0, SEEK_END) != 0) {
+            perror("DISK_IMAGE");
+            return 1;
+        }
+        disk_sectors = ftell(f) / 512;
+        rewind(f);
+        disk = calloc(disk_sectors, 512);
+        if (disk_sectors < 2 || fread(disk, 512, disk_sectors, f) != disk_sectors) {
             perror("DISK_IMAGE");
             return 1;
         }
         fclose(f);
+    } else {
+        disk = calloc(disk_sectors, 512);
     }
     if (getenv("DISK_OUT")) atexit(save_disk);
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;

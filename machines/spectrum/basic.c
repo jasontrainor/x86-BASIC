@@ -1788,7 +1788,7 @@ _Static_assert(sizeof(spectrum_keywords) / sizeof(spectrum_keywords[0]) == 256 -
  * they're redefined.
  */
 #define PRINTER_SIZE 4096
-#define PRINTER_FILE "PRINTOUT.TXT"
+#define PRINTER_FILE "PRINTOUT.TXT"       // (in the machine's folder)
 HIGH_MEM char printer_buf[PRINTER_SIZE];
 int printer_len, printer_col;
 int to_printer;           // PRINT is printing on the printer
