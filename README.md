@@ -168,8 +168,10 @@ doesn't use) runs at full speed; `POKE 23681,0` goes back.
   and functions are the PC's, rounded to that precision, not the
   Spectrum ROM's own routines, so a last digit can still occasionally
   differ.
-- A keyword can't be used as a variable name (`LET to=1`, `LET line=1`),
-  since keywords are typed as words.
+- Keywords are typed as words, so a variable named like one is only
+  possible for keywords that can't start a value: `LET to=1`, `FOR
+  step=1 TO 3`, `PRINT line` work (and list as `LET TO =1`), but not
+  names that are functions (`len`, `int`), and `PRINT at` is `PRINT AT`.
 - No machine code: `USR` addresses, `RANDOMIZE USR`, and `LOAD "" CODE`
   followed by a call don't run anything.
 - A PC keyboard only reports a key going down, not that it's still held,

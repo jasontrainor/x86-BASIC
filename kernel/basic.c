@@ -566,13 +566,30 @@ static char *heap_alloc(unsigned int size, int is_array, int owner) {
 // $ for a string. As on the Spectrum, spaces within a name are ignored
 // (LET hi score=0 sets HISCORE) and case doesn't matter. Returns 0 (with
 // an error) if there isn't one.
+/*
+ * A keyword that can be used as a variable name: a single word that
+ * can't start a value (not a function or operator), so that where a
+ * value or a name is expected it can only be a name: LET to=1, FOR
+ * step=1 TO 3, PRINT line. (On the Spectrum, names typed letter by
+ * letter are never keywords; here keywords are typed as words.)
+ */
+static int is_name_token(unsigned char t) {
+    if (!IS_TOKEN(t) || t >= T_LE) return 0;
+    if ((t >= T_AND && t <= T_POINT) || t == T_FN || t == T_PEEK ||
+        (t >= T_USR && t <= T_IN) || t == T_GOTO || t == T_GOSUB || t == T_DEFFN)
+        return 0;
+    return 1;
+}
+
 static int read_name(char *name, int *is_str) {
     skip_space();
-    if (!isalpha(*p)) {
+    int n = 0;
+    if (is_name_token(*p)) {              // a keyword as a name (see above)
+        for (const char *k = token_name(*p++); *k; k++) name[n++] = *k;
+    } else if (!isalpha(*p)) {
         error("C Nonsense in BASIC");
         return 0;
     }
-    int n = 0;
     for (;;) {
         while (isalnum(*p)) {
             if (n == NAME_LEN - 1) {
@@ -1436,7 +1453,7 @@ static struct value primary() {
     } else if (c >= T_PEEK && c <= T_IN && c != T_POKE) {
         p++;
         return spectrum_function(c);
-    } else if (isalpha(c)) {
+    } else if (isalpha(c) || is_name_token(c)) {
         return variable_value();
     }
     error("C Nonsense in BASIC");
@@ -3258,8 +3275,14 @@ static void execute_statement() {
         break;
     }
     default:
-        if (isalpha(t)) st_let();          // LET is optional
-        else error("C Nonsense in BASIC");
+        if (isalpha(t)) {
+            st_let();                      // LET is optional
+        } else if (is_name_token(t)) {
+            p--;                           // (to=1: a keyword as a name)
+            st_let();
+        } else {
+            error("C Nonsense in BASIC");
+        }
     }
 }
 

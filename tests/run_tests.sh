@@ -123,6 +123,10 @@ check "keyword prefix"    "10 PRINT 3*3${NL}RUNX${NL}" "[ERR]RUNX?${NL}" "!${NL}
 check "no space needed"   "10 GOTO30${NL}20 PRINT 1+1${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}"
 check "long names"        "SCORE=5${NL}TOTAL2=SCORE*2${NL}PRINT TOTAL2+1${NL}" "${NL}11${NL}"
 check "keyword in name"   "FORM=3${NL}TOTAL=4${NL}PRINT FORM*TOTAL${NL}" "${NL}12${NL}"
+check "keyword names"     "LET to=5: LET step=2: PRINT to*step${NL}LET line=3: PRINT line+1${NL}LET print=7: PRINT print${NL}" "${NL}10${NL}" "${NL}4${NL}" "${NL}7${NL}" "![ERR]"
+check "keyword name loops" "FOR step=1 TO 3: NEXT step: PRINT step${NL}DIM at(3): LET at(2)=7: LET x=at(2): PRINT x${NL}LET then\$=\"T\": PRINT then\$${NL}" "${NL}4${NL}" "${NL}7${NL}" "${NL}T${NL}" "![ERR]"
+check "keyword name list" "10 LET to=1: FOR i=to TO to+1: NEXT i${NL}LIST${NL}RUN${NL}" "  10>LET TO =1: FOR i= TO TO TO +1: NEXT i${NL}" "0 OK, 10:3"
+check "function not name" "LET len=1${NL}" "[ERR]LET ?len=1${NL}"
 check "name too long"     "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFG=1${NL}" "[ERR]ABCDEFGHIJKLMNOPQRSTUVWXYZABCDE?FG=1${NL}"
 
 # --- Numbers ---------------------------------------------------------------
