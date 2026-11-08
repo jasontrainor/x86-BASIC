@@ -115,7 +115,7 @@ MSG_LOAD_KERNEL db "Loading BASIC kernel...", 0x0D, 0x0A, 0
 ; CHS fields use the usual 255-head, 63-sector translation.
 ; ---------------------------------------------------------------------------
 IMAGE_SECTORS equ 2880
-ESP_START     equ 1152
+ESP_START     equ 2048
 
 %macro chs 1               ; CHS address of LBA %1 (cylinder < 256 here)
     db (%1) / 63 % 255     ; head

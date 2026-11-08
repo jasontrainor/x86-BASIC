@@ -309,8 +309,8 @@ check "input not history" "10 INPUT A\$${NL}RUN${NL}SECRET${NL}${UP}${NL}" "\"SE
 
 # --- Saving programs -----------------------------------------------------------
 check "save load"         "10 PRINT 6*7${NL}SAVE \"answer\"${NL}NEW${NL}LOAD \"ANSWER\"${NL}LIST${NL}RUN${NL}" "LIST${NL}  10 PRINT 6*7${NL}" "${NL}42${NL}"
-check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             7${NL}TWO             14 LINE 20${NL}13 FREE${NL}"
-check "save replaces"     "10 PRINT 1${NL}SAVE \"P\"${NL}10 PRINT 2${NL}SAVE \"P\"${NL}NEW${NL}LOAD \"P\"${NL}LIST${NL}CAT${NL}" "LIST${NL}  10 PRINT 2${NL}" "14 FREE"
+check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             7${NL}TWO             14 LINE 20${NL}891K FREE${NL}"
+check "save replaces"     "10 PRINT 1${NL}SAVE \"P\"${NL}10 PRINT 2${NL}SAVE \"P\"${NL}NEW${NL}LOAD \"P\"${NL}LIST${NL}CAT${NL}" "LIST${NL}  10 PRINT 2${NL}" "891K FREE"
 check "load autorun"      "10 PRINT 6*7${NL}SAVE \"GO\" LINE 10${NL}NEW${NL}LOAD \"GO\"${NL}" "LOAD \"GO\"${NL}42${NL}"
 check "load missing"      "LOAD \"NOPE\"${NL}" "R Program not found, 0:"
 check "erase"             "10 PRINT 1${NL}SAVE \"X\"${NL}ERASE \"X\"${NL}LOAD \"X\"${NL}" "R Program not found, 0:"
@@ -324,8 +324,9 @@ check "wrong kind"        "SAVE \"B\" CODE 0,10${NL}LOAD \"B\"${NL}" "R Wrong ki
 check "verify"            "10 PRINT 1${NL}SAVE \"V\"${NL}VERIFY \"V\"${NL}20 PRINT 2${NL}VERIFY \"V\"${NL}" "0 OK, 0:1${NL}VERIFY \"V\"${NL}0 OK" "R Tape loading error, 0:1"
 check "merge"             "10 PRINT 1${NL}20 PRINT 2${NL}SAVE \"M\"${NL}NEW${NL}20 PRINT 5${NL}30 PRINT 3${NL}LET x=9: MERGE \"M\": PRINT x${NL}LIST${NL}" "${NL}9${NL}" "  10 PRINT 1${NL}  20 PRINT 2${NL}  30>PRINT 3${NL}" "![ERR]"
 check "load clears vars"  "10 PRINT 1${NL}SAVE \"V\"${NL}A=5${NL}LOAD \"V\"${NL}PRINT A${NL}" "2 Variable not found, 0:"
-FULL15=""; for i in $(seq 1 15); do FULL15+="SAVE \"P$i\"${NL}"; done
-check "disk full"         "10 PRINT 1${NL}${FULL15}SAVE \"P16\"${NL}CAT${NL}" "R Disk full, 0:" "0 FREE"
+check "disk full"         "FOR i=1 TO 30: SAVE STR\$ i CODE 0,32768: NEXT i${NL}PRINT i${NL}CAT${NL}" "R Disk full, 0:2" "${NL}28${NL}" "27              32768 CODE 0${NL}28K FREE${NL}"
+check "erase frees room"  "FOR i=1 TO 28: SAVE STR\$ i CODE 0,32768: NEXT i${NL}ERASE \"5\": SAVE \"x\" CODE 0,32768: LOAD \"x\" CODE: PRINT \"done\"${NL}" "R Disk full, 0:2" "${NL}done${NL}"
+check "directory full"    "10 PRINT 1${NL}FOR i=1 TO 130: SAVE STR\$ i: NEXT i${NL}PRINT i${NL}SAVE \"1\": PRINT \"replaced\"${NL}" "R Disk full, 0:2" "${NL}128${NL}" "${NL}replaced${NL}"
 BIG=""; for i in $(seq 1 150); do BIG+="$i REM ${A200}${NL}"; done
 check "big program"       "${BIG}SAVE \"BIG\"${NL}NEW${NL}LOAD \"BIG\"${NL}LIST 97${NL}" "LIST 97${NL}  97>REM" "![ERR]"
 check "save in program"   "10 SAVE \"SELF\"${NL}20 PRINT 6*7${NL}RUN${NL}CAT${NL}" "${NL}42${NL}" "SELF "

@@ -2308,13 +2308,13 @@ static void cat_entry(const char *name, int len, int param, int type) {
 }
 
 static void st_cat() {
-    int free_slots;
-    const char *err = storage_list(cat_entry, &free_slots);
+    int free_files, free_kb;
+    const char *err = storage_list(cat_entry, &free_files, &free_kb);
     if (err) { error(err); return; }
     char buf[8];
-    itoa(free_slots, buf);
+    itoa(free_files ? free_kb : 0, buf);  // (no room in the directory: none)
     print_string(buf);
-    print_string(" FREE\n");
+    print_string("K FREE\n");
 }
 
 static int next_statement();

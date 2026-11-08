@@ -7,9 +7,9 @@ Build os.img: a 1.44MB disk image that boots on both kinds of PC.
 Layout (512-byte sectors):
 
     0           boot sector: BIOS boot code, BPB, MBR partition table
-    1-127       the 16-bit kernel, loaded by the boot sector     \\ partition 1
-    128-1088    saved programs (kernel/storage.h)                 / (type 0xDA)
-    1152-2879   EFI system partition: FAT12 with                  partition 2
+    1-255       the 16-bit kernel, loaded by the boot sector     \\ partition 1
+    256-2047    saved files (kernel/storage.h)                    / (type 0xDA)
+    2048-2879   EFI system partition: FAT12 with                  partition 2
                 EFI/BOOT/BOOTX64.EFI, the 64-bit UEFI kernel      (type 0xEF)
 
 A BIOS (or UEFI firmware with legacy "CSM" boot) runs the boot sector;
@@ -21,8 +21,8 @@ import sys
 
 SECTOR = 512
 IMAGE_SECTORS = 2880             # 1.44MB, so it also works as a floppy image
-KERNEL_MAX = 127                 # sectors 1-127
-ESP_START = 1152                 # must match boot/boot.asm
+KERNEL_MAX = 255                 # sectors 1-255
+ESP_START = 2048                 # must match boot/boot.asm
 ESP_SECTORS = IMAGE_SECTORS - ESP_START
 
 
@@ -132,7 +132,7 @@ def main():
     kernel = open(kernel_path, 'rb').read()
     efi = open(efi_path, 'rb').read()
     assert len(boot) == SECTOR, 'boot sector must be 512 bytes'
-    assert len(kernel) <= KERNEL_MAX * SECTOR, 'kernel too big for sectors 1-127'
+    assert len(kernel) <= KERNEL_MAX * SECTOR, 'kernel too big for sectors 1-255'
 
     img = bytearray(IMAGE_SECTORS * SECTOR)
     img[:SECTOR] = boot

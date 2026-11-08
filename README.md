@@ -180,9 +180,9 @@ the disk the computer booted from and `LOAD "name"` reads it back (`LOAD
 from line 10. `SAVE "name" CODE start,length` and `SAVE "name" SCREEN$`
 save memory or the screen, loaded back with `LOAD "name" CODE [start]`
 and `LOAD "name" SCREEN$`. `VERIFY` checks a save, `MERGE` adds a saved
-program's lines to the one in memory, `CAT` lists what's saved and `ERASE
-"name"` deletes one. There's room for 15 files of up to 32KB, with names
-of up to 15 characters.
+program's lines to the one in memory, `CAT` lists what's saved, and how much
+room is left, and `ERASE "name"` deletes one. There's room for 127
+files, about 890KB in all, with names of up to 15 characters.
 
 Files are kept in a reserved area of the disk image, so they persist on a
 USB stick, and the BIOS and UEFI versions share them. Rebuilding
