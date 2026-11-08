@@ -59,8 +59,11 @@ def fat12_image(files, sectors, hidden):
         return first
 
     def entry(name, attr, cluster, size):
-        base, _, ext = name.partition('.')
-        short = base.upper().ljust(8)[:8] + ext.upper().ljust(3)[:3]
+        if name in ('.', '..'):
+            short = name.ljust(11)
+        else:
+            base, _, ext = name.partition('.')
+            short = base.upper().ljust(8)[:8] + ext.upper().ljust(3)[:3]
         # Fixed timestamp (2026-01-01 00:00) so builds are reproducible.
         date = ((2026 - 1980) << 9) | (1 << 5) | 1
         return struct.pack('<11sBBBHHHHHHHI', short.encode(), attr, 0, 0, 0,
