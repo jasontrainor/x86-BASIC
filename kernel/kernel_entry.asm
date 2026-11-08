@@ -27,7 +27,7 @@ _start:
     jmp $
 
 ; ---------------------------------------------------------------------------
-; enter_unreal: give DS, ES, FS and GS a 4GB limit ("unreal mode").
+; enter_unreal: give DS, ES, FS, GS and SS a 4GB limit ("unreal mode").
 ;
 ; In real mode a segment is normally limited to 64KB, so with every
 ; segment register 0 (as the C code needs), only the first 64KB of memory
@@ -37,7 +37,11 @@ _start:
 ; switch straight back. The registers are 0 again, real-mode BIOS calls
 ; still work, and the C code can now use 32-bit addresses up to 4GB.
 ;
-; Code (CS) and the stack (SS) are left alone: both stay below 64KB.
+; SS needs the 4GB limit too, even though the stack itself stays below
+; 64KB: GCC uses EBP as an ordinary register, and an address formed with
+; EBP uses SS, so a pointer into high memory held in EBP goes through SS.
+; The descriptor is 16-bit (B=0), so the stack still uses SP. Code (CS)
+; is left alone: it stays below 64KB.
 ;
 ; A BIOS routine that switches to protected mode itself could leave the
 ; limits at 64KB again, so this is called again after each BIOS call.
@@ -60,6 +64,7 @@ enter_unreal:
     mov es, ax
     mov fs, ax
     mov gs, ax
+    mov ss, ax
     mov eax, cr0
     and al, 0xFE
     mov cr0, eax           ; and back to real mode
@@ -70,6 +75,7 @@ enter_unreal:
     mov es, ax
     mov fs, ax
     mov gs, ax
+    mov ss, ax
     pop eax
     popfd                  ; restores the interrupt flag
     retd                   ; 32-bit return, as GCC -m16 code expects
