@@ -40,7 +40,7 @@ enum {
 };
 
 static const char *const token_names[] = {
-    "PRINT", "LET", "GOTO", "GOSUB", "RETURN", "IF", "THEN", "FOR",
+    "PRINT", "LET", "GO TO", "GO SUB", "RETURN", "IF", "THEN", "FOR",
     "TO", "STEP", "NEXT", "REM", "INPUT", "END", "STOP", "CONTINUE", "RUN",
     "LIST", "NEW", "CLEAR", "CLS", "BEEP", "INK", "PAPER", "BORDER",
     "BRIGHT", "INVERSE", "OVER", "PLOT", "DRAW", "CIRCLE", "PAUSE",
@@ -60,11 +60,30 @@ static const char *token_name(unsigned char t) {
 }
 
 // Look up a keyword (upper case, NUL-terminated); 0 if it isn't one.
+// GO TO and GO SUB may also be typed without the space.
 static int find_token(const char *word) {
     for (int t = T_PRINT; t < T_LE; t++) {
         if (strcmp(token_name(t), word) == 0) return t;
     }
+    if (strcmp(word, "GOTO") == 0) return T_GOTO;
+    if (strcmp(word, "GOSUB") == 0) return T_GOSUB;
     return 0;
+}
+
+// The length of the run of letters at s.
+static int letters(const char *s) {
+    int n = 0;
+    while (isalpha(s[n])) n++;
+    return n;
+}
+
+// Does the run of letters at s spell word (upper case), in any case?
+static int is_word(const char *s, const char *word) {
+    int n = letters(s);
+    if (n != (int)strlen(word)) return 0;
+    for (int i = 0; i < n; i++)
+        if (toupper(s[i]) != word[i]) return 0;
+    return 1;
 }
 
 /*
@@ -76,7 +95,10 @@ static int find_token(const char *word) {
  * that matches one, in any case, so names may contain keywords
  * (TOTAL, FORM) and keywords may be followed directly by digits
  * (GOTO10). Spaces around keywords are dropped; LIST puts them back.
- * The text of strings and of REM comments is kept exactly.
+ * The two-word keywords GO TO and GO SUB are recognised with or without
+ * the space. Names are kept as typed (LIST shows them that way) but
+ * compared in any case. The text of strings and of REM comments is kept
+ * exactly.
  */
 static int tokenize(const char *src, unsigned char *dst, int cap) {
     int n = 0;
@@ -110,6 +132,12 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
                 }
                 if (!t) t = find_token(word);
             }
+            if (len == 2 && toupper(src[0]) == 'G' && toupper(src[1]) == 'O') {
+                const char *q = src + 2;     // GO TO, GO SUB
+                while (*q == ' ') q++;
+                if (is_word(q, "TO"))  { t = T_GOTO; len = q + 2 - src; }
+                if (is_word(q, "SUB")) { t = T_GOSUB; len = q + 3 - src; }
+            }
             if (t) {
                 while (n > 0 && dst[n - 1] == ' ') n--;
                 PUT(t);
@@ -117,7 +145,7 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
                 while (*src == ' ') src++;
                 if (t == T_REM) rest_raw = 1;
             } else {
-                for (int i = 0; i < len; i++) PUT(toupper(*src++));
+                for (int i = 0; i < len; i++) PUT(*src++);
             }
             continue;
         }
@@ -250,7 +278,7 @@ static int at_statement_end() {
  * Variables
  * --------------------------------------------------------------------- */
 
-#define NAME_LEN 16       // including the terminating 0
+#define NAME_LEN 32       // including the terminating 0
 #define MAX_STR 255
 #define MAX_VARS 128
 
@@ -265,7 +293,9 @@ HIGH_MEM struct var vars[MAX_VARS];
 int num_vars = 0;
 
 // Read a name at p: a letter, then letters and digits, then an optional
-// $ for a string. Returns 0 (with an error) if there isn't one.
+// $ for a string. As on the Spectrum, spaces within a name are ignored
+// (LET hi score=0 sets HISCORE) and case doesn't matter. Returns 0 (with
+// an error) if there isn't one.
 static int read_name(char *name, int *is_str) {
     skip_space();
     if (!isalpha(*p)) {
@@ -273,12 +303,18 @@ static int read_name(char *name, int *is_str) {
         return 0;
     }
     int n = 0;
-    while (isalnum(*p)) {
-        if (n == NAME_LEN - 1) {
-            error("NAME TOO LONG");
-            return 0;
+    for (;;) {
+        while (isalnum(*p)) {
+            if (n == NAME_LEN - 1) {
+                error("NAME TOO LONG");
+                return 0;
+            }
+            name[n++] = toupper(*p++);
         }
-        name[n++] = toupper(*p++);
+        char *q = p;
+        while (*q == ' ') q++;
+        if (q == p || !isalnum(*q)) break;
+        p = q;
     }
     name[n] = '\0';
     *is_str = (*p == '$');
@@ -956,12 +992,15 @@ static void reset_run_state() {
     restore(0);
 }
 
-// Continue at the start of line number num.
+// Continue at the start of line number num or, as on the Spectrum, the
+// first line after it if there's no such line. Past the last line, the
+// program ends.
 static void go_to_line(int num) {
     if (error_msg) return;
     int off = line_find(num);
-    if (off >= prog_len || line_num(off) != num) {
-        error("LINE NOT FOUND");
+    jumped = 1;
+    if (off >= prog_len) {
+        running = 0;
         return;
     }
     cur_line = off;
@@ -1016,6 +1055,11 @@ static void st_print() {
             newline = 0;
             continue;
         }
+        if (accept_char('\'')) {            // ' starts a new line
+            newline = 0;
+            print_string("\n");
+            continue;
+        }
         if (accept_char(',')) {
             newline = 0;
             int next = (cursor_col() / 16 + 1) * 16;
@@ -1041,7 +1085,7 @@ static void st_print() {
         struct value v = expr();
         if (error_msg) break;
         print_value(v);
-        if (!at_statement_end() && *p != ';' && *p != ',') {
+        if (!at_statement_end() && *p != ';' && *p != ',' && *p != '\'') {
             error("SYNTAX ERROR");
             break;
         }
@@ -1062,7 +1106,7 @@ static void st_if() {
     if (!cond) { skip_line(); return; }
     skip_space();
     if (isdigit(*p)) {                    // IF ... THEN 100
-        go_to_line(expr_int(1, 9999));
+        go_to_line(expr_int(0, 65535));
     } else {
         jumped = 1;     // the statements after THEN simply run next
     }
@@ -1163,7 +1207,7 @@ static void st_next() {
 }
 
 static void st_gosub() {
-    int num = expr_int(1, 9999);
+    int num = expr_int(0, 65535);
     if (error_msg) return;
     if (gosub_sp == MAX_GOSUB) {
         error("TOO MANY GOSUBS");
@@ -1584,7 +1628,7 @@ static void execute_statement() {
     switch (t) {
     case T_PRINT:  st_print(); break;
     case T_LET:    st_let(); break;
-    case T_GOTO:   go_to_line(expr_int(1, 9999)); break;
+    case T_GOTO:   go_to_line(expr_int(0, 65535)); break;
     case T_GOSUB:  st_gosub(); break;
     case T_RETURN: st_return(); break;
     case T_INPUT:  st_input(); break;
@@ -1677,15 +1721,15 @@ static void execute_statement() {
     case T_LIST:
         list_program(at_statement_end() ? 0 : expr_int(1, 9999));
         break;
-    case T_RUN:
+    case T_RUN: {                          // RUN [line]
+        int num = at_statement_end() ? 0 : expr_int(0, 65535);
+        if (error_msg) break;
         clear_variables();
         reset_run_state();
         cont_ok = 0;
-        if (prog_len == 0) { running = 0; break; }
-        cur_line = 0;
-        p = (char *)line_text(0);
-        jumped = 1;
+        go_to_line(num);
         break;
+    }
     case T_BEEP:   st_beep(); break;
     default:
         if (isalpha(t)) st_let();          // LET is optional

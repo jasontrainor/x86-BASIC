@@ -57,7 +57,7 @@ check "beep"             "BEEP${NL}BEEP 1,12${NL}BEEP .5,0${NL}" "[TONE 1000 200
 # --- Errors are reported, and stop the program --------------------------
 check "unknown statement" "10 FROB${NL}RUN${NL}" "ERROR: SYNTAX ERROR IN LINE 10"
 check "trailing junk"     "PRINT 1 2${NL}" "ERROR: SYNTAX ERROR"
-check "error stops run"   "10 PRINT 1+1${NL}20 GOTO 99${NL}30 PRINT 1+2${NL}RUN${NL}" "ERROR: LINE NOT FOUND IN LINE 20" "!${NL}3${NL}"
+check "error stops run"   "10 PRINT 1+1${NL}20 PRINT Q${NL}30 PRINT 1+2${NL}RUN${NL}" "ERROR: VARIABLE NOT FOUND IN LINE 20" "!${NL}3${NL}"
 check "if without then"   "IF 1=1 PRINT 5${NL}" "ERROR: THEN EXPECTED"
 check "division by zero"  "PRINT 1/0${NL}" "ERROR: DIVISION BY ZERO"
 check "missing paren"     "PRINT (1+2${NL}" "ERROR: MISSING )"
@@ -102,7 +102,7 @@ check "keyword prefix"    "10 PRINT 3*3${NL}RUNX${NL}" "ERROR: SYNTAX ERROR" "!$
 check "no space needed"   "10 GOTO30${NL}20 PRINT 1+1${NL}30 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}"
 check "long names"        "SCORE=5${NL}TOTAL2=SCORE*2${NL}PRINT TOTAL2+1${NL}" "${NL}11${NL}"
 check "keyword in name"   "FORM=3${NL}TOTAL=4${NL}PRINT FORM*TOTAL${NL}" "${NL}12${NL}"
-check "name too long"     "ABCDEFGHIJKLMNOPQ=1${NL}" "ERROR: NAME TOO LONG"
+check "name too long"     "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFG=1${NL}" "ERROR: NAME TOO LONG"
 
 # --- Numbers ---------------------------------------------------------------
 check "decimals"          "PRINT 7/2${NL}PRINT 1/3${NL}PRINT 2/3${NL}PRINT .5+.25${NL}" "${NL}3.5${NL}" "${NL}0.33333333${NL}" "${NL}0.66666667${NL}" "${NL}0.75${NL}"
@@ -144,10 +144,16 @@ check "type mismatch 2"   "A=\"X\"${NL}" "ERROR: NUMBER EXPECTED"
 check "variable not found" "PRINT Q+1${NL}" "ERROR: VARIABLE NOT FOUND"
 check "run clears vars"   "A=5${NL}10 PRINT A${NL}RUN${NL}" "ERROR: VARIABLE NOT FOUND IN LINE 10"
 check "print ; at end"    "PRINT 1+1;: PRINT 3+3${NL}" "${NL}26${NL}"
-check "list detokenizes"  "10 print a:goto 10${NL}20 if a<=b then print \"if\"${NL}LIST${NL}" "10 PRINT A: GOTO 10${NL}20 IF A<=B THEN PRINT \"if\"${NL}"
+check "list detokenizes"  "10 print a:goto 10${NL}20 if a<=b then print \"if\"${NL}LIST${NL}" "10 PRINT a: GO TO 10${NL}20 IF a<=b THEN PRINT \"if\"${NL}"
 check "list rem keeps text" "10 rem Hello print${NL}LIST${NL}" "10 REM Hello print${NL}"
 
 # --- More statements ---------------------------------------------------------
+check "go to with space"  "10 GO TO 30${NL}20 PRINT 1+1${NL}30 GO SUB 50: PRINT 1+2: STOP${NL}50 PRINT 4*4: RETURN${NL}RUN${NL}" "${NL}16${NL}3${NL}" "!${NL}2${NL}" "!ERROR"
+check "go to missing line" "10 GO TO 15${NL}12 PRINT 1+1${NL}20 PRINT 1+2${NL}RUN${NL}" "${NL}3${NL}" "!${NL}2${NL}" "!ERROR"
+check "go to past end"    "10 PRINT 1+2: GO TO 100${NL}20 PRINT 7*7${NL}RUN${NL}" "${NL}3${NL}" "!49" "!ERROR"
+check "run from line"     "10 PRINT 1+1${NL}20 PRINT 1+2${NL}RUN 20${NL}" "${NL}3${NL}" "!${NL}2${NL}"
+check "names with spaces" "LET hi score=5: PRINT HiScore+1${NL}" "${NL}6${NL}"
+check "print apostrophe"  "PRINT 1'2;' '3${NL}" "${NL}1${NL}2${NL}${NL}3${NL}"
 check "gosub return"      "10 GOSUB 100: PRINT \"BACK\"${NL}20 END${NL}100 PRINT \"SUB\"${NL}110 RETURN${NL}RUN${NL}" "${NL}SUB${NL}BACK${NL}"
 check "nested gosub"      "10 GOSUB 100${NL}20 PRINT 3*3: END${NL}100 GOSUB 200: PRINT 2*2: RETURN${NL}200 PRINT 1*1: RETURN${NL}RUN${NL}" "${NL}1${NL}4${NL}9${NL}"
 check "return no gosub"   "RETURN${NL}" "ERROR: RETURN WITHOUT GOSUB"
