@@ -642,6 +642,10 @@ check "dos rename delete" "10 PRINT 1${NL}SAVE ONE${NL}RENAME ONE,TWO${NL}LOAD O
 check "dos run program"   "10 PRINT \"SECOND\"${NL}SAVE SECOND${NL}NEW${NL}10 PRINT \"FIRST\":PRINT CHR\$(4);\"RUN SECOND\"${NL}20 PRINT \"NOT HERE\"${NL}RUN${NL}" "${NL}FIRST${NL}SECOND${NL}" "!${NL}NOT HERE"
 check "dos exec"          "10 PRINT CHR\$(4);\"OPEN CMDS\":PRINT CHR\$(4);\"WRITE CMDS\":PRINT \"NEW\":PRINT \"10 PRINT 6*7\":PRINT \"RUN\":PRINT CHR\$(4);\"CLOSE\"${NL}RUN${NL}EXEC CMDS${NL}" "${NL}42${NL}"
 check "dos language"      "10 PRINT 1${NL}SAVE FPPROG${NL}INT${NL}FP${NL}" "INT${NL}[TONE 1000 100]LANGUAGE NOT AVAILABLE" "FP${NL}]"
+python3 tools/dsk.py make "$TD/disk.dsk" "A:STAR TREK=tests/listings/dsk_test.bas" "T:SCORES=tests/listings/dsk_test.txt" "B@0x300:CODE=tests/listings/dsk_test.txt" > /dev/null
+python3 tools/dsk.py extract "$TD/disk.dsk" "$TD/dsk" > /dev/null
+python3 tests/make_disk.py "$TD/dsk.img" /A2FP/STAR_TRE.SAV="$TD/dsk/STAR_TRE.SAV" /A2FP/SCORES.SAV="$TD/dsk/SCORES.SAV" /A2FP/CODE.SAV="$TD/dsk/CODE.SAV"
+DISK_IMAGE="$TD/dsk.img" check "dos from a dsk" "CATALOG${NL}RUN STAR TREK${NL}BLOAD CODE${NL}PRINT PEEK(768)${NL}" " A 002 STAR TREK${NL} T 002 SCORES${NL} B 002 CODE${NL}" "${NL}FROM A DISK${NL}123${NL}HELLO2${NL}LINE TWO${NL}" "PRINT PEEK(768)${NL}76${NL}"
 BIN=tests/build/a2int_host
 check "dos from int"      "10 D\$=\"${D4}\"${NL}20 PRINT D\$;\"OPEN NUMS\":PRINT D\$;\"WRITE NUMS\":PRINT 12:PRINT 34:PRINT D\$;\"CLOSE NUMS\"${NL}30 PRINT D\$;\"OPEN NUMS\":PRINT D\$;\"READ NUMS\":INPUT A,B:PRINT D\$:PRINT A+B${NL}40 PRINT D\$;\"LOAD NOPE\"${NL}50 END${NL}RUN${NL}" "${NL}46${NL}[TONE 1000 100]FILE NOT FOUND${NL}>"
 BIN=tests/build/basic_host
