@@ -1,31 +1,33 @@
 # x86-BASIC
 
-A ZX Spectrum-style BASIC computer for PCs. Boot it from a USB stick and
-the PC starts straight into BASIC, like a home computer from the 1980s.
-There's no operating system underneath: just a boot loader, a small
-kernel and the interpreter.
+Home-computer BASICs of the late 1970s and 1980s, for PCs. Boot it from
+a USB stick and the PC starts straight into BASIC, like a home computer
+from then: a ZX Spectrum-style machine, or one of three for Apple I and
+Apple II listings, picked from a menu. There's no operating system
+underneath: just a boot loader, a small kernel and the interpreter.
 
-The aim is that a Spectrum BASIC listing — from a magazine, a book or the
-Spectrum manual — can be typed in and gives the same result as on a real
-Spectrum. It isn't an emulator: it doesn't run Z80 machine code, tapes or
-snapshots, and it contains nothing of the Spectrum's ROM. The BASIC is a
-new implementation, and the character set was drawn for this project.
+The aim is that a listing — from a magazine, a book or a manual — can
+be typed in and gives the same result as on the real computer. They
+aren't emulators: they don't run Z80 or 6502 machine code, tapes or
+snapshots, and they contain nothing of the originals' ROMs. Each BASIC
+is a new implementation, and the character sets were drawn for this
+project.
 
-- The Spectrum's screen: 32×24 characters on a 256×192 picture inside a
-  coloured border, eight colours with BRIGHT and FLASH, an upper screen
-  for programs and a lower screen for typing, INPUT and reports
-- Spectrum BASIC: its numbers, strings and slicing, arrays, DEF FN,
-  READ/DATA, graphics, BEEP, PEEK and POKE, user-defined graphics, error
-  reports — and it runs at about the Spectrum's speed
-- A line editor with cursor keys and history, and SAVE/LOAD to the boot
-  disk
+- **Spectrum BASIC** (see [Using it](#using-it)): the Spectrum's
+  screen, 32×24 characters on a 256×192 picture inside a coloured
+  border, eight colours with BRIGHT and FLASH; its numbers, strings and
+  slicing, arrays, DEF FN, READ/DATA, graphics, BEEP and PLAY, PEEK and
+  POKE, user-defined graphics and error reports, at about the
+  Spectrum's speed; a line editor with cursor keys and history
+- **Integer BASIC**, on the 1976 terminal computer (Apple I) and on the
+  1977 colour one (Apple II), and **FP BASIC**, the floating-point BASIC
+  of 1978–83, for Applesoft listings (Apple II Plus and IIe): their text,
+  low- and high-resolution graphics, shapes and DOS 3.3-style disk
+  commands (see [The Apple-style machines](#the-apple-style-machines))
+- SAVE/LOAD to files on the boot disk, which any PC can read
 - One disk image that boots on both old (BIOS) and new (UEFI) PCs, from
-  a USB stick, hard disk or floppy
-- Three more machines, for listings written for the Apple I, II, II Plus
-  and IIe: Integer BASIC on the 1976 terminal computer and on the 1977
-  colour one, and the floating-point BASIC of 1978–83 (for Applesoft
-  listings), with their graphics and DOS 3.3-style disk commands (see
-  [The Apple-style machines](#the-apple-style-machines))
+  a USB stick, hard disk or floppy, with a menu to choose the machine
+  (or an image with just one)
 
 ## Build and run
 
