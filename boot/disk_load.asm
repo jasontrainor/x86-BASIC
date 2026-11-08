@@ -1,5 +1,7 @@
 ; Load KERNEL_SECTORS sectors, starting at the sector after the boot
-; sector (LBA 1), into memory at 0000:KERNEL_OFFSET.
+; sector (LBA 1), into memory from linear address KERNEL_OFFSET up. The
+; kernel can be bigger than 64KB, so each sector goes to offset 0 of a
+; segment, the segment going up by 512 bytes each time.
 ;
 ; Reads one sector at a time. That's slower than one big read, but it
 ; works on every BIOS: multi-sector reads that cross a track (or a 64KB
@@ -49,12 +51,12 @@ disk_load:
     push cx
     call read_sector
     pop cx
-    add word [dest], 512
+    add word [dest], 512 / 16
     inc word [lba]
     loop .next_sector
     ret
 
-; Read the sector at [lba] into 0000:[dest].
+; Read the sector at [lba] into [dest]:0000.
 read_sector:
     mov byte [tries], 4
 .retry:
@@ -63,7 +65,7 @@ read_sector:
 
     ; LBA read (AH=42h) via the disk address packet below.
     mov ax, [dest]
-    mov [dap_offset], ax
+    mov [dap_segment], ax
     mov ax, [lba]
     mov [dap_lba], ax
     mov si, dap
@@ -89,9 +91,12 @@ read_sector:
     or cl, ah                   ; CL bits 6-7 = cylinder bits 8-9
     mov dh, dl                  ; DH = head
     mov dl, [BOOT_DRIVE]
-    mov bx, [dest]              ; ES:BX = destination (ES = 0)
+    push es
+    mov es, [dest]              ; ES:BX = destination
+    xor bx, bx
     mov ax, 0x0201              ; AH=02h read, AL=1 sector
     int 0x13
+    pop es
     jnc .done
 
 .failed:
@@ -114,7 +119,7 @@ DISK_ERROR_MSG db "Disk read error!", 0x0D, 0x0A, 0
 use_lba db 0
 tries   db 0
 lba     dw 1                    ; next sector to read (0 = boot sector)
-dest    dw KERNEL_OFFSET        ; where it goes
+dest    dw KERNEL_OFFSET / 16   ; where it goes (a segment)
 spt     dw 18                   ; sectors per track (CHS only)
 heads   dw 2                    ; number of heads (CHS only)
 
@@ -123,8 +128,8 @@ dap:
     db 0x10                     ; packet size
     db 0
     dw 1                        ; sectors to read
-dap_offset:
     dw 0                        ; destination offset
+dap_segment:
     dw 0                        ; destination segment
 dap_lba:
     dq 0                        ; starting LBA (we only use the low word)

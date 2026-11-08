@@ -244,8 +244,9 @@ prints what's on the screen, for trying things out.
 
     boot/boot.asm          boot sector: loads the 16-bit kernel; also the
                            partition table and floppy BPB
-    kernel/kernel_entry.asm  16-bit start-up: sets up "unreal mode" so the
-                           real-mode kernel can use memory above 64KB
+    kernel/kernel_entry.asm  16-bit start-up: moves the code to its segment
+                           and sets up "unreal mode" so the real-mode
+                           kernel can use memory above 64KB
     kernel/bios.c          BIOS platform: VGA mode 13h, keyboard, timer,
                            speaker, disk (INT 13h)
     kernel/uefi/uefi.c     UEFI platform: graphics output, keyboard,
@@ -264,6 +265,7 @@ prints what's on the screen, for trying things out.
 Everything above the platform layer (`kernel/platform.h`) is shared by
 the BIOS and UEFI kernels and the host tests.
 
-The BIOS kernel runs in 16-bit real mode, so its code, small data and
-stack must fit in the first 64KB of memory (larger data lives above it).
-It's built with `-Os`, and there's room for a few more KB of code.
+The BIOS kernel runs in 16-bit real mode. Its code has a 64KB segment
+of its own (at 0x80000, so the PC needs 576KB of memory); its small data
+and stack fit in the first 64KB, and larger data lives above that (see
+`linker.ld`). It's built with `-Os`.

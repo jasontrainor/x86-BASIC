@@ -4,8 +4,7 @@ LD = ld
 
 # --- The 16-bit kernel, booted by the BIOS --------------------------------
 #
-# -Os: the code, its small data and the stack must all fit in the first
-# 64KB. GCC likes to turn copy loops into movsb and similar string
+# -Os: the code has a 64KB segment of its own (see linker.ld). GCC likes to turn copy loops into movsb and similar string
 # instructions, which only reach the first 64KB in 16-bit code; the
 # stringop and loop-pattern options stop that, and tools/check16.sh
 # checks that none slipped through. Floating point uses the x87 FPU only: SSE
@@ -65,7 +64,9 @@ build/BOOTX64.EFI: $(UEFI_OBJS)
 
 build/kernel.bin: $(BIOS_OBJS) linker.ld tools/check16.sh
 	sh tools/check16.sh $(BIOS_C_OBJS)
-	$(LD) -m elf_i386 -T linker.ld --oformat binary $(BIOS_OBJS) -o $@
+	@# --no-check-sections: the code is linked at offset 0 of its own
+	@# segment, so its addresses overlap the data's (see linker.ld).
+	$(LD) -m elf_i386 -T linker.ld --no-check-sections --oformat binary $(BIOS_OBJS) -o $@
 
 # The boot sector loads exactly as many sectors as the kernel occupies,
 # so it is rebuilt whenever the kernel changes size.

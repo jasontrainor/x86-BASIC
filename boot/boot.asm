@@ -1,19 +1,19 @@
 [bits 16]
 ; The BIOS loads this sector at 0x7C00, but the first thing it does is
-; copy itself down to 0x0600, so that the kernel can be loaded into all
-; of 0x1000-0xEFFF without overwriting the code doing the loading.
+; copy itself down to 0x0600, so that the kernel can be loaded from
+; 0x1000 up without overwriting the code doing the loading.
 [org 0x0600]
 
 RELOCATED     equ 0x0600
 KERNEL_OFFSET equ 0x1000 ; The memory offset to which we will load our kernel
-MAX_KERNEL_SECTORS equ (0xF000 - KERNEL_OFFSET) / 512
+MAX_KERNEL_SECTORS equ (0x20000 - KERNEL_OFFSET) / 512   ; as linker.ld
 
 ; The Makefile passes the kernel's size in sectors (-DKERNEL_SECTORS=n).
 %ifndef KERNEL_SECTORS
   %error "KERNEL_SECTORS not defined; build with make"
 %endif
 %if KERNEL_SECTORS > MAX_KERNEL_SECTORS
-  %error "kernel.bin is too big to load below 0xF000"
+  %error "kernel.bin is too big to load below 0x20000"
 %endif
 
 ; ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ relocated:
 load_kernel:
     mov bx, MSG_LOAD_KERNEL
     call print_string
-    call disk_load         ; KERNEL_SECTORS sectors to 0000:KERNEL_OFFSET
+    call disk_load         ; KERNEL_SECTORS sectors to KERNEL_OFFSET and up
     ret
 
 BOOT_DRIVE      db 0

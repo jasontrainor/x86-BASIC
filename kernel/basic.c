@@ -1267,7 +1267,7 @@ static struct value primary();
  * rather than letting the stack overflow.
  */
 #if defined(BIOS_KERNEL)
-#define STACK_BUDGET (8 * 1024)       // of the 12KB in linker.ld
+#define STACK_BUDGET (36 * 1024)      // of the 40KB in linker.ld
 #elif defined(UEFI_KERNEL)
 #define STACK_BUDGET (64 * 1024)      // (UEFI promises at least 128KB)
 #else
