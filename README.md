@@ -91,7 +91,7 @@ It's the Spectrum's BASIC; a quick summary:
 
 | | |
 |---|---|
-| `PRINT`, `LPRINT` | items separated by `;` (together), `,` (next half-line) or `'` (new line); `AT row,col`, `TAB col`; colours (`PRINT INK 2;"RED"`) last for that `PRINT`. `PRINT #1;` prints in the lower screen. `LPRINT`, `LLIST` and `COPY` do nothing (no printer). |
+| `PRINT`, `LPRINT` | items separated by `;` (together), `,` (next half-line) or `'` (new line); `AT row,col`, `TAB col`; colours (`PRINT INK 2;"RED"`) last for that `PRINT`. `PRINT #1;` prints in the lower screen. `LPRINT` (and `PRINT #3`), `LLIST` and `COPY` print on the printer: see below. |
 | `LET` | numbers and strings; numeric names can be long and contain spaces (`LET hi score=0`) |
 | `DIM a(10,10)`, `DIM a$(5,10)` | arrays from 1; a string array holds fixed-length strings, as on the Spectrum: `DIM a$(10)` is one string of 10 characters |
 | `a$(2 TO 4)`, `LET a$(3)="X"` | slicing, and assigning to a slice (padded or cut to fit) |
@@ -175,8 +175,8 @@ doesn't use) runs at full speed; `POKE 23681,0` goes back.
 - A PC keyboard only reports a key going down, not that it's still held,
   so `IN` counts a key as held for a moment after each press (or repeat),
   and `INKEY$` returns each press (and repeat) once.
-- No printer, microdrives or other Interface 1 commands; `OPEN #`,
-  `CLOSE #`, `FORMAT` and `MOVE` aren't there.
+- No microdrives or other Interface 1 commands; `OPEN #`, `CLOSE #`,
+  `FORMAT` and `MOVE` aren't there. The printer is a text file.
 - Speed is matched on average, statement by statement, not exactly.
 
 ## Saving programs
@@ -215,6 +215,15 @@ with its `?`, to be put right.
 
 `make LISTINGS="game.bas other.bas"` puts listings on the image when it's
 built.
+
+### The printer
+
+`LPRINT`, `LLIST` and `COPY` print on a pretend ZX Printer: the text
+file `PRINTOUT.TXT` on the FAT partition, 32 characters to a line. Each
+command or program adds what it printed to the end of the file (which
+keeps its last 64KB). The pound sign, © and block graphics come out as
+their Unicode characters, and UDGs as the letters they start as. `COPY`
+prints the text on the screen; pictures don't come out.
 
 ## Booting a real PC from a USB stick
 

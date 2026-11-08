@@ -387,6 +387,16 @@ else fail=$((fail+1)); echo "FAIL text big fsck"; sed 's/^/    | /' "$TD/fsck.ou
 DISK_OUT="$TD/full.img" check "text disk full"    "${BIGT}FOR i=1 TO 50: SAVE \"big\"+STR\$ i+\".bas\": NEXT i${NL}PRINT i${NL}" "R Disk full, 0:2" "${NL}33${NL}"
 if python3 tests/fatfile.py "$TD/full.img" --fsck > "$TD/fsck.out" 2>&1; then pass=$((pass+1)); echo "PASS text full fsck"
 else fail=$((fail+1)); echo "FAIL text full fsck"; sed 's/^/    | /' "$TD/fsck.out"; fi
+# The printer: LPRINT, LLIST and COPY go into PRINTOUT.TXT.
+{ printf 'HELLO     X         Y\n1               2\n\xc2\xa3\xe2\x96\x88A\n'
+  printf '%s\n%s\n' "${A60:0:32}" "${A60:0:8}"
+  printf '  10>PRINT "x"\nSCREEN TEXT\n'
+  for i in $(seq 21); do printf '\n'; done
+  printf 'again\n'; } > "$TD/printout.expected"
+DISK_OUT="$TD/prn.img" check "printer" "10 PRINT \"x\"${NL}CLS: PRINT \"SCREEN TEXT\": LPRINT \"HELLO\";TAB 10;\"X\";AT 5,20;\"Y\": LPRINT 1,2: LPRINT \"\`\\::\\a\": LPRINT \"${A60:0:40}\": LLIST: COPY${NL}PRINT #3;\"again\"${NL}" "![ERR]" "!HELLO     X"
+python3 tests/fatfile.py "$TD/prn.img" PRINTOUT.TXT > "$TD/printout.got" 2>&1
+if cmp -s "$TD/printout.expected" "$TD/printout.got"; then pass=$((pass+1)); echo "PASS printer file"
+else fail=$((fail+1)); echo "FAIL printer file"; diff "$TD/printout.expected" "$TD/printout.got" | sed 's/^/    | /'; fi
 unset DISK_IMAGE
 check "text no fat"       "LOAD \"x.bas\"${NL}" "R No FAT partition, 0:1"
 

@@ -269,6 +269,11 @@ static void detokenize(const unsigned char *src, char *out, char *kw, int cap) {
 #define LINE_HEAD 4                       // number and length
 
 HIGH_MEM unsigned char prog[PROG_SIZE];
+
+// For text files, arrays being saved or loaded, and the printer's file.
+#define TEXT_SIZE (64 * 1024)
+#define DATA_SIZE TEXT_SIZE
+HIGH_MEM unsigned char text_buf[TEXT_SIZE];  // (text files and arrays)
 int prog_len = 0;
 
 static int line_num(int off) { return prog[off] | (prog[off + 1] << 8); }
@@ -1756,40 +1761,119 @@ static const char *const spectrum_keywords[] = {
 _Static_assert(sizeof(spectrum_keywords) / sizeof(spectrum_keywords[0]) == 256 - 165,
                "spectrum_keywords should cover 165-255");
 
+/*
+ * The printer (LPRINT, LLIST, COPY, PRINT #3): what's printed goes to
+ * the text file PRINTOUT.TXT on the FAT partition, 32 columns wide as on
+ * the ZX Printer. It's collected here and added to the end of the file
+ * when a command or program finishes (or this fills up). Characters a
+ * text file can't hold come out as UTF-8 (the pound and copyright signs
+ * and block graphics) or, for UDGs, as the letters they look like until
+ * they're redefined.
+ */
+#define PRINTER_SIZE 4096
+#define PRINTER_FILE "PRINTOUT.TXT"
+HIGH_MEM char printer_buf[PRINTER_SIZE];
+int printer_len, printer_col;
+int to_printer;           // PRINT is printing on the printer
+
+static void printer_flush();
+
+static void printer_put(const char *bytes) {
+    for (; *bytes; bytes++) {
+        if (printer_len == PRINTER_SIZE) printer_flush();
+        printer_buf[printer_len++] = *bytes;
+    }
+}
+
+static void printer_char(unsigned char c) {
+    // Unicode quadrant blocks, for CHR$ 128-143 (bits: 1 top right,
+    // 2 top left, 4 bottom right, 8 bottom left).
+    static const char *const blocks[16] = {
+        " ", "\xE2\x96\x9D", "\xE2\x96\x98", "\xE2\x96\x80", "\xE2\x96\x97", "\xE2\x96\x90",
+        "\xE2\x96\x9A", "\xE2\x96\x9C", "\xE2\x96\x96", "\xE2\x96\x9E", "\xE2\x96\x8C",
+        "\xE2\x96\x9B", "\xE2\x96\x84", "\xE2\x96\x9F", "\xE2\x96\x99", "\xE2\x96\x88",
+    };
+    char one[2] = { c, 0 };
+    if (c == '\n') {
+        printer_put("\n");
+        printer_col = 0;
+        return;
+    }
+    if (printer_col == SCREEN_COLS) {    // the paper is 32 characters wide
+        printer_put("\n");
+        printer_col = 0;
+    }
+    if (c == 96) printer_put("\xC2\xA3");                 // £
+    else if (c == 127) printer_put("\xC2\xA9");           // ©
+    else if (c >= 128 && c <= 143) printer_put(blocks[c - 128]);
+    else if (c >= 144 && c <= 164) { one[0] = 'A' + c - 144; printer_put(one); }
+    else if (c < 32 || c > 164) printer_put(" ");
+    else printer_put(one);
+    printer_col++;
+}
+
+static void printer_flush() {
+    if (!printer_len) return;
+    int len = 0, n = printer_len;
+    printer_len = 0;
+    if (fat_read(PRINTER_FILE, text_buf, TEXT_SIZE, &len)) len = 0;   // (not there yet)
+    if (len + n > TEXT_SIZE) {            // too long: keep the end of it
+        int drop = len + n - TEXT_SIZE;
+        memmove(text_buf, text_buf + drop, len - drop);
+        len -= drop;
+    }
+    memcpy(text_buf + len, printer_buf, n);
+    fat_write(PRINTER_FILE, text_buf, len + n);   // (no FAT partition: it's lost)
+}
+
+// Printing, on the screen or the printer.
+static void out_char(unsigned char c) {
+    if (to_printer) printer_char(c);
+    else print_char(c);
+}
+
+static void out_string(const char *s) {
+    while (*s) out_char(*s++);
+}
+
+static int out_col() {
+    return to_printer ? printer_col : cursor_col();
+}
+
 static void print_value(struct value v) {
     if (v.is_str) {
         for (int i = 0; i < v.len; i++) {
             unsigned char c = v.str[i];
             if (c >= 165) {
                 const char *k = spectrum_keywords[c - 165];
-                print_string(k);
-                if (isalpha(k[0])) print_char(' ');
+                out_string(k);
+                if (isalpha(k[0])) out_char(' ');
             } else {
-                print_char(c);
+                out_char(c);
             }
         }
     } else {
         char buf[24];
         num_format(v.num, buf);
-        print_string(buf);
+        out_string(buf);
     }
 }
 
 static void print_spaces_to(int col) {
-    while (cursor_col() < col) print_char(' ');
+    while (out_col() < col) out_char(' ');
 }
 
 // , in PRINT: on to the next half of the line.
 static void print_comma() {
-    int next = (cursor_col() / 16 + 1) * 16;
-    if (next >= SCREEN_COLS) print_string("\n");
+    int next = (out_col() / 16 + 1) * 16;
+    if (next >= SCREEN_COLS) out_char('\n');
     else print_spaces_to(next);
 }
 
 // TAB col: on to that column, on the next line if it's already past.
 static void print_tab(int col) {
     col %= SCREEN_COLS;
-    if (col < cursor_col()) print_string("\n");
+    if (col < out_col()) out_char('\n');
     print_spaces_to(col);
 }
 
@@ -1801,7 +1885,8 @@ static int print_at(int really) {
     if (error_msg) return 0;
     if (checking) return 1;
     if (col >= SCREEN_COLS) { error("B Integer out of range"); return 0; }
-    if (really && !set_cursor(col, row)) { error("5 Out of screen"); return 0; }
+    if (really && to_printer) print_tab(col);     // (the printer only has columns)
+    else if (really && !set_cursor(col, row)) { error("5 Out of screen"); return 0; }
     return 1;
 }
 /*
@@ -1819,7 +1904,7 @@ static int colour_item(struct colours *c);
  * after the text.
  *
  * Streams 0 and 1 are the lower screen, 2 the upper screen (the default)
- * and 3 the printer (LPRINT), which isn't there: its output is dropped.
+ * and 3 the printer (LPRINT).
  */
 static void st_print(int stream) {
     int newline = 1;
@@ -1832,7 +1917,8 @@ static void st_print(int stream) {
             return;
         }
     }
-    int printer = stream == 3 || checking;   // (printing nothing)
+    int printer = checking;               // (printing nothing)
+    to_printer = stream == 3;
     int was_lower = using_lower();
     use_lower(stream < 2);
     struct colours saved, temp;
@@ -1850,7 +1936,7 @@ static void st_print(int stream) {
         }
         if (accept_char('\'')) {            // ' starts a new line
             newline = 0;
-            if (!printer) print_string("\n");
+            if (!printer) out_char('\n');
             continue;
         }
         if (accept_char(',')) {
@@ -1876,7 +1962,8 @@ static void st_print(int stream) {
             break;
         }
     }
-    if (newline && !error_msg && !printer) print_string("\n");
+    if (newline && !error_msg && !printer) out_char('\n');
+    to_printer = 0;
     set_colours(&saved);
     use_lower(was_lower);
 }
@@ -2334,9 +2421,6 @@ HIGH_MEM unsigned char load_buf[PROG_SIZE];
  * byte), each dimension (2 bytes), then its elements: doubles, or the
  * characters of a string array. The file's param is the array's letter.
  */
-#define TEXT_SIZE (64 * 1024)
-#define DATA_SIZE TEXT_SIZE
-HIGH_MEM unsigned char text_buf[TEXT_SIZE];  // (text files and arrays)
 
 __attribute__((noinline, noclone))   // (text_buf is HIGH_MEM: see mem.h)
 static int array_to_bytes(struct array *a, unsigned char *out) {
@@ -2939,6 +3023,33 @@ static int listed_rows(int off) {
     return n ? (n + SCREEN_COLS - 1) / SCREEN_COLS : 1;
 }
 
+// LLIST: the listing, on the printer.
+static void llist(int from) {
+    to_printer = 1;
+    for (int off = line_find(from); off < prog_len; off = line_next(off)) {
+        listed_length(off, list_buf, list_kw, sizeof(list_buf));
+        out_string(list_buf);
+        out_char('\n');
+    }
+    to_printer = 0;
+}
+
+// COPY: the upper screen's text, on the printer. (Graphics that aren't
+// characters come out as spaces.)
+static void copy_screen() {
+    to_printer = 1;
+    for (int r = 0; r < SCREEN_ROWS - 2; r++) {
+        int end = SCREEN_COLS;
+        while (end > 0 && screen_char(r, end - 1) <= ' ') end--;
+        for (int c = 0; c < end; c++) {
+            int ch = screen_char(r, c);
+            out_char(ch < 0 ? ' ' : ch);
+        }
+        out_char('\n');
+    }
+    to_printer = 0;
+}
+
 static void list_program(int from) {
     for (int off = line_find(from); off < prog_len && !check_break(); off = line_next(off)) {
         list_line(off);
@@ -3018,10 +3129,14 @@ static void execute_statement() {
     switch (t) {
     case T_PRINT:  st_print(2); break;
     case T_LPRINT: st_print(3); break;
-    case T_LLIST:                          // (no printer)
-        if (!at_statement_end()) expr_num();
+    case T_LLIST: {
+        int from = at_statement_end() ? 0 : expr_int(0, 9999);
+        if (!error_msg && !checking) llist(from);
         break;
-    case T_COPY:   break;
+    }
+    case T_COPY:
+        if (!checking) copy_screen();
+        break;
     case T_LET:    st_let(); break;
     case T_GOTO:   go_to_line(expr_int(0, 65535)); break;
     case T_GOSUB:  st_gosub(); break;
@@ -3319,6 +3434,7 @@ static void run() {
         }
     }
     scroll_stopped();
+    printer_flush();
     if (!no_report) print_report(report_msg, rep_line < 0 ? 0 : rep_line, rep_stmt);
 }
 /* ------------------------------------------------------------------------
