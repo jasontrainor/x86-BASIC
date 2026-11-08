@@ -329,8 +329,24 @@ const char *error_msg = 0;
 const char *report_msg;
 int no_report;
 
+/*
+ * The syntax check. As on the Spectrum, a line is checked when it's
+ * entered, and refused (with a ? where it goes wrong) unless it makes
+ * sense; only then is it stored or run. The check is the interpreter run
+ * with checking set: statements and expressions are parsed as usual, but
+ * nothing is done, variables aren't looked up (their names say whether
+ * they're numbers or strings), and only syntax errors (C Nonsense in
+ * BASIC) count. error_pos is where the first one was found.
+ */
+int checking;
+char *error_pos;
+
 static void error(const char *msg) {
-    if (!error_msg) error_msg = msg;
+    if (checking && msg[0] != 'C') return;   // (numbers out of range etc.: not syntax)
+    if (!error_msg) {
+        error_msg = msg;
+        error_pos = p;
+    }
 }
 
 static void skip_space() {
@@ -648,11 +664,37 @@ static int slice_spec(int len, int *from, int *to) {
         else if (skip_space(), *p != ')') *to = expr_int(0, 65535);   // (n TO m)
     }
     if (error_msg) return 0;
-    if (*from <= *to && (*from < 1 || *to > len)) {
+    if (!checking && *from <= *to && (*from < 1 || *to > len)) {
         error("3 Subscript wrong");
         return 0;
     }
     return 1;
+}
+
+/*
+ * When checking, the subscripts after a name (the "(" consumed): the
+ * variable isn't looked at, so anything of the right form is taken: for
+ * numbers, (i, j, ...); for strings, the same but each may be a slice
+ * (i TO j, TO j, i TO, or nothing).
+ */
+static void check_subscripts(int is_str) {
+    skip_space();
+    if (*p != ')' || !is_str) {
+        do {
+            int to = is_str && accept(T_TO);
+            skip_space();
+            if (*p == ',' || *p == ')') {
+                if (!is_str) error("C Nonsense in BASIC");
+                continue;
+            }
+            expr_num();
+            if (!to && is_str && accept(T_TO)) {
+                skip_space();
+                if (*p != ',' && *p != ')') expr_num();
+            }
+        } while (!error_msg && accept_char(','));
+    }
+    expect_char(')', "C Nonsense in BASIC");
 }
 
 // Parse the subscripts "i, j, ...)" of an element of numeric array a
@@ -743,6 +785,10 @@ static int parse_lvalue(struct lvalue *lv) {
     lv->fixed_len = -1;
     if (!read_name(lv->name, &lv->is_str)) return 0;
     skip_space();
+    if (checking) {
+        if (accept_char('(')) check_subscripts(lv->is_str);
+        return !error_msg;
+    }
     if (!lv->is_str) {
         if (*p == '(') {
             struct array *a = find_array(lv->name, 0);
@@ -784,9 +830,10 @@ static int parse_lvalue(struct lvalue *lv) {
 static void store(struct lvalue *lv, struct value val) {
     if (error_msg) return;
     if (lv->is_str != val.is_str) {
-        error(lv->is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
+        error("C Nonsense in BASIC");
         return;
     }
+    if (checking) return;
     if (!lv->is_str) {
         if (!lv->num) {                    // a new simple variable
             struct var *v = find_var(lv->name, 0, 1);
@@ -819,6 +866,7 @@ static void randomize(unsigned int seed) {
 }
 
 static double rnd() {
+    if (checking) return 0;
     rnd_seed = (75 * (rnd_seed + 1)) % 65537 - 1;
     return rnd_seed / 65536.0;            // 0 <= RND < 1
 }
@@ -961,6 +1009,10 @@ static struct value variable_value() {
     int is_str;
     if (!read_name(name, &is_str)) return num_value(0);
     skip_space();
+    if (checking) {
+        if (accept_char('(')) check_subscripts(is_str);
+        return is_str ? str_value("", 0) : num_value(0);
+    }
     struct value *param = fn_param(name, is_str);
     if (param) return *param;
     if (is_str) {
@@ -1051,7 +1103,7 @@ __attribute__((noinline)) static struct value string_function(int t) {
         return num_value(v.len ? (unsigned char)v.str[0] : 0);
     case T_VAL:
         v = str_arg();
-        return num_value(error_msg ? 0 : val(v));
+        return num_value(error_msg || checking ? 0 : val(v));
     case T_CHRS:
         buf[0] = to_int(num_arg(), 0, 255);
         return copy_to_pool(buf, 1);
@@ -1059,6 +1111,7 @@ __attribute__((noinline)) static struct value string_function(int t) {
         num_format(num_arg(), buf);
         return copy_to_pool(buf, strlen(buf));
     case T_INKEYS: {
+        if (checking) return str_value("", 0);
         int k = poll_key();
         if (k == 27) {            // Esc: leave it to stop the program
             break_requested = 1;
@@ -1130,12 +1183,18 @@ __attribute__((noinline)) static struct value fn_call() {
     skip_space();
     if (*p != ')') {
         do {
-            if (nargs == MAX_PARAMS) { error("Q Parameter error"); break; }
+            if (nargs == MAX_PARAMS) {
+                error("Q Parameter error");
+                if (!checking) break;
+                expr();
+                continue;
+            }
             args[nargs++] = expr();
         } while (!error_msg && accept_char(','));
     }
     expect_char(')', "C Nonsense in BASIC");
     if (error_msg) return num_value(0);
+    if (checking) return is_str ? str_value("", 0) : num_value(0);
 
     char *saved = p;
     if (!find_def_fn(name, is_str)) {
@@ -1231,6 +1290,7 @@ __attribute__((noinline)) static struct value spectrum_function(int t) {
             if (c < 'a' || c > 'u') { error("A Invalid argument"); return num_value(0); }
             return num_value(mem_peek16(SYS_UDG) + (c - 'a') * 8);
         }
+        if (checking) return num_value(0);
         if (to_int(v.num, 0, 65535) == 0 && !error_msg) {
             reset_requested = 1;           // USR 0 resets the Spectrum
             return num_value(0);
@@ -1240,7 +1300,7 @@ __attribute__((noinline)) static struct value spectrum_function(int t) {
     }
     case T_VALS: {                         // VAL$ "expression": a string
         struct value v = str_arg(), r;
-        if (error_msg) return str_value("", 0);
+        if (error_msg || checking) return str_value("", 0);
         if (!eval_text(v.str, v.len, &r)) return str_value("", 0);
         if (!r.is_str) { error("C Nonsense in BASIC"); return str_value("", 0); }
         return r;
@@ -1422,7 +1482,9 @@ static struct value sum() {
             break;
         }
         cost_us += 800;
-        if (v.is_str) {                    // concatenation
+        if (v.is_str && checking) {
+            v = str_value("", 0);          // (only the type matters)
+        } else if (v.is_str) {             // concatenation
             if (v.len + w.len > MAX_STR) { error("4 Out of memory"); break; }
             char *s = pool_alloc(v.len + w.len);
             if (error_msg) break;
@@ -1641,7 +1703,7 @@ static void data_unmark() {
 // first line after it if there's no such line. Past the last line, the
 // program ends.
 static void go_to_line(int num) {
-    if (error_msg) return;
+    if (error_msg || checking) return;
     int off = line_find(num);
     jumped = 1;
     if (off >= prog_len) {
@@ -1725,6 +1787,7 @@ static int print_at(int really) {
     expect_char(',', "C Nonsense in BASIC");
     int col = expr_int(0, 255);
     if (error_msg) return 0;
+    if (checking) return 1;
     if (col >= SCREEN_COLS) { error("B Integer out of range"); return 0; }
     if (really && !set_cursor(col, row)) { error("5 Out of screen"); return 0; }
     return 1;
@@ -1751,13 +1814,13 @@ static void st_print(int stream) {
     if (accept_char('#')) {
         stream = expr_int(0, 15);
         if (error_msg) return;
-        if (stream > 3) { error("O Invalid stream"); return; }
+        if (stream > 3 && !checking) { error("O Invalid stream"); return; }
         if (!at_statement_end() && !accept_char(';') && !accept_char(',')) {
             error("C Nonsense in BASIC");
             return;
         }
     }
-    int printer = stream == 3;
+    int printer = stream == 3 || checking;   // (printing nothing)
     int was_lower = using_lower();
     use_lower(stream < 2);
     struct colours saved, temp;
@@ -1814,7 +1877,7 @@ static void st_if() {
     double cond = expr_num();
     if (error_msg) return;
     if (!accept(T_THEN)) { error("C Nonsense in BASIC"); return; }
-    if (!cond) { skip_line(); return; }
+    if (!cond && !checking) { skip_line(); return; }
     skip_space();
     if (isdigit(*p)) {                    // IF ... THEN 100
         go_to_line(expr_int(0, 65535));
@@ -1868,7 +1931,7 @@ static void st_for() {
     double limit = expr_num();
     double step = 1;
     if (accept(T_STEP)) step = expr_num();
-    if (error_msg) return;
+    if (error_msg || checking) return;
     struct var *v = find_var(name, 0, 1);
     if (!v) return;
     v->num = start;
@@ -1888,6 +1951,10 @@ static void st_next() {
     char name[NAME_LEN];
     int is_str;
     if (!read_name(name, &is_str)) return;
+    if (checking) {
+        if (is_str) error("C Nonsense in BASIC");
+        return;
+    }
     struct var *v = is_str ? 0 : lookup_var(name, 0);
     if (!v || !v->is_for) {
         error("1 NEXT without FOR");
@@ -1903,7 +1970,7 @@ static void st_next() {
 
 static void st_gosub() {
     int num = expr_int(0, 65535);
-    if (error_msg) return;
+    if (error_msg || checking) return;
     if (gosub_sp == MAX_GOSUB) {
         error("4 Out of memory");
         return;
@@ -1915,6 +1982,7 @@ static void st_gosub() {
 }
 
 static void st_return() {
+    if (checking) return;
     if (gosub_sp == 0) {
         error("7 RETURN without GO SUB");
         return;
@@ -1980,39 +2048,42 @@ static void input_value(struct lvalue *lv, int line_mode) {
  * STOP (or Esc) stops the program: H STOP in INPUT.
  */
 static void st_input() {
-    use_lower(1);
-    clear_lower();
-    set_scroll_count(upper_rows());       // everything on screen has been seen
+    int quiet = checking;                 // (just checking: print nothing)
+    if (!quiet) {
+        use_lower(1);
+        clear_lower();
+        set_scroll_count(upper_rows());   // everything on screen has been seen
+    }
     struct colours temp;
     get_colours(&temp);
     while (!at_statement_end() && !error_msg) {
         if (colour_item(&temp)) {
-            set_colours(&temp);
+            if (!quiet) set_colours(&temp);
             continue;
         }
         if (accept_char(';')) continue;
-        if (accept_char(',')) { print_comma(); continue; }
-        if (accept_char('\'')) { print_string("\n"); continue; }
-        if (accept(T_AT)) { print_at(1); continue; }
+        if (accept_char(',')) { if (!quiet) print_comma(); continue; }
+        if (accept_char('\'')) { if (!quiet) print_string("\n"); continue; }
+        if (accept(T_AT)) { print_at(!quiet); continue; }
         if (accept(T_TAB)) {
             int col = expr_int(0, 65535);
-            if (!error_msg) print_tab(col);
+            if (!error_msg && !quiet) print_tab(col);
             continue;
         }
         skip_space();
         if (*p == '"') {                  // a prompt
             struct value v = factor();
-            if (!error_msg) print_value(v);
+            if (!error_msg && !quiet) print_value(v);
             continue;
         }
         if (accept_char('(')) {           // (items): printed, as in PRINT
             while (!error_msg && !accept_char(')')) {
                 if (accept_char(';')) continue;
-                if (accept_char(',')) { print_comma(); continue; }
-                if (accept_char('\'')) { print_string("\n"); continue; }
+                if (accept_char(',')) { if (!quiet) print_comma(); continue; }
+                if (accept_char('\'')) { if (!quiet) print_string("\n"); continue; }
                 if (at_statement_end()) { error("C Nonsense in BASIC"); break; }
                 struct value v = expr();
-                if (!error_msg) print_value(v);
+                if (!error_msg && !quiet) print_value(v);
             }
             continue;
         }
@@ -2020,10 +2091,12 @@ static void st_input() {
         struct lvalue lv;
         if (!parse_lvalue(&lv)) break;
         if (line_mode && !lv.is_str) { error("C Nonsense in BASIC"); break; }
-        input_value(&lv, line_mode);
+        if (!quiet) input_value(&lv, line_mode);
     }
-    clear_lower();
-    use_lower(0);
+    if (!quiet) {
+        clear_lower();
+        use_lower(0);
+    }
 }
 static void st_dim() {
     do {
@@ -2036,7 +2109,11 @@ static void st_dim() {
         int room = HEAP_SIZE / esize;     // more elements than could ever fit
         int count = 1;
         do {
-            if (nd == MAX_DIMS) { error("C Nonsense in BASIC"); return; }
+            if (nd == MAX_DIMS) {
+                error("3 Subscript wrong");
+                if (!checking) return;
+                nd--;
+            }
             int d = expr_int(1, 65535);
             if (error_msg) return;
             dims[nd++] = d;
@@ -2044,6 +2121,7 @@ static void st_dim() {
         } while (accept_char(','));
         expect_char(')', "C Nonsense in BASIC");
         if (error_msg) return;
+        if (checking) continue;
         if (count > room) { error("4 Out of memory"); return; }
         struct array *a = find_array(name, is_str);
         if (!a) {
@@ -2093,6 +2171,7 @@ static void st_read() {
     do {
         struct lvalue lv;
         if (!parse_lvalue(&lv)) return;
+        if (checking) continue;
         if (!find_data()) { error("E Out of DATA"); return; }
         char *saved = p;
         p = data_pos;
@@ -2107,13 +2186,44 @@ static void st_read() {
 }
 
 // DATA is only read by READ (and DEF FN by FN); running it does nothing.
-static void st_data() {
+// But it's checked: DATA is a list of expressions, DEF FN as below.
+static void check_def_fn();
+
+static void st_data(int t) {
+    if (checking) {
+        if (t == T_DEFFN) {
+            check_def_fn();
+            return;
+        }
+        do expr(); while (!error_msg && accept_char(','));
+        return;
+    }
     while (!at_statement_end()) {
         if (*p++ == '"') {
             while (*p && *p != '"') p++;
             if (*p) p++;
         }
     }
+}
+
+// DEF FN F(A, B$)=expression: the name, parameters and expression.
+static void check_def_fn() {
+    char name[NAME_LEN];
+    int is_str;
+    if (!read_name(name, &is_str)) return;
+    expect_char('(', "C Nonsense in BASIC");
+    skip_space();
+    if (!error_msg && *p != ')') {
+        do {
+            int s;
+            if (!read_name(name, &s)) return;
+        } while (accept_char(','));
+    }
+    expect_char(')', "C Nonsense in BASIC");
+    expect_char('=', "C Nonsense in BASIC");
+    if (error_msg) return;
+    struct value v = expr();
+    if (!error_msg && v.is_str != is_str) error("C Nonsense in BASIC");
 }
 
 // Wait for n/50 seconds (n = 0: forever), or until a key is pressed.
@@ -2127,13 +2237,13 @@ static void pause(int n) {
 // BEEP duration, pitch: seconds, and semitones above middle C.
 static void st_beep() {
     if (at_statement_end()) {          // plain BEEP: a short click
-        tone(1000, 200);
+        if (!checking) tone(1000, 200);
         return;
     }
     double secs = expr_num();
     expect_char(',', "C Nonsense in BASIC");
     double pitch = expr_num();
-    if (error_msg) return;
+    if (error_msg || checking) return;
     if (secs < 0 || secs > 10 || pitch < -60 || pitch > 69) {
         error("B Integer out of range");
         return;
@@ -2158,6 +2268,10 @@ static int file_name(char *name) {
     struct value v = expr();
     if (error_msg) return 0;
     if (!v.is_str) { error("C Nonsense in BASIC"); return 0; }
+    if (checking) {
+        name[0] = '\0';
+        return 1;
+    }
     if (v.len > STORE_NAME_LEN) {
         error("F Invalid file name");
         return 0;
@@ -2189,11 +2303,11 @@ HIGH_MEM unsigned char load_buf[PROG_SIZE];
 static void st_save() {
     char name[STORE_NAME_LEN + 1];
     if (!file_name(name)) return;
-    if (!name[0]) { error("F Invalid file name"); return; }
+    if (!name[0] && !checking) { error("F Invalid file name"); return; }
     unsigned int start = 0, len = 0;
     int kind = file_kind(&start, &len), param = 0;
     if (kind == FILE_PROGRAM && accept(T_LINE)) param = expr_int(1, 9999);
-    if (error_msg) return;
+    if (error_msg || checking) return;
     const char *err;
     if (kind == FILE_BYTES) {
         if (len > PROG_SIZE) { error("4 Out of memory"); return; }
@@ -2231,6 +2345,7 @@ static void st_load(int t) {
     int kind = file_kind(&start, &want);
     if (error_msg) return;
     if (kind == FILE_BYTES && t == T_MERGE) { error("C Nonsense in BASIC"); return; }
+    if (checking) return;
     int len, param;
     const char *err = storage_load(name, kind, load_buf, PROG_SIZE, &len, &param);
     if (!err && kind == FILE_PROGRAM && !valid_program(load_buf, len)) err = "R Bad program file";
@@ -2280,7 +2395,7 @@ static void st_load(int t) {
 
 static void st_erase() {
     char name[STORE_NAME_LEN + 1];
-    if (!file_name(name)) return;
+    if (!file_name(name) || checking) return;
     const char *err = storage_erase(name);
     if (err) error(err);
 }
@@ -2308,6 +2423,7 @@ static void cat_entry(const char *name, int len, int param, int type) {
 }
 
 static void st_cat() {
+    if (checking) return;
     int free_files, free_kb;
     const char *err = storage_list(cat_entry, &free_files, &free_kb);
     if (err) { error(err); return; }
@@ -2320,6 +2436,7 @@ static void st_cat() {
 static int next_statement();
 
 static void st_continue() {
+    if (checking) return;
     if (!cont_ok) { error("N Statement lost"); return; }
     resume(cont_line, cont_stmt, cont_next);
 }
@@ -2327,7 +2444,7 @@ static void st_continue() {
 // INK n, PAPER n etc. as statements: the upper screen's colours.
 static void st_colour(int which) {
     int n = expr_int(0, 255);
-    if (error_msg) return;
+    if (error_msg || checking) return;
     struct colours c;
     get_colours(&c);
     if (!colour_set(&c, which, n)) error("K Invalid colour");
@@ -2371,7 +2488,7 @@ static void st_plot() {
     int x = expr_int(0, SCREEN_WIDTH - 1);
     expect_char(',', "C Nonsense in BASIC");
     int y = expr_int(0, PLOT_HEIGHT - 1);
-    if (!error_msg) {
+    if (!error_msg && !checking) {
         plot(x, y);
         plot_x = x;
         plot_y = y;
@@ -2391,7 +2508,7 @@ static void st_draw() {
     double dy = expr_num();
     double a = 0;
     if (accept_char(',')) a = expr_num();
-    if (!error_msg) draw_to(dx, dy, a);
+    if (!error_msg && !checking) draw_to(dx, dy, a);
     set_colours(&saved);
 }
 
@@ -2439,7 +2556,7 @@ static void st_circle() {
     int y = expr_int(0, PLOT_HEIGHT - 1);
     expect_char(',', "C Nonsense in BASIC");
     int r = expr_int(0, 1000);
-    if (!error_msg) circle(x, y, r);       // parts off the screen are skipped
+    if (!error_msg && !checking) circle(x, y, r);       // parts off the screen are skipped
     set_colours(&saved);
 }
 
@@ -2590,22 +2707,25 @@ static void execute_statement() {
     case T_INPUT:  st_input(); break;
     case T_DIM:    st_dim(); break;
     case T_READ:   st_read(); break;
-    case T_DATA:   st_data(); break;
-    case T_DEFFN:  st_data(); break;      // only used by FN
-    case T_RESTORE:
-        restore(at_statement_end() ? 0 : expr_int(1, 9999));
+    case T_DATA:   st_data(T_DATA); break;
+    case T_DEFFN:  st_data(T_DEFFN); break;   // only used by FN
+    case T_RESTORE: {
+        int n = at_statement_end() ? 0 : expr_int(1, 9999);
+        if (!checking) restore(n);
         break;
+    }
     case T_RANDOMIZE: {
         int n = at_statement_end() ? 0 : expr_int(0, 65535);
-        if (!error_msg) randomize(n);
+        if (!error_msg && !checking) randomize(n);
         break;
     }
     case T_PAUSE: {
         int n = expr_int(0, 65535);
-        if (!error_msg) pause(n);
+        if (!error_msg && !checking) pause(n);
         break;
     }
     case T_STOP:
+        if (checking) break;
         cont_ok = cur_line >= 0;
         cont_line = current_line_number();
         cont_stmt = statement_number(stmt_pos);
@@ -2623,7 +2743,7 @@ static void execute_statement() {
     case T_EDIT: {
         // Put the line in the editor for the next command line.
         int num = at_statement_end() ? last_line : expr_int(1, 9999);
-        if (error_msg) break;
+        if (error_msg || checking) break;
         int off = line_find(num);
         if (num <= 0 || off >= prog_len || line_num(off) != num) {
             error("N Statement lost");
@@ -2641,6 +2761,7 @@ static void execute_statement() {
     case T_NEXT:   st_next(); break;
     case T_REM:    skip_line(); break;
     case T_CLS:
+        if (checking) break;
         clear_screen();
         plot_x = plot_y = 0;
         break;
@@ -2652,7 +2773,7 @@ static void execute_statement() {
     case T_OVER:    st_colour(C_OVER); break;
     case T_BORDER: {
         int n = expr_int(0, 255);
-        if (error_msg) break;
+        if (error_msg || checking) break;
         if (n > 7) error("K Invalid colour");
         else set_border(n);
         break;
@@ -2660,25 +2781,25 @@ static void execute_statement() {
     case T_PLOT:    st_plot(); break;
     case T_DRAW:    st_draw(); break;
     case T_CIRCLE:  st_circle(); break;
-    case T_END:    running = 0; break;
+    case T_END:    if (!checking) running = 0; break;
     case T_NEW:                            // as if switched on again
-        new_program();
+        if (!checking) new_program();
         break;
     case T_CLEAR:                          // CLEAR [n]: n (RAMTOP) is ignored
         if (!at_statement_end()) expr_num();
-        if (error_msg) break;
+        if (error_msg || checking) break;
         clear_all();
         break;
     case T_LIST: {
         int from = at_statement_end() ? 0 : expr_int(0, 9999);
-        if (error_msg) break;
+        if (error_msg || checking) break;
         if (from) e_ppc = from;
         list_program(from);
         break;
     }
     case T_RUN: {                          // RUN [line]
         int num = at_statement_end() ? 0 : expr_int(0, 65535);
-        if (error_msg) break;
+        if (error_msg || checking) break;
         clear_all();
         cont_ok = 0;
         go_to_line(num);
@@ -2689,14 +2810,14 @@ static void execute_statement() {
         int a = expr_int(0, 65535);
         expect_char(',', "C Nonsense in BASIC");
         int v = expr_int(-255, 255);
-        if (!error_msg) mem_poke(a, v);
+        if (!error_msg && !checking) mem_poke(a, v);
         break;
     }
     case T_OUT: {                          // OUT 254,n sets the border
         int port = expr_int(0, 65535);
         expect_char(',', "C Nonsense in BASIC");
         int v = expr_int(0, 255);
-        if (!error_msg && !(port & 1)) set_border(v & 7);
+        if (!error_msg && !checking && !(port & 1)) set_border(v & 7);
         break;
     }
     default:
@@ -2780,10 +2901,37 @@ static int next_statement() {
 }
 
 /*
- * Run statements from p until the end of the program (or of a typed
- * line, when cur_line is -1), an END, STOP, error or BREAK. Errors and
- * BREAK leave CONTINUE set to run the statement again.
+ * Check the (tokenized) line text: returns -1 if it makes sense, or the
+ * offset in it where it stops making sense.
  */
+static int syntax_check(char *text) {
+    unsigned long saved_cost = cost_us;
+    checking = 1;
+    error_msg = 0;
+    pool_used = 0;
+    fn_depth = 0;
+    p = text;
+    for (;;) {
+        jumped = 0;
+        execute_statement();
+        if (error_msg) break;
+        skip_space();
+        if (jumped) continue;             // IF ... THEN: the next statement follows
+        if (*p == '\0') break;
+        if (*p != ':') {
+            error("C Nonsense in BASIC");
+            break;
+        }
+        p++;
+    }
+    checking = 0;
+    then_part = 0;
+    cost_us = saved_cost;
+    int bad = error_msg ? (int)(error_pos - text) : -1;
+    error_msg = 0;
+    return bad;
+}
+
 /*
  * Run statements from p until the end of the program (or of a typed
  * line, when cur_line is -1), STOP, an error or BREAK; then show the
@@ -2858,10 +3006,46 @@ HIGH_MEM unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
 // whatever is in edit_next (put there by EDIT). Returns -1 for Esc.
 HIGH_MEM char edit_next[MAX_TEXT + 1];
 
+static int edit_cursor = -1;      // where the cursor starts in edit_next
+
 static int edit_input(int use_history) {
     strcpy(input_buf, edit_next);
     memset(edit_next, 0, 1);          // (not edit_next[0] = 0: see memory.c's ram_p)
-    return edit_line(input_buf, sizeof(input_buf), use_history, -1);
+    int cursor = edit_cursor;
+    edit_cursor = -1;
+    return edit_line(input_buf, sizeof(input_buf), use_history, cursor);
+}
+
+// Where, in the typed text s, the tokenized text's offset k comes from:
+// the shortest start of s that tokenizes to the same first k bytes.
+static int source_offset(const char *s, int k) {
+    int n = strlen(s);
+    for (int len = 0; len < n; len++) {
+        memcpy(list_buf, s, len);
+        memset(list_buf + len, 0, 1);
+        int m = tokenize(list_buf, (unsigned char *)list_kw, sizeof(list_kw));
+        if (m - 1 >= k && memcmp(list_kw, typed_line, k) == 0) {
+            while (s[len] == ' ') len++;  // (the ? goes on what follows)
+            return len;
+        }
+    }
+    return n;
+}
+
+// A line that doesn't make sense goes back to the editor, with a
+// flashing ? where it stops making sense (and a rasp), as on the Spectrum.
+static void refuse_line(const char *s, int bad) {
+    int mark = (s - input_buf) + source_offset(s, bad);
+    strcpy(edit_next, input_buf);
+    edit_cursor = mark;
+    edit_show_error();
+    transcript("[ERR]");              // (for tests: the line, with the ?)
+    memcpy(list_buf, input_buf, mark);
+    memcpy(list_buf + mark, "?", 2);
+    transcript(list_buf);
+    transcript(input_buf + mark);
+    transcript("\n");
+    tone(110, 100);
 }
 
 // For INPUT: edit what's in input_buf, with the cursor at cursor.
@@ -2920,6 +3104,13 @@ void basic_run() {
         if (len < 0) {
             print_report("G No room for line", 0, 1);
             continue;
+        }
+        if (len > 1 || num < 0) {
+            int bad = syntax_check((char *)typed_line);
+            if (bad >= 0) {
+                refuse_line(s, bad);
+                continue;
+            }
         }
         if (num > 0) {
             last_line = e_ppc = num;

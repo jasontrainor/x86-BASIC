@@ -76,6 +76,23 @@ static void replace_text(const char *s, int cap) {
     redraw(0, old_len);
 }
 
+static int error_mark;
+
+void edit_show_error(void) { error_mark = 1; }
+
+// Show a ? at the cursor, the text after it moved along to make room.
+static void show_mark(void) {
+    make_room(len + 1);
+    for (int i = pos; i < len; i++) {
+        int col, row;
+        place(i + 1, &col, &row);
+        lower_put(col, row, text[i]);
+    }
+    int col, row;
+    place(pos, &col, &row);
+    lower_put(col, row, '?');
+}
+
 int edit_line(char *buf, int cap, int use_history, int cursor) {
     text = buf;
     start = cursor_row() * SCREEN_COLS + cursor_col();
@@ -86,12 +103,19 @@ int edit_line(char *buf, int cap, int use_history, int cursor) {
     len = strlen(buf);
     pos = cursor >= 0 && cursor < len ? cursor : len;
     redraw(0, 0);
+    int marked = error_mark;
+    error_mark = 0;
+    if (marked) show_mark();
 
     int browsing = -1;                    // history entries back, -1: none
     int result = 0;
     for (;;) {
         move_cursor();
         int k = get_key();
+        if (marked) {                     // the first key takes the ? away
+            marked = 0;
+            redraw(pos, len + 1);
+        }
         if (k == '\r' || k == '\n') {
             break;
         } else if (k == 27) {

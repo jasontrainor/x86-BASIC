@@ -46,6 +46,12 @@ bottom — `0 OK, 0:1`, or `2 Variable not found, 30:2` (line 30,
 statement 2) — and stays until a key is pressed. A number on its own
 deletes that line, and Enter on its own lists the program again.
 
+Each line is checked when Enter is pressed, as on the Spectrum. If it
+doesn't make sense, it isn't stored or run: it stays in the editor with
+a flashing `?` where it goes wrong, to be corrected (or Esc to abandon
+it). The check is for the form of the line: whether variables exist,
+numbers are in range and so on is only known when it runs.
+
 Keywords are typed in full, in any case: `print`, `GO TO`, `goto`. Press
 **Esc** (or **Ctrl+C**) for BREAK; `CONTINUE` carries on.
 
@@ -159,8 +165,6 @@ doesn't use) runs at full speed; `POKE 23681,0` goes back.
 - Arithmetic uses 64-bit floating point rather than the Spectrum's
   5-byte numbers, so results very occasionally differ in the last
   digits, and a long run of decimal steps may end differently.
-- Lines aren't checked as they're entered: a mistake shows up as `C
-  Nonsense in BASIC` when the line runs.
 - A keyword can't be used as a variable name (`LET to=1`, `LET line=1`),
   since keywords are typed as words.
 - No machine code: `USR` addresses, `RANDOMIZE USR`, and `LOAD "" CODE`

@@ -8,4 +8,8 @@
 // earlier lines and the line is added to the history.
 int edit_line(char *buf, int cap, int use_history, int cursor);
 
+// The next edit_line shows a flashing ? at the cursor (where the line
+// stops making sense) until a key is pressed.
+void edit_show_error(void);
+
 #endif
