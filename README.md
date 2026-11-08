@@ -95,6 +95,7 @@ It's the Spectrum's BASIC; a quick summary:
 | `LET` | numbers and strings; numeric names can be long and contain spaces (`LET hi score=0`) |
 | `DIM a(10,10)`, `DIM a$(5,10)` | arrays from 1; a string array holds fixed-length strings, as on the Spectrum: `DIM a$(10)` is one string of 10 characters |
 | `a$(2 TO 4)`, `LET a$(3)="X"` | slicing, and assigning to a slice (padded or cut to fit) |
+| `PLAY` | the Spectrum 128's music strings (notes `a`–`g` and `A`–`G`, `#` `$`, `&`, lengths `1`–`12`, `O`, `T`, `( )`, `!…!`, `H`). The PC speaker has one voice, so only the first string is heard; volume, envelopes and MIDI are ignored. |
 | `INPUT` | in the lower screen, with prompts, `AT`, colours and `LINE`; numbers can be typed as expressions, strings between quotes |
 | `IF ... THEN`, `FOR ... TO ... STEP`, `NEXT`, `GO TO`, `GO SUB`, `RETURN`, `STOP`, `CONTINUE` | as on the Spectrum (`GO TO` a missing line goes to the next one) |
 | `READ`, `DATA`, `RESTORE`, `DEF FN`, `FN`, `RANDOMIZE`, `PAUSE`, `BEEP`, `REM` | |

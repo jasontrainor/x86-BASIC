@@ -40,7 +40,7 @@ enum {
     T_EXP, T_RND, T_LEN, T_VAL, T_CODE, T_CHRS, T_STRS, T_INKEYS, T_POINT,
     T_DEFFN, T_FN, T_FLASH, T_LPRINT, T_LLIST, T_COPY,
     T_PEEK, T_POKE, T_USR, T_BIN, T_VALS, T_ATTR, T_SCREENS, T_IN, T_OUT,
-    T_MERGE, T_VERIFY,
+    T_MERGE, T_VERIFY, T_PLAY,
     T_LE, T_GE, T_NE,
     T_END_OF_TOKENS
 };
@@ -56,7 +56,7 @@ static const char *const token_names[] = {
     "EXP", "RND", "LEN", "VAL", "CODE", "CHR$", "STR$", "INKEY$", "POINT",
     "DEF FN", "FN", "FLASH", "LPRINT", "LLIST", "COPY",
     "PEEK", "POKE", "USR", "BIN", "VAL$", "ATTR", "SCREEN$", "IN", "OUT",
-    "MERGE", "VERIFY",
+    "MERGE", "VERIFY", "PLAY",
     "<=", ">=", "<>",
 };
 _Static_assert(sizeof(token_names) / sizeof(token_names[0]) == T_END_OF_TOKENS - T_PRINT,
@@ -2378,6 +2378,121 @@ static void st_beep() {
 }
 
 /*
+ * PLAY, from the Spectrum 128: music strings. The PC speaker has one
+ * voice, so only the first string (channel A) is played; any others
+ * (up to 8) are worked out but not heard. In a string:
+ *
+ *   a-g        a note in the current octave; A-G an octave higher
+ *   # $        before a note: sharp, flat
+ *   &          a rest
+ *   1-12       the length of the notes that follow: 1 semiquaver, 2
+ *              dotted semiquaver, 3 quaver, 4 dotted quaver, 5 crotchet
+ *              (the start), 6 dotted crotchet, 7 minim, 8 dotted minim,
+ *              9 semibreve; 10-12 triplets of semiquavers, quavers and
+ *              crotchets
+ *   On         octave n, 0-8 (5 at the start: middle C's)
+ *   Tn         tempo, 60-240 crotchets a minute (120 at the start)
+ *   ( )        repeat what's between once; a ) on its own repeats from
+ *              the start
+ *   !...!      a comment
+ *   _          a tie (the notes run together anyway)
+ *   H          stop
+ *   V W U X Y Z M N, with a number: volume, envelopes and MIDI, which
+ *              the speaker can't do: ignored
+ */
+static int strchr_in(const char *set, char c) {
+    for (; *set; set++)
+        if (*set == c) return 1;
+    return 0;
+}
+
+static int play_number(const char *t, int len, int *i) {
+    int n = 0;
+    while (*i < len && isdigit(t[*i]) && n < 10000) n = n * 10 + (t[(*i)++] - '0');
+    while (*i < len && isdigit(t[*i])) (*i)++;
+    return n;
+}
+
+static void play_string(const char *t, int len) {
+    // Lengths in 24ths of a crotchet.
+    static const unsigned char units[12] = { 6, 9, 12, 18, 24, 36, 48, 72, 96, 4, 8, 16 };
+    static const signed char semitone[7] = { 9, 11, 0, 2, 4, 5, 7 };   // a-g from c
+    int octave = 5, length = 5, tempo = 120, accidental = 0;
+    int stack[8], repeated[8], depth = 0, whole_repeated = 0;
+    int i = 0;
+    while (i < len && !error_msg) {
+        if (key_waiting() && check_break()) {
+            break_requested = 1;
+            return;
+        }
+        char c = t[i++];
+        int ms = units[length - 1] * 2500 / tempo;
+        if (isdigit(c)) {
+            i--;
+            int n = play_number(t, len, &i);
+            if (n < 1 || n > 12) error("n Out of range");
+            else length = n;
+        } else if (c == 'O' || c == 'o') {
+            int n = play_number(t, len, &i);
+            if (n > 8) error("n Out of range");
+            else octave = n;
+        } else if (c == 'T' || c == 't') {
+            int n = play_number(t, len, &i);
+            if (n < 60 || n > 240) error("n Out of range");
+            else tempo = n;
+        } else if (c == '#' || c == '$') {
+            accidental = c == '#' ? 1 : -1;
+            if (i >= len || toupper(t[i]) < 'A' || toupper(t[i]) > 'G')
+                error("k Invalid note name");
+        } else if (toupper(c) >= 'A' && toupper(c) <= 'G') {
+            int up = c >= 'A' && c <= 'G';
+            double n = semitone[toupper(c) - 'A'] + accidental + 12 * (octave - 5 + up);
+            accidental = 0;
+            double freq = 261.6255653 * num_exp(n / 12 * 0.69314718055994530942);
+            tone((int)(freq + 0.5), ms);
+        } else if (c == '&') {
+            tone(0, ms);
+        } else if (c == '!') {
+            while (i < len && t[i] != '!') i++;
+            i++;
+        } else if (c == '(') {
+            if (depth == 8) { error("n Out of range"); break; }
+            stack[depth] = i;
+            repeated[depth++] = 0;
+        } else if (c == ')') {
+            if (depth && !repeated[depth - 1]) {
+                repeated[depth - 1] = 1;
+                i = stack[depth - 1];
+            } else if (depth) {
+                depth--;
+            } else if (!whole_repeated) {
+                whole_repeated = 1;
+                i = 0;
+            }
+        } else if (c == 'H' || c == 'h') {
+            return;
+        } else if (strchr_in("VvWwXxYyZzMmNn", c)) {
+            play_number(t, len, &i);
+        } else if (c != 'U' && c != 'u' && c != '_' && c != ' ') {
+            error("k Invalid note name");
+        }
+    }
+}
+
+static void st_play() {
+    struct value first = str_value("", 0);
+    int n = 0;
+    do {
+        struct value v = expr();
+        if (error_msg) return;
+        if (!v.is_str) { error("C Nonsense in BASIC"); return; }
+        if (n++ == 0) first = v;
+    } while (accept_char(','));
+    if (n > 8) error("n Out of range");
+    if (!error_msg && !checking) play_string(first.str, first.len);
+}
+
+/*
  * SAVE, LOAD, VERIFY and MERGE, as on the Spectrum but with the boot disk
  * for a tape (see storage.c):
  *
@@ -3260,6 +3375,7 @@ static void execute_statement() {
         break;
     }
     case T_BEEP:   st_beep(); break;
+    case T_PLAY:   st_play(); break;
     case T_POKE: {
         int a = expr_int(0, 65535);
         expect_char(',', "C Nonsense in BASIC");

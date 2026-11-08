@@ -56,6 +56,11 @@ check "cls"              "CLS${NL}" "[CLS]"
 check "colours"          "INK 2${NL}PAPER 5${NL}BORDER 1${NL}" "[BORDER 1]" "![ERR]"
 check "beep"             "BEEP${NL}BEEP 1,12${NL}BEEP .5,0${NL}" "[TONE 1000 200]" "[TONE 523 1000]" "[TONE 261 500]"
 
+check "play notes"        "PLAY \"cdeC#c\$e&\"${NL}" "[TONE 262 500][TONE 294 500][TONE 330 500][TONE 523 500][TONE 277 500][TONE 311 500][TONE 0 500]0 OK"
+check "play length tempo" "PLAY \"3O4a T240 9g !a comment! H c\", \"ignored\"${NL}" "[TONE 220 250][TONE 196 1000]0 OK"
+check "play repeats"      "PLAY \"(c)d)\"${NL}" "[TONE 262 500][TONE 262 500][TONE 294 500][TONE 262 500][TONE 262 500][TONE 294 500]0 OK"
+check "play errors"       "PLAY \"q\"${NL}PLAY \"O9c\"${NL}PLAY 1${NL}" "k Invalid note name, 0:1" "n Out of range, 0:1" "[ERR]PLAY 1?${NL}"
+
 # --- Errors are reported, and stop the program --------------------------
 
 # --- Lines are checked as they're entered ---------------------------------
