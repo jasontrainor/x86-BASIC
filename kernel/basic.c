@@ -415,7 +415,9 @@ static char *pool_alloc(int len) {
     return s;
 }
 
+// Every number is held as the Spectrum would hold it (see num_spectrum).
 static struct value num_value(double n) {
+    if (!num_spectrum(&n)) error("6 Number too big");
     struct value v = { 0, n, 0, 0 };
     return v;
 }
@@ -427,9 +429,10 @@ static struct value str_value(const char *s, int len) {
 
 static struct value expr();
 
-// Results that overflow become infinity (or NaN); report them.
+// Results too big for the Spectrum's numbers (including infinity and
+// NaN) are reported; the rest are rounded to its precision.
 static double check(double v) {
-    if (!num_is_finite(v)) error("6 Number too big");
+    if (!num_spectrum(&v)) error("6 Number too big");
     return v;
 }
 

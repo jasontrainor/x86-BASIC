@@ -82,6 +82,30 @@ double num_pow10(int n) {
     return r;
 }
 
+/*
+ * The Spectrum's numbers: an exponent byte and a 32-bit mantissa (the
+ * top bit, always 1, standing for the sign). So the significand of a
+ * double (52 bits after the leading 1) is rounded to 31 bits after it,
+ * to nearest, and the exponent kept in the Spectrum's range: values are
+ * 0.1xxx (binary) * 2^(e - 128) for e from 1 to 255.
+ */
+int num_spectrum(double *x) {
+    union { double d; unsigned long long u; } v;
+    v.d = *x;
+    unsigned long long sign = v.u & (1ULL << 63), mag = v.u & ~(1ULL << 63);
+    if ((int)(mag >> 52) == 0x7FF) return 0;              // infinity, NaN
+    mag = (mag + (1ULL << 20)) & ~((1ULL << 21) - 1);    // (a carry goes into the exponent)
+    int e = (int)(mag >> 52) - 1023;                      // x = 1.f * 2^e
+    if (e > 126) return 0;
+    if (e < -128) {
+        *x = 0;                                          // (no -0 either)
+        return 1;
+    }
+    v.u = sign | mag;
+    *x = v.d;
+    return 1;
+}
+
 // Infinity and NaN are the only values for which x - x isn't 0.
 int num_is_finite(double x) { return x - x == 0; }
 

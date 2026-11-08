@@ -162,9 +162,12 @@ doesn't use) runs at full speed; `POKE 23681,0` goes back.
 
 ### Differences from a Spectrum
 
-- Arithmetic uses 64-bit floating point rather than the Spectrum's
-  5-byte numbers, so results very occasionally differ in the last
-  digits, and a long run of decimal steps may end differently.
+- Numbers have the Spectrum's precision (32 bits) and range (up to about
+  1.7E38, and down to about 2.9E-39, below which they're 0), so rounding
+  drift and overflow happen where they would there. But the arithmetic
+  and functions are the PC's, rounded to that precision, not the
+  Spectrum ROM's own routines, so a last digit can still occasionally
+  differ.
 - A keyword can't be used as a variable name (`LET to=1`, `LET line=1`),
   since keywords are typed as words.
 - No machine code: `USR` addresses, `RANDOMIZE USR`, and `LOAD "" CODE`

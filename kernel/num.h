@@ -22,6 +22,11 @@ double num_exp(double x);
 double num_pow10(int n);
 int    num_is_finite(double x);
 
+// Round *x to what the Spectrum's 5-byte numbers can hold: 32
+// significant bits, and magnitudes from 2^-128 (smaller ones become 0)
+// up to 2^127. Returns 0 if it's too big (or infinite, or NaN).
+int    num_spectrum(double *x);
+
 // Format x the way BASIC prints it (at most 8 significant digits,
 // exponent form for very large or small numbers). buf: 24 bytes.
 void num_format(double x, char *buf);
