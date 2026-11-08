@@ -137,7 +137,8 @@ int plat_read_key(void) {
         }
         CHAR16 c = key.UnicodeChar;
         if (c == '\r' || c == '\n') return 13;
-        if (c == 8 || c == 3 || (c >= 32 && c < 127)) return c;
+        // (Ctrl+letter: 1-26, as the BIOS gives them.)
+        if ((c >= 1 && c <= 26) || (c >= 32 && c < 127)) return c;
         // Anything else (function keys, accented letters): ignore it.
     }
 }
@@ -183,6 +184,11 @@ static UINT8 inb(UINT16 port) {
     UINT8 val;
     __asm__ __volatile__ ("inb %1, %0" : "=a" (val) : "Nd" (port));
     return val;
+}
+
+void plat_click(void) {
+    UINT8 v = inb(0x61);
+    outb(0x61, (v & ~0x01) ^ 0x02);
 }
 
 void plat_tone(int freq, int ms) {

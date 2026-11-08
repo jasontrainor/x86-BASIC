@@ -31,10 +31,34 @@ void host_echo(char c) {
 
 void host_trace(const char *fmt, int a, int b) { printf(fmt, a, b); }
 
+/* The picture is kept, and written out at the end as a PPM file if
+   SCREEN_OUT names one (each pixel tall times, as it's shown). */
+static struct video video;
+static unsigned char *picture;
 void plat_init(void) {}
-void plat_video(const struct video *v) {}
-void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels) {}
+void plat_video(const struct video *v) {
+    video = *v;
+    free(picture);
+    picture = calloc(v->width * v->height, 1);
+}
+void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels) {
+    if (x % 8 || w % 8 || x < 0 || y < 0 || x + w > video.width || y + h > video.height) {
+        printf("[BAD BLOCK %d,%d %dx%d]", x, y, w, h);
+        return;
+    }
+    for (int j = 0; j < h; j++)
+        memcpy(picture + (y + j) * video.width + x, pixels + j * w, w);
+}
 void plat_border(int colour) {}
+static void save_screen(void) {
+    FILE *f = fopen(getenv("SCREEN_OUT"), "wb");
+    if (!f || !picture) return;
+    fprintf(f, "P6\n%d %d\n255\n", video.width, video.height * video.tall);
+    for (int y = 0; y < video.height * video.tall; y++)
+        for (int x = 0; x < video.width; x++)
+            fwrite(video.palette[picture[(y / video.tall) * video.width + x] & 15], 1, 3, f);
+    fclose(f);
+}
 
 /*
  * The input is "typed ahead": a key becomes available on every other
@@ -68,6 +92,11 @@ void plat_idle(void) {
 unsigned long plat_timer_ms(void) { static unsigned long t; return t += 20; }
 
 void plat_tone(int f, int ms) { printf("[TONE %d %d]", f, ms); }
+static long host_clicks;
+void plat_click(void) { host_clicks++; }
+static void report_clicks(void) {
+    if (host_clicks) printf("[CLICKS %ld]", host_clicks);
+}
 
 /* A blank 1.44MB disk in memory (or DISK_IMAGE, of any size). Its last
    sector always fails, for tests. */
@@ -115,6 +144,8 @@ int main(int argc, char **argv) {
         disk = calloc(disk_sectors, 512);
     }
     if (getenv("DISK_OUT")) atexit(save_disk);
+    if (getenv("SCREEN_OUT")) atexit(save_screen);
+    atexit(report_clicks);
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;
     machine_start();                /* as kernel_start() does */
     return 0;

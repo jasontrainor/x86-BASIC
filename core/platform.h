@@ -61,6 +61,11 @@ unsigned long plat_timer_ms(void);
 // freq 0 means silence (just wait).
 void plat_tone(int freq, int ms);
 
+// Move the speaker's cone the other way: one click. Machines whose
+// programs make sound by clicking the speaker (the Apple II's) call this
+// each time; how fast they do sets the pitch.
+void plat_click(void);
+
 // Read or write one 512-byte sector of the disk the system booted from
 // (lba counts from the start of the disk). Return 0, or -1 on failure.
 int plat_disk_read(unsigned int lba, void *buf);

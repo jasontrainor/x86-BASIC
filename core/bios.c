@@ -27,11 +27,19 @@ static unsigned char inb(unsigned short port) {
  * bit per pixel each, chosen for writing through the sequencer's map
  * mask. Every VGA has both. (Unreal mode lets the C code address
  * 0xA0000 directly.)
+ *
+ * Writing to the planes is slow (four writes for 8 pixels, each one a
+ * trip out to the emulator in a virtual machine), so for a picture
+ * shown twice as tall the VGA shows each line of memory twice itself
+ * ("double scanning", as 200-line modes do): 640x240 in memory. And a
+ * line that is all black and white (as text is) goes into all four
+ * planes at once.
  * --------------------------------------------------------------------- */
 
 #define VGA_MEM   ((volatile unsigned char *)0xA0000)
 
 static int planar;                        // mode 12h
+static int dscan;                         // ... double-scanned: 240 lines
 static int vga_w, vga_h;                  // the mode's size
 static int pic_w, pic_h, tall;            // the picture, as plat_video() gave it
 static int win_x, win_y;                  // where it is (win_x a multiple of 8)
@@ -64,6 +72,13 @@ void plat_video(const struct video *v) {
     pic_w = v->width;
     pic_h = v->height;
     tall = v->tall;
+    dscan = planar && tall == 2;
+    if (dscan) {                          // CRTC 9: two scan lines a line
+        outb(0x3D4, 0x09);
+        outb(0x3D5, (inb(0x3D5) & 0xE0) | 1);
+        vga_h = 240;
+        tall = 1;
+    }
     win_x = (vga_w - pic_w) / 2 & ~7;
     win_y = (vga_h - pic_h * tall) / 2;
     set_palette(v->palette);
@@ -93,8 +108,10 @@ void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels) {
                 continue;
             }
             volatile unsigned char *p = VGA_MEM + row * 80 + (win_x + x) / 8;
-            for (int plane = 0; plane < 4; plane++) {
-                map_mask(1 << plane);
+            int mono = 1;
+            for (int i = 0; i < w && mono; i++) mono = pixels[i] == 0 || pixels[i] == 15;
+            for (int plane = 0; plane < (mono ? 1 : 4); plane++) {
+                map_mask(mono ? 0x0F : 1 << plane);
                 for (int i = 0; i < w; i += 8) {
                     unsigned char b = 0;
                     for (int k = 0; k < 8; k++) b |= ((pixels[i + k] >> plane) & 1) << (7 - k);
@@ -386,6 +403,13 @@ int plat_disk_read(unsigned int lba, void *buf) {
 int plat_disk_write(unsigned int lba, const void *buf) {
     memcpy(sector_buf, buf, 512);
     return bios_disk(1, lba);
+}
+
+// The speaker's data bit (port 0x61 bit 1), with the timer's gate to it
+// (bit 0) off, moves the cone directly.
+void plat_click(void) {
+    unsigned char v = inb(0x61);
+    outb(0x61, (v & ~0x01) ^ 0x02);
 }
 
 // The duration is rounded to whole timer ticks (~55ms).
