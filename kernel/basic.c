@@ -21,6 +21,7 @@
 #include "editor.h"
 #include "storage.h"
 #include "memory.h"
+#include "platform.h"
 
 /* ------------------------------------------------------------------------
  * Tokens
@@ -816,6 +817,62 @@ static double rnd() {
 int break_requested;      // Esc was seen by INKEY$ or INPUT
 
 /* ------------------------------------------------------------------------
+ * Running at the Spectrum's speed
+ *
+ * A PC runs BASIC thousands of times faster than a Spectrum, which would
+ * change what programs do: delay loops, games, animation. So the time
+ * each statement would take on a Spectrum is added up (roughly: from
+ * the kind of statement and the arithmetic, functions, printing and
+ * drawing it does) and the program is held back to match. POKE 23681,1
+ * (a system variable the Spectrum leaves unused) runs at full speed.
+ *
+ * The figures are from benchmark timings of Spectrum BASIC: about 3.5ms
+ * a statement, a FOR...NEXT loop round in 4.4ms, multiplying 2.5ms,
+ * dividing 3.5ms, SQR 35ms.
+ * --------------------------------------------------------------------- */
+
+#define SPEED_SYSVAR 23681
+#define STATEMENT_US 3500
+unsigned long cost_us;    // Spectrum time used since the last pace()
+int then_part;            // set by IF: the next statement is its THEN part
+static long ahead_us;     // how far the Spectrum's time is ahead of ours
+static unsigned long pace_ms;
+extern unsigned long screen_cost_us;   // (screen.c: printing and drawing)
+
+static void pace_start() {
+    cost_us = screen_cost_us = 0;
+    ahead_us = 0;
+    pace_ms = timer_ms();
+}
+
+static void pace() {
+    unsigned long now = timer_ms();
+    ahead_us += (long)(cost_us + screen_cost_us) - (long)(now - pace_ms) * 1000;
+    cost_us = screen_cost_us = 0;
+    pace_ms = now;
+    if (mem_peek(SPEED_SYSVAR) & 1) {     // full speed
+        ahead_us = 0;
+        return;
+    }
+    // If the PC fell behind (waiting for a key, say), don't make it up
+    // later by running fast; a little slack evens out the timer's steps.
+    if (ahead_us < -60000) ahead_us = -60000;
+    while (ahead_us > 0) {
+        if (key_waiting() && check_break()) {   // (stop at once)
+            break_requested = 1;
+            ahead_us = 0;
+            return;
+        }
+#ifndef HOST_TEST                         // (the tests' clock moves on by itself)
+        plat_idle();
+#endif
+        now = timer_ms();
+        ahead_us -= (long)(now - pace_ms) * 1000;
+        pace_ms = now;
+    }
+}
+
+/* ------------------------------------------------------------------------
  * Expressions
  *
  * Precedence, lowest first, as on the Spectrum:
@@ -863,6 +920,8 @@ static double num_arg() {
 __attribute__((noinline)) static struct value numeric_function(int t) {
     double x = num_arg();
     if (error_msg) return num_value(0);
+    cost_us += t == T_SQR ? 35000 : t == T_TAN ? 25000 :
+               (t == T_ABS || t == T_INT || t == T_SGN) ? 1000 : 15000;
     switch (t) {
     case T_ABS: return num_value(num_abs(x));
     case T_INT: return num_value(num_floor(x));
@@ -1275,6 +1334,7 @@ static struct value primary() {
         return string_function(c);
     } else if (c == T_RND) {
         p++;
+        cost_us += 5000;
         return num_value(rnd());
     } else if (c == T_POINT) {             // POINT (x,y): 1 if ink there
         p++;
@@ -1303,6 +1363,7 @@ static struct value power_expr() {
     while (!error_msg && accept_char('^')) {
         double y = num_arg();
         if (v.is_str) error("C Nonsense in BASIC");
+        cost_us += 15000;
         if (!error_msg) v = num_value(power(v.num, y));
     }
     return v;
@@ -1327,6 +1388,7 @@ static struct value term() {
         struct value w = unary();
         if (error_msg) break;
         if (v.is_str || w.is_str) { error("C Nonsense in BASIC"); break; }
+        cost_us += op == '*' ? 2500 : 3500;
         if (op == '*') {
             v.num = check(v.num * w.num);
         } else if (w.num == 0) {
@@ -1350,6 +1412,7 @@ static struct value sum() {
             error(v.is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
             break;
         }
+        cost_us += 800;
         if (v.is_str) {                    // concatenation
             if (v.len + w.len > MAX_STR) { error("4 Out of memory"); break; }
             char *s = pool_alloc(v.len + w.len);
@@ -1389,6 +1452,7 @@ static struct value comparison() {
             error(v.is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
             break;
         }
+        cost_us += 800;
         int c = compare(v, w);
         int r = op == '=' ? c == 0 : op == '<' ? c < 0 : op == '>' ? c > 0 :
                 op == T_LE ? c <= 0 : op == T_GE ? c >= 0 : c != 0;
@@ -1747,6 +1811,7 @@ static void st_if() {
         go_to_line(expr_int(0, 65535));
     } else {
         jumped = 1;     // the statements after THEN simply run next
+        then_part = 1;
     }
 }
 
@@ -1821,6 +1886,7 @@ static void st_next() {
     }
     double n = check(v->num + v->step);
     if (error_msg) return;
+    cost_us += 900;                       // (the add and the test)
     v->num = n;
     if ((v->step >= 0 && n <= v->limit) || (v->step < 0 && n >= v->limit))
         resume(v->loop_line, v->loop_stmt, 1);    // just after the FOR
@@ -2636,6 +2702,7 @@ static void run() {
     int rep_line = 0, rep_stmt = 1;
     int first = 1;            // (an Esc typed ahead stops it after the first statement)
     running = 1;
+    pace_start();
     report_msg = "0 OK";
     no_report = 0;
     use_lower(0);
@@ -2659,7 +2726,11 @@ static void run() {
         stmt_pos = p;
         rep_line = current_line_number();
         rep_stmt = statement_number(p);
+        int in_then = then_part;
+        then_part = 0;
         execute_statement();
+        if (!in_then) cost_us += STATEMENT_US;   // (THEN's part is IF's)
+        pace();
         first = 0;
         if (reset_requested) {
             reset_requested = 0;

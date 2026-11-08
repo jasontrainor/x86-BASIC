@@ -51,6 +51,15 @@ void plat_init(void) {
     __asm__ __volatile__ ("int $0x10" : : "a" (0x0013) : "cc", "memory");
     enter_unreal();
     set_palette();
+    // Put the timer (PIT channel 0) in mode 2, counting down once per
+    // tick, at the same rate as the BIOS set (divisor 65536, 18.2Hz), so
+    // that plat_timer_ms() can read how far through a tick it is. (The
+    // BIOS's mode 3 counts down twice per tick, which can't be read.)
+    __asm__ __volatile__ ("cli");
+    outb(0x43, 0x34);                     // channel 0, low then high byte, mode 2
+    outb(0x40, 0);
+    outb(0x40, 0);
+    __asm__ __volatile__ ("sti");
 }
 
 void plat_draw_cell(int col, int row, const unsigned char *bits, int ink, int paper) {
@@ -133,8 +142,20 @@ static unsigned int bios_ticks(void) {
     return t;
 }
 
+// Milliseconds: whole ticks (54.925ms each) plus how far the PIT has
+// counted through the current one (1193182 counts a second).
 unsigned long plat_timer_ms(void) {
-    return bios_ticks() * 55UL;
+    unsigned int ticks, count;
+    do {
+        ticks = bios_ticks();
+        __asm__ __volatile__ ("cli");
+        outb(0x43, 0x00);                 // latch channel 0's count
+        count = inb(0x40);
+        count |= inb(0x40) << 8;
+        __asm__ __volatile__ ("sti");
+    } while (bios_ticks() != ticks);      // a tick went by: try again
+    unsigned long into = (65536UL - (count ? count : 65536UL)) * 1000UL / 1193182UL;
+    return ticks * 54UL + ticks * 925UL / 1000UL + into;
 }
 
 // Wait for the given number of timer ticks (~55ms each). This is

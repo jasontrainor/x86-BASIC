@@ -47,6 +47,10 @@ static int cursor_on;
 static int flash_on;              // FLASH cells show swapped colours
 static unsigned long flash_time;
 static int scr_ct = 1;            // scrolls left before "scroll?"
+
+// How long the printing and drawing done would have taken a Spectrum,
+// in microseconds (basic.c holds programs back to match).
+unsigned long screen_cost_us;
 static int scroll_refused;
 
 static int top_of_lower(void) { return SCREEN_ROWS - lower_size; }
@@ -148,6 +152,7 @@ static void put_cell(int c, int r, char ch, const struct colours *col) {
     }
     attrs[r][c] = cell_attr(col, attrs[r][c]);
     draw(c, r);
+    screen_cost_us += 300;
 }
 
 void lower_put(int col, int row, char ch) {
@@ -156,6 +161,7 @@ void lower_put(int col, int row, char ch) {
 
 // Scroll screen rows [from, to) up by one, blanking the last in attr a.
 static void scroll_rows(int from, int to, unsigned char a) {
+    screen_cost_us += 700 * (to - from);
     if (to - from > 1) {
         memmove(bitmap[from * 8], bitmap[(from + 1) * 8], (to - from - 1) * 8 * SCREEN_COLS);
         memmove(attrs[from], attrs[from + 1], (to - from - 1) * SCREEN_COLS);
@@ -274,6 +280,7 @@ void clear_screen(void) {
     TRACE("[CLS]\n", 0, 0);
     memset(bitmap, 0, sizeof(bitmap));
     memset(attrs, upper.colour.attr, sizeof(attrs));
+    screen_cost_us += 15000;
     lower_size = 2;
     clear_lower();
     draw_rows(0, SCREEN_ROWS);
@@ -424,6 +431,7 @@ static void set_pixel(int x, int y) {
     unsigned char *a = &attrs[py >> 3][x >> 3];
     *a = cell_attr(&upper.colour, *a);
     dirty[py >> 3][x >> 3] = 1;
+    screen_cost_us += 100;
 }
 
 void plot(int x, int y) {
