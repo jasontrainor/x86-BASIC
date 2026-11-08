@@ -5,8 +5,9 @@
 
 Builds a copy of the disk image with the listing on its FAT partition
 (from the kernels in build/, so run make first: `make run-listing` does),
-boots it, types LOAD "GAME.BAS" and RUN, waits, saves the screen as a
-PNG and prints the text on it. The listing needs a DOS 8.3 name.
+boots it, types LOAD "GAME.BAS" and RUN (on the Apple-style machines,
+--machine a2fp, a2int or a1basic: RUN GAME.BAS), waits, saves the screen
+as a PNG and prints the text on it. The listing needs a DOS 8.3 name.
 """
 import argparse
 import os
@@ -18,6 +19,23 @@ import time
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, os.path.join(ROOT, 'tests'))
 import qemu_smoke as q
+import apple_screen
+
+# The Apple-style machines: the prompt each shows when it's ready.
+APPLE_PROMPTS = {'a2fp': ']', 'a2int': '>', 'a1basic': '>'}
+
+
+def apple_text(mon, tmp):
+    path = os.path.join(tmp, 'apple.ppm')
+    if os.path.exists(path):
+        os.unlink(path)
+    mon.qmp('screendump', filename=path)
+    for _ in range(50):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            break
+        time.sleep(0.05)
+    s = apple_screen.Screen(path)
+    return s.text() if s.w >= 560 else ''
 
 
 def main():
@@ -40,15 +58,16 @@ def main():
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             mon = q.Monitor(mon_path)
+            apple = APPLE_PROMPTS.get(a.machine)
             deadline = time.time() + 30
-            while not q.ready(mon, tmp):
+            while not (apple in apple_text(mon, tmp) if apple else q.ready(mon, tmp)):
                 if time.time() > deadline:
                     sys.exit('the image did not start')
                 time.sleep(0.2)
-            q.type_keys(mon, 'LOAD "%s"\nRUN\n' % name)
+            q.type_keys(mon, ('RUN %s\n' if apple else 'LOAD "%s"\nRUN\n') % name)
             time.sleep(a.wait)
             mon.qmp('screendump', filename=os.path.abspath(out), format='png')
-            print(q.screen_text(mon, tmp))
+            print(apple_text(mon, tmp) if apple else q.screen_text(mon, tmp))
             print('screenshot: ' + out)
         finally:
             proc.kill()
