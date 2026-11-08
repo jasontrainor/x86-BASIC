@@ -134,6 +134,20 @@ void apple_vlin(int y1, int y2, int x);
 int  apple_scrn(int x, int y);
 
 /* ------------------------------------------------------------------------
+ * High resolution (hires.c): 280x192 dots, HCOLOR 0-7, on the page zero
+ * page ($E6) says; shapes from the table at $E8-$E9.
+ * --------------------------------------------------------------------- */
+
+void apple_hgr(int page2);           // HGR (page 1, mixed) or HGR2 (page 2), cleared
+void apple_hclear(int fill);         // the page black, or (fill) in HCOLOR
+void apple_hcolor(int c);
+void apple_hplot(int x, int y);      // x 0-279, y 0-191 (callers check)
+void apple_hplot_to(int x, int y);   // a line from the last point
+void apple_rot(int r);
+void apple_scale(int s);
+int  apple_draw(int n, int x, int y, int xor);   // 0 if there's no shape n
+
+/* ------------------------------------------------------------------------
  * CALL (calls.c): the firmware routines BASIC programs call for the
  * screen, done here. Returns 0 if addr isn't one of them (it's machine
  * code, which isn't run).

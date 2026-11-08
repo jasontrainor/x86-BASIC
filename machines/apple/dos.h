@@ -41,4 +41,8 @@ void dos_init(const struct dos_basic *basic, const char *folder);
 int dos_command(const char *line, int direct);
 const char *dos_message(int error);
 
+// A character a program prints, while a text file is open for writing
+// (OPEN, WRITE): it goes to the file, and this returns 1.
+int dos_write_char(int c);
+
 #endif

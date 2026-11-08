@@ -158,6 +158,11 @@ static int load(const char *name) {
     return basic->enter(dos_buf, len);
 }
 
+int dos_write_char(int c) {
+    (void)c;
+    return 0;
+}
+
 int dos_command(const char *line, int direct) {
     const char *r;
     char name[32];

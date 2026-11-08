@@ -94,7 +94,7 @@ def run(mode):
     return good
 
 
-def run_basic(mode, machine, typed, want):
+def run_basic(mode, machine, prompt, typed, want):
     """Boot an image with just this BASIC machine, type a line, and look
     for what it should print."""
     if mode.startswith('uefi') and not q.ovmf():
@@ -108,7 +108,7 @@ def run_basic(mode, machine, typed, want):
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             mon = q.Monitor(mon_path)
-            ok = wait_text(mon, tmp, '>', seconds=60) is not None
+            ok = wait_text(mon, tmp, prompt, seconds=60) is not None
             if ok:
                 q.type_keys(mon, typed)
                 ok = wait_text(mon, tmp, want) is not None
@@ -122,8 +122,9 @@ def run_basic(mode, machine, typed, want):
 
 
 BASICS = [
-    ('a2int', 'PRINT 6*7\nGR\nCOLOR=3:PLOT 1,1\n', '42'),
-    ('a1basic', 'PRINT 6*7\n', '42'),
+    ('a2int', '>', 'PRINT 6*7\nGR\nCOLOR=3:PLOT 1,1\n', '42'),
+    ('a1basic', '>', 'PRINT 6*7\n', '42'),
+    ('a2fp', ']', 'PRINT 1/3\nHGR\nHPLOT 0,0 TO 279,191\n', '.333333333'),
 ]
 
 

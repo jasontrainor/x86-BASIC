@@ -581,5 +581,53 @@ check "a1 terminal io"    "PRINT PEEK(-12271)${NL}POKE -12270,65:POKE -12270,141
 acheck "a1 screen"        "$(for i in $(seq 1 30); do printf 'PRINT %d\n' $i; done)${NL}" "${NL}>PRINT 30${NL}30${NL}" "!PRINT 10${NL}"
 BIN=tests/build/basic_host
 
+# --- FP BASIC (machines/a2fp/) ---------------------------------------------
+host_machine a2fp
+BIN=tests/build/a2fp_host
+ABIN=tests/build/a2fp_host
+B1='[TONE 1000 100]'
+check "fp numbers"        "PRINT 1/3;\" \";2/3;\" \";1E9;\" \";.001;\" \";.01;\" \";123456789;\" \";-.5;\" \";10/3${NL}" "${NL}.333333333 .666666667 1E+09 1E-03 .01 123456789 -.5 3.33333333${NL}"
+check "fp more numbers"   "PRINT 2^10;\" \";-2^2;\" \";2^-1;\" \";1.5E-5;\" \";1234567891;\" \";1E38*10${NL}" "${NL}1024 -4 .5 1.5E-05 1.23456789E+09 " "?OVERFLOW ERROR${NL}"
+check "fp functions"      "PRINT SQR(2);\" \";INT(-3.7);\" \";ABS(-2);\" \";SGN(-5);\" \";ATN(1)*4;\" \";LOG(EXP(1));\" \";SIN(0)${NL}" "${NL}1.41421356 -4 2 -1 3.14159265 1 0${NL}"
+check "fp strings"        "A\$=\"HELLO\":PRINT LEFT\$(A\$,2);MID\$(A\$,2,3);RIGHT\$(A\$,2);LEN(A\$);ASC(A\$);CHR\$(65);STR\$(12.5);VAL(\"3.5E2X\")${NL}PRINT A\$+\" \"+A\$, A\$<\"HELP\", A\$=\"HELLO\"${NL}" "${NL}HEELLLO572A12.5350${NL}" "${NL}HELLO HELLO     1               1${NL}"
+check "fp string errors"  "A\$=\"X\":FOR I=1 TO 9:A\$=A\$+A\$:NEXT${NL}PRINT ASC(\"\")${NL}A=\"X\"${NL}PRINT MID\$(\"ABC\",0)${NL}" "?STRING TOO LONG ERROR${NL}" "PRINT ASC(\"\")${NL}${B1}?ILLEGAL QUANTITY ERROR" "A=\"X\"${NL}${B1}?TYPE MISMATCH ERROR" "MID\$(\"ABC\",0)${NL}${B1}?ILLEGAL QUANTITY ERROR"
+check "fp program list"   "20 PRINT:PRINT \"DONE\"${NL}10 for i=1to 3:print i;:next${NL}RUN${NL}LIST${NL}LIST 20${NL}" "${NL}123${NL}DONE${NL}" "LIST${NL}10  FOR I = 1 TO 3: PRINT I;: NEXT ${NL}20  PRINT : PRINT \"DONE\"${NL}]LIST 20${NL}20  PRINT"
+check "fp two letters"    "SCORE=5${NL}SC=4:SCALP=7:PRINT SC${NL}TOTAL=3${NL}" "SCORE=5${NL}${B1}?SYNTAX ERROR${NL}" "${NL}7${NL}" "TOTAL=3${NL}${B1}?SYNTAX ERROR"
+check "fp a to b"         "A=1:B=3:FORI=ATOB:PRINTI;:NEXT${NL}" "${NL}123${NL}"
+check "fp errors in"      "10 PRINT 1${NL}20 PRINT 1+${NL}30 GOTO 99${NL}RUN${NL}20${NL}RUN${NL}" "${NL}1${NL}${B1}?SYNTAX ERROR IN 20${NL}" "${NL}1${NL}${B1}?UNDEF'D STATEMENT ERROR IN 30${NL}"
+check "fp if"             "IF 1=2 THEN PRINT \"X\":PRINT \"Y\"${NL}IF 1 THEN PRINT \"Z\":PRINT \"W\"${NL}10 IF 2>1 GOTO 30${NL}20 PRINT \"NO\"${NL}30 PRINT \"YES\"${NL}RUN${NL}" "!${NL}Y${NL}" "${NL}Z${NL}W${NL}" "${NL}YES${NL}" "!${NL}NO${NL}"
+check "fp input"          "10 INPUT \"NAME? \";N\$:INPUT A,B${NL}20 PRINT N\$;A+B${NL}RUN${NL}BOB${NL}X${NL}3${NL}4${NL}RUN${NL}\"SMITH, J\"${NL}1,2,3${NL}" "NAME? BOB${NL}?X${NL}?REENTER${NL}?3${NL}??4${NL}BOB7${NL}" "?1,2,3${NL}?EXTRA IGNORED${NL}SMITH, J3${NL}"
+check "fp input direct"   "INPUT A${NL}" "${B1}?ILLEGAL DIRECT ERROR${NL}"
+check "fp get"            "10 GET K\$:GET N:PRINT K\$;N*2${NL}RUN${NL}Q4" "${NL}Q8${NL}"
+check "fp read data"      "10 READ A,B\$,C:PRINT A;B\$;C:RESTORE:READ D:PRINT D:READ E\$,F,G\$:PRINT G\$;F:READ H${NL}20 DATA 1, HELLO WORLD ,3${NL}30 DATA \"QUOTED, COMMA\"${NL}RUN${NL}" "${NL}1HELLO WORLD3${NL}1${NL}QUOTED, COMMA3${NL}${B1}?OUT OF DATA ERROR IN 10${NL}"
+check "fp read errors"    "10 READ A:PRINT A${NL}20 DATA ABC${NL}RUN${NL}" "?SYNTAX ERROR IN 20${NL}"
+check "fp def fn"         "10 DEF FN SQ(X)=X*X+Y:Y=1:X=9:PRINT FN SQ(5);X${NL}RUN${NL}PRINT FN Q(1)${NL}" "${NL}269${NL}" "${B1}?UNDEF'D FUNCTION ERROR"
+check "fp on goto"        "10 ON 2 GOTO 20,30:PRINT \"FELL\":END${NL}20 PRINT \"TWENTY\":END${NL}30 PRINT \"THIRTY\":ON 5 GOSUB 20:PRINT \"ON\"${NL}RUN${NL}" "${NL}THIRTY${NL}ON${NL}" "!${NL}TWENTY"
+check "fp onerr resume"   "10 ONERR GOTO 100${NL}20 X=0:PRINT 1/X${NL}30 PRINT \"RESUMED\":END${NL}100 PRINT \"ERR\";PEEK(222);\" LINE\";PEEK(218)+256*PEEK(219):IF X=0 THEN X=1:RESUME${NL}RUN${NL}" "${NL}ERR133 LINE20${NL}1${NL}RESUMED${NL}"
+check "fp onerr off"      "10 ONERR GOTO 100${NL}20 POKE 216,0:PRINT 1/0${NL}100 PRINT \"CAUGHT\"${NL}RUN${NL}" "?DIVISION BY ZERO ERROR IN 20" "!${NL}CAUGHT"
+check "fp integers"       "A%=-3.7:PRINT A%${NL}B%=40000${NL}A%=7/2:PRINT A%*2${NL}" "${NL}-4${NL}" "${B1}?ILLEGAL QUANTITY ERROR" "${NL}6${NL}"
+check "fp arrays"         "DIM A(3,3):A(2,3)=5:PRINT A(2,3)+B(10)${NL}PRINT B(11)${NL}DIM A(2)${NL}DIM N\$(2):N\$(1)=\"X\":N\$(2)=N\$(1)+\"Y\":PRINT N\$(2)${NL}PRINT A(1)${NL}" "${NL}5${NL}" "PRINT B(11)${NL}${B1}?BAD SUBSCRIPT ERROR" "?REDIM'D ARRAY ERROR" "${NL}XY${NL}" "PRINT A(1)${NL}${B1}?BAD SUBSCRIPT ERROR"
+check "fp gosub"          "10 GOSUB 20:PRINT \"B\":END${NL}20 PRINT \"A\":RETURN${NL}RUN${NL}RETURN${NL}NEXT${NL}" "${NL}A${NL}B${NL}" "RETURN${NL}${B1}?RETURN WITHOUT GOSUB ERROR" "NEXT${NL}${B1}?NEXT WITHOUT FOR ERROR"
+check "fp for loops"      "FOR I=1 TO 3:FOR J=1 TO 2:PRINT I*J;:NEXT J,I${NL}FOR I=5 TO 1:PRINT \"ONCE\":NEXT:PRINT I${NL}FOR I=1 TO 2 STEP .5:PRINT I;\" \";:NEXT${NL}" "${NL}122436${NL}" "${NL}ONCE${NL}6${NL}" "${NL}1 1.5 2 ${NL}"
+check "fp break cont"     "10 X=X+1:IF X<30000 THEN 10${NL}20 PRINT \"DONE\"${NL}RUN${NL}${CC}PRINT X>0${NL}CONT${NL}" "${NL}BREAK IN 10${NL}]PRINT X>0${NL}1${NL}]CONT${NL}DONE${NL}"
+check "fp stop"           "10 PRINT 1:STOP:PRINT 2${NL}RUN${NL}CONT${NL}CONT${NL}" "${NL}1${NL}BREAK IN 10${NL}]CONT${NL}2${NL}]CONT${NL}${B1}?CAN'T CONTINUE ERROR"
+check "fp clear new"      "10 PRINT 1${NL}A=5:CLEAR:PRINT A${NL}NEW${NL}LIST${NL}" "CLEAR:PRINT A${NL}0${NL}" "NEW${NL}]LIST${NL}]"
+check "fp tab spc pos"    "PRINT \"A\";TAB(5);\"B\";SPC(3);\"C\";POS(0)${NL}PRINT 1,2,3,4${NL}" "${NL}A   B   C9${NL}" "${NL}1               2               3${NL}4${NL}"
+check "fp del trace"      "10 REM A${NL}20 REM B${NL}30 PRINT 3${NL}DEL 10,20${NL}LIST${NL}TRACE${NL}RUN${NL}" "LIST${NL}30  PRINT 3${NL}]" "#30 3${NL}"
+check "fp question mark"  "?\"HI\"${NL}10 ?1${NL}LIST${NL}" "${NL}HI${NL}" "${NL}10  PRINT 1${NL}"
+check "fp rnd"            "FOR I=1 TO 50:R=RND(1):IF R<0 OR R>=1 THEN PRINT \"BAD\":NEXT${NL}PRINT \"OK\";RND(0)=RND(0)${NL}NEXT${NL}" "${NL}OK1${NL}" "!${NL}BAD"
+check "fp peek poke"      "POKE 768,200:PRINT PEEK(768);PEEK(-16384+0)>=0${NL}POKE 768,256${NL}" "${NL}2001${NL}" "?ILLEGAL QUANTITY ERROR"
+check "fp save load"      "10 PRINT \"SAVED\"${NL}SAVE HELLO${NL}NEW${NL}LOAD HELLO${NL}RUN${NL}CATALOG${NL}RUN NOPE${NL}" "${NL}SAVED${NL}" " A 002 HELLO${NL}" "FILE NOT FOUND${NL}"
+check "fp lower case"     "print \"Hi\";len(\"ab\")${NL}" "${NL}Hi2${NL}"
+check "fp wait"           "10 WAIT -16384,128:PRINT \"KEY\"${NL}RUN${NL}X" "${NL}KEY${NL}"
+acheck "fp home vtab"     "HOME:VTAB 5:HTAB 10:PRINT \"HERE\":INVERSE:PRINT \"INV\":NORMAL${NL}" "${NL}${NL}${NL}${NL}         HERE${NL}[INV]${NL}"
+acheck "fp 80 columns"    "PR#3${NL}PRINT \"EIGHTY\";TAB(70);\"END\"${NL}" --80 "${NL}EIGHTY                                                               END${NL}"
+acolour "fp hgr"          "HGR:HCOLOR=3:HPLOT 0,0 TO 279,0:HCOLOR=1:HPLOT 10,50 TO 100,50:HCOLOR=5:HPLOT 10,100 TO 100,100${NL}" 50,0=15 100,50=12 100,100=9 140,30=0 50,170=0
+acolour "fp hgr2"         "HGR2:HCOLOR=6:HPLOT 0,180 TO 279,180${NL}" 100,180=6
+acolour "fp gr"           "GR:COLOR=13:PLOT 1,1:HLIN 0,39 AT 30${NL}" 20,5=13 300,122=13 300,10=0
+acolour "fp draw"         "HGR:POKE 768,1:POKE 769,0:POKE 770,4:POKE 771,0:POKE 772,45:POKE 773,0:POKE 232,0:POKE 233,3${NL}HCOLOR=3:SCALE=10:DRAW 1 AT 200,150:ROT=16:DRAW 1 AT 100,10${NL}" 400,150=15 436,150=15 444,150=0 200,25=3 200,40=0
+acolour "fp hgr clear"    "HGR:HCOLOR=6:CALL 62454${NL}" 100,100=6
+BIN=tests/build/basic_host
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

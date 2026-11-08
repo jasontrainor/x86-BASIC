@@ -6,7 +6,7 @@ LD = ld
 # pair of kernels, on top of the shared code in core/: build/NAME/kernel.bin
 # for the BIOS and build/NAME/BOOTX64.EFI for UEFI. The chooser
 # (machines/chooser/) is built the same way.
-MACHINES = spectrum a2int a1basic
+MACHINES = spectrum a2int a1basic a2fp
 # (make run-listing's)
 MACHINE ?= spectrum
 

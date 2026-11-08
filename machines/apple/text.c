@@ -537,6 +537,8 @@ restart:
             buf[n++] = k;
             apple_cout(k);
             if (n == cap - 8) apple_bell();   // nearly full
+        } else if (k == 3) {              // Ctrl+C: kept (FP BASIC's INPUT stops on it)
+            buf[n++] = k;
         }
         if (n >= cap - 1) {               // full: as the Apple does, start again
             apple_cout('\\');
