@@ -6,17 +6,7 @@
 void kernel_start(void) {
     plat_init();
     screen_init();   // Spectrum defaults: black ink on white paper, white border
-
-    // Spectrum-style boot screen: blank, with a banner at the bottom left.
-    // (Our own name rather than a real company's copyright notice.)
-    // The first key clears it.
-    set_cursor(0, SCREEN_ROWS - 1);
-    print_string("x86 BASIC for PCs");
-    set_cursor(0, 0);
-    unget_key(get_key());
-    clear_screen();
-
-    basic_run();
+    basic_run();     // (which shows the banner at the bottom, as on the Spectrum)
 }
 
 #ifdef BIOS_KERNEL

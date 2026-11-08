@@ -51,26 +51,30 @@ KEYS = {
 RESET = None
 SESSION = [
     ('10 FOR I=1 TO 3\n20 PRINT "LOOP ";I*11\n30 NEXT I\n40 PRINT "DONE"\nRUN\n',
-     ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE']),
+     ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE', '0 OK, 40:1']),
     ('IF 1<>2 THEN PRINT "NOT EQUAL"\n', ['NOT EQUAL']),
     ('TOTAL=0: FOR N=1 TO 4: TOTAL=TOTAL+N: NEXT N: PRINT "SUM ";TOTAL\n', ['SUM 10']),
-    ('PRINT 1/0\n', ['ERROR: DIVISION BY ZERO']),
+    ('PRINT 1/0\n', ['6 Number too big, 0:1']),
     ('PRINT 1/3;" ";SQR 2\n', ['0.33333333 1.4142136']),
     ('BEEP\nPRINT 6*7\n', ['\n42']),   # BEEP must return (timer-based)
     ('INK 1: BORDER 2: PRINT 6*9: INK 0: BORDER 7\n', ['\n54']),
     ('A$="HELLO": DIM N(3): N(2)=7: PRINT A$(2 TO 4);LEN A$;N(2)\n', ['ELL57']),
     ('NEW\n10 INPUT "AGE";A\n20 GOSUB 100: STOP\n100 PRINT "DOUBLE ";A*2: RETURN\nRUN\n21\n',
-     ['DOUBLE 42', 'STOPPED IN LINE 20']),
+     ['DOUBLE 42', '9 STOP statement, 20:2']),
     ('CLS: PLOT 0,0: DRAW 50,50: CIRCLE 100,100,20: PRINT POINT (25,25);POINT (120,100)\n',
      ['11']),
     ('CLS: PRINT "lower case: abc xyz"\n', ['lower case: abc xyz']),
-    # Line editor: cursor keys, Home, Delete, history.
-    ('PRINT 1X2\x02\x02\x7f\x01\x06\x06\x06\x06\x06\x06"=";\x05\n', ['PRINT "=";12\n=12']),
-    ('PRINT 6*8\n\x10\n', ['48\nPRINT 6*8\n48']),
+    # Line editor (in the lower screen): cursor keys, Home, Delete, history.
+    ('PRINT 1X2\x02\x02\x7f\x01\x06\x06\x06\x06\x06\x06"=";\x05\n', ['\n=12']),
+    ('PRINT 6*8\n\x10\n', ['48\n48']),
+    # INPUT and reports in the lower screen; the automatic listing.
+    ('NEW\n10 PRINT "LISTED"\n', ['  10>PRINT "LISTED"']),
+    ('INPUT "WHO? ";N$\n', ['WHO? ""']),
+    ('ME\n', ['0 OK, 0:1']),
     ('NEW\n10 PRINT "SAVED ";6*7\nSAVE "keep"\nCAT\n', ['keep            ']),
     (RESET, []),                      # reboot: the program must still be there
     ('LOAD "KEEP"\nRUN\n', ['SAVED 42']),
-    ('NEW\n10 GOTO 10\nRUN\n\x1b', ['BREAK IN LINE 10']),
+    ('NEW\n10 GOTO 10\nRUN\n\x1b', ['L BREAK into program, 10:1']),
 ]
 
 # Use KVM when available. Besides being faster, it runs the code on the

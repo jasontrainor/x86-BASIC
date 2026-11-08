@@ -39,7 +39,7 @@ static unsigned int checksum(const unsigned char *data, int len) {
 // Read the directory; a disk that has never been saved to has none yet,
 // which is the same as an empty one.
 static const char *read_dir(void) {
-    if (plat_disk_read(DIR_LBA, dir) < 0) return "DISK ERROR";
+    if (plat_disk_read(DIR_LBA, dir) < 0) return "R Disk error";
     if (memcmp(dir, MAGIC, 16) != 0) {
         memset(dir, 0, sizeof(dir));
         memcpy(dir, MAGIC, 16);
@@ -64,7 +64,7 @@ static int find(const char *name) {
 
 static const char *check_name(const char *name) {
     int n = strlen(name);
-    if (n == 0 || n > STORE_NAME_LEN) return "NAME MUST BE 1-15 CHARACTERS";
+    if (n == 0 || n > STORE_NAME_LEN) return "F Invalid file name";
     return 0;
 }
 
@@ -75,14 +75,14 @@ const char *storage_save(const char *name, const unsigned char *data, int len, i
     int slot = find(name);
     if (slot < 0) {
         for (slot = 0; slot < STORE_SLOTS && ENTRY(slot)[0]; slot++) {}
-        if (slot == STORE_SLOTS) return "DISK FULL";
+        if (slot == STORE_SLOTS) return "R Disk full";
     }
     unsigned char sector[512];
     for (int i = 0; i * 512 < len; i++) {
         int n = len - i * 512 < 512 ? len - i * 512 : 512;
         memset(sector, 0, sizeof(sector));
         memcpy(sector, data + i * 512, n);
-        if (plat_disk_write(SLOT_LBA(slot) + i, sector) < 0) return "DISK ERROR";
+        if (plat_disk_write(SLOT_LBA(slot) + i, sector) < 0) return "R Disk error";
     }
     unsigned char *e = ENTRY(slot);
     memset(e, 0, 32);
@@ -90,7 +90,7 @@ const char *storage_save(const char *name, const unsigned char *data, int len, i
     put16(e + 16, len);
     put16(e + 18, autorun);
     put32(e + 20, checksum(data, len));
-    if (plat_disk_write(DIR_LBA, dir) < 0) return "DISK ERROR";
+    if (plat_disk_write(DIR_LBA, dir) < 0) return "R Disk error";
     return 0;
 }
 
@@ -99,16 +99,16 @@ const char *storage_load(const char *name, unsigned char *data, int cap, int *le
     if (!err) err = read_dir();
     if (err) return err;
     int slot = find(name);
-    if (slot < 0) return "PROGRAM NOT FOUND";
+    if (slot < 0) return "R Program not found";
     unsigned char *e = ENTRY(slot);
     int n = get16(e + 16);
-    if (n > cap || n > STORE_SLOT_SECTORS * 512) return "BAD PROGRAM FILE";
+    if (n > cap || n > STORE_SLOT_SECTORS * 512) return "R Bad program file";
     unsigned char sector[512];
     for (int i = 0; i * 512 < n; i++) {
-        if (plat_disk_read(SLOT_LBA(slot) + i, sector) < 0) return "DISK ERROR";
+        if (plat_disk_read(SLOT_LBA(slot) + i, sector) < 0) return "R Disk error";
         memcpy(data + i * 512, sector, n - i * 512 < 512 ? n - i * 512 : 512);
     }
-    if (checksum(data, n) != get32(e + 20)) return "BAD PROGRAM FILE";
+    if (checksum(data, n) != get32(e + 20)) return "R Bad program file";
     *len = n;
     *autorun = get16(e + 18);
     return 0;
@@ -119,9 +119,9 @@ const char *storage_erase(const char *name) {
     if (!err) err = read_dir();
     if (err) return err;
     int slot = find(name);
-    if (slot < 0) return "PROGRAM NOT FOUND";
+    if (slot < 0) return "R Program not found";
     memset(ENTRY(slot), 0, 32);
-    if (plat_disk_write(DIR_LBA, dir) < 0) return "DISK ERROR";
+    if (plat_disk_write(DIR_LBA, dir) < 0) return "R Disk error";
     return 0;
 }
 

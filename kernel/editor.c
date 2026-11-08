@@ -1,13 +1,15 @@
 /*
- * The line editor, used for the command line and INPUT.
+ * The line editor, used for the command line and INPUT. It edits in the
+ * lower screen, from its print position, which must be in use
+ * (use_lower(1)).
  *
  *   Left/Right, Home/End   move the cursor
  *   Backspace, Delete      delete before / at the cursor
  *   Up/Down                recall earlier lines (history)
  *   Enter                  finish;  Esc: give up (BREAK)
  *
- * Characters are inserted at the cursor. The line wraps across screen
- * rows and scrolls the screen if it runs off the bottom.
+ * Characters are inserted at the cursor. The line wraps across rows, and
+ * the lower screen grows upwards to hold it.
  */
 #include "editor.h"
 #include "screen.h"
@@ -16,7 +18,7 @@
 #include "mem.h"
 
 #define HISTORY 16
-#define HIST_LEN 256
+#define HIST_LEN 1024
 HIGH_MEM static char history[HISTORY][HIST_LEN];
 static int hist_count;            // entries used
 static int hist_newest;           // index of the most recent entry
@@ -29,8 +31,8 @@ static void remember(const char *line) {
     if (hist_count < HISTORY) hist_count++;
 }
 
-// Editing state: the text, and where on screen it starts (a cell number,
-// row * SCREEN_COLS + col; it moves up when the screen scrolls).
+// Editing state: the text, and where in the lower screen it starts (a
+// cell number, row * SCREEN_COLS + col).
 static char *text;
 static int len, pos, start;
 
@@ -39,30 +41,28 @@ static void place(int i, int *col, int *row) {
     *row = (start + i) / SCREEN_COLS;
 }
 
-// Scroll until character i (or the cell after the text) is on screen.
-static void make_visible(int i) {
-    while ((start + i) / SCREEN_COLS >= SCREEN_ROWS) {
-        scroll_up();
-        start -= SCREEN_COLS;
-    }
+// Make the lower screen big enough for character i (or the cell after
+// the text).
+static void make_room(int i) {
+    lower_need_rows((start + i) / SCREEN_COLS + 1);
 }
 
 // Redraw from character i to the end, blanking up to old_len.
 static void redraw(int i, int old_len) {
     int end = len > old_len ? len : old_len;
-    make_visible(end);
+    make_room(end);
     for (; i < end; i++) {
         int col, row;
         place(i, &col, &row);
-        put_char_at(col, row, i < len ? text[i] : ' ');
+        lower_put(col, row, i < len ? text[i] : ' ');
     }
 }
 
 static void move_cursor(void) {
     int col, row;
-    make_visible(pos);
+    make_room(pos);
     place(pos, &col, &row);
-    place_cursor(col, row);
+    set_cursor(col, row);
 }
 
 // Replace the whole text (for history), redrawing it.
@@ -74,16 +74,19 @@ static void replace_text(const char *s, int cap) {
     redraw(0, old_len);
 }
 
-int edit_line(char *buf, int cap, int use_history) {
+int edit_line(char *buf, int cap, int use_history, int cursor) {
     text = buf;
-    len = strlen(buf);
-    pos = len;
-    // (A cursor just past the last column means the next row.)
     start = cursor_row() * SCREEN_COLS + cursor_col();
+    // It must fit on the screen, with room for the cursor after it.
+    int room = SCREEN_ROWS * SCREEN_COLS - start - 1;
+    if (cap > room + 1) cap = room + 1;
+    buf[cap - 1] = '\0';
+    len = strlen(buf);
+    pos = cursor >= 0 && cursor < len ? cursor : len;
     redraw(0, 0);
 
     int browsing = -1;                    // history entries back, -1: none
-    char draft[HIST_LEN];                 // the line being typed, while browsing
+    static char draft[HIST_LEN];          // the line being typed, while browsing
     int result = 0;
     for (;;) {
         move_cursor();
@@ -133,11 +136,11 @@ int edit_line(char *buf, int cap, int use_history) {
         }
     }
 
-    // Leave the cursor on the line after the text.
+    // Leave the print position just after the text.
     pos = len;
     move_cursor();
     transcript(text);
-    print_char('\n');
+    transcript("\n");
     if (result == 0 && use_history) remember(text);
     return result;
 }

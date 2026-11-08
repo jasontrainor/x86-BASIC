@@ -35,7 +35,7 @@ enum {
     T_ERASE, T_EDIT, T_AT, T_TAB, T_LINE, T_AND, T_OR, T_NOT, T_PI, T_ABS,
     T_INT, T_SGN, T_SQR, T_SIN, T_COS, T_TAN, T_ATN, T_ASN, T_ACS, T_LN,
     T_EXP, T_RND, T_LEN, T_VAL, T_CODE, T_CHRS, T_STRS, T_INKEYS, T_POINT,
-    T_DEFFN, T_FN,
+    T_DEFFN, T_FN, T_FLASH, T_LPRINT, T_LLIST, T_COPY,
     T_LE, T_GE, T_NE,
     T_END_OF_TOKENS
 };
@@ -49,7 +49,7 @@ static const char *const token_names[] = {
     "ERASE", "EDIT", "AT", "TAB", "LINE", "AND", "OR", "NOT", "PI", "ABS",
     "INT", "SGN", "SQR", "SIN", "COS", "TAN", "ATN", "ASN", "ACS", "LN",
     "EXP", "RND", "LEN", "VAL", "CODE", "CHR$", "STR$", "INKEY$", "POINT",
-    "DEF FN", "FN",
+    "DEF FN", "FN", "FLASH", "LPRINT", "LLIST", "COPY",
     "<=", ">=", "<>",
 };
 _Static_assert(sizeof(token_names) / sizeof(token_names[0]) == T_END_OF_TOKENS - T_PRINT,
@@ -240,7 +240,7 @@ static void line_delete(int num) {
 static const char *line_store(int num, const unsigned char *text, int len) {
     int off = line_find(num);
     int old = (off < prog_len && line_num(off) == num) ? line_next(off) - off : 0;
-    if (prog_len - old + 3 + len > PROG_SIZE) return "PROGRAM FULL";
+    if (prog_len - old + 3 + len > PROG_SIZE) return "G No room for line";
     line_delete(num);
     memmove(prog + off + 3 + len, prog + off, prog_len - off);
     prog[off] = num & 0xFF;
@@ -263,6 +263,11 @@ int running;              // still going (cleared by END, STOP, errors)
 // First error raised while executing the current statement, or 0.
 // Once set, the parser stops consuming input and the statement is abandoned.
 const char *error_msg = 0;
+
+// The report shown when the program or command finishes (if there
+// wasn't an error), and whether to show one at all.
+const char *report_msg;
+int no_report;
 
 static void error(const char *msg) {
     if (!error_msg) error_msg = msg;
@@ -317,7 +322,7 @@ int pool_used;
 static char *pool_alloc(int len) {
     static char dummy[16];
     if (pool_used + len > POOL_SIZE) {
-        error("OUT OF MEMORY");
+        error("4 Out of memory");
         return len <= (int)sizeof(dummy) ? dummy : 0;
     }
     char *s = str_pool + pool_used;
@@ -339,13 +344,13 @@ static struct value expr();
 
 // Results that overflow become infinity (or NaN); report them.
 static double check(double v) {
-    if (!num_is_finite(v)) error("NUMBER TOO BIG");
+    if (!num_is_finite(v)) error("6 Number too big");
     return v;
 }
 
 static double expr_num() {
     struct value v = expr();
-    if (v.is_str) error("NUMBER EXPECTED");
+    if (v.is_str) error("C Nonsense in BASIC");
     return v.num;
 }
 
@@ -353,7 +358,7 @@ static double expr_num() {
 static int to_int(double v, int lo, int hi) {
     v = num_round(v);
     if (!(v >= lo && v <= hi)) {     // (also catches NaN)
-        error("INTEGER OUT OF RANGE");
+        error("B Integer out of range");
         return lo;
     }
     return (int)v;
@@ -453,7 +458,7 @@ static char *heap_alloc(unsigned int size, int is_array, int owner) {
     unsigned int need = sizeof(struct block) + size;
     if (heap_used + need > HEAP_SIZE) compact();
     if (heap_used + need > HEAP_SIZE) {
-        error("OUT OF MEMORY");
+        error("4 Out of memory");
         return 0;
     }
     struct block *b = (struct block *)(heap + heap_used);
@@ -471,14 +476,14 @@ static char *heap_alloc(unsigned int size, int is_array, int owner) {
 static int read_name(char *name, int *is_str) {
     skip_space();
     if (!isalpha(*p)) {
-        error("BAD VARIABLE NAME");
+        error("C Nonsense in BASIC");
         return 0;
     }
     int n = 0;
     for (;;) {
         while (isalnum(*p)) {
             if (n == NAME_LEN - 1) {
-                error("NAME TOO LONG");
+                error("C Nonsense in BASIC");
                 return 0;
             }
             name[n++] = toupper(*p++);
@@ -507,13 +512,13 @@ static struct var *find_var(const char *name, int is_str, int create) {
     struct var *found = lookup_var(name, is_str);
     if (found) return found;
     if (!create) {
-        error("VARIABLE NOT FOUND");
+        error("2 Variable not found");
         return 0;
     }
     int i = 0;
     while (i < num_vars && vars[i].name[0]) i++;   // reuse a free slot
     if (i == MAX_VARS) {
-        error("OUT OF MEMORY");
+        error("4 Out of memory");
         return 0;
     }
     if (i == num_vars) num_vars++;
@@ -584,7 +589,7 @@ static int slice_spec(int len, int *from, int *to) {
     }
     if (error_msg) return 0;
     if (*from <= *to && (*from < 1 || *to > len)) {
-        error("SUBSCRIPT OUT OF RANGE");
+        error("3 Subscript wrong");
         return 0;
     }
     return 1;
@@ -597,20 +602,20 @@ static int element_index(struct array *a) {
     int idx = 0;
     for (int k = 0; k < a->ndims; k++) {
         if (k > 0 && !accept_char(',')) {
-            error("SUBSCRIPT OUT OF RANGE");     // too few subscripts
+            error("3 Subscript wrong");     // too few subscripts
             return -1;
         }
         double v = expr_num();
         if (error_msg) return -1;
         v = num_round(v);
         if (!(v >= 1 && v <= a->dims[k])) {
-            error("SUBSCRIPT OUT OF RANGE");
+            error("3 Subscript wrong");
             return -1;
         }
         idx = idx * a->dims[k] + (int)v - 1;
     }
     if (!accept_char(')')) {
-        error("SUBSCRIPT OUT OF RANGE");         // too many subscripts
+        error("3 Subscript wrong");         // too many subscripts
         return -1;
     }
     return idx;
@@ -629,7 +634,7 @@ static int string_array_part(struct array *a, char **ptr, int *len) {
     int idx = 0;
     for (int k = 0; k < last; k++) {
         if (k > 0 && !accept_char(',')) {
-            error("SUBSCRIPT OUT OF RANGE");
+            error("3 Subscript wrong");
             return 0;
         }
         int i = expr_int(1, a->dims[k]);
@@ -640,13 +645,13 @@ static int string_array_part(struct array *a, char **ptr, int *len) {
     *len = a->dims[last];
     if (last > 0 && accept_char(')')) return 1;   // a whole string
     if (last > 0 && !accept_char(',')) {
-        error("SUBSCRIPT OUT OF RANGE");
+        error("3 Subscript wrong");
         return 0;
     }
     int from, to;
     if (!slice_spec(*len, &from, &to)) return 0;
     if (!accept_char(')')) {
-        error("SUBSCRIPT OUT OF RANGE");
+        error("3 Subscript wrong");
         return 0;
     }
     *ptr += from - 1;
@@ -682,7 +687,7 @@ static int parse_lvalue(struct lvalue *lv) {
         if (*p == '(') {
             struct array *a = find_array(lv->name, 0);
             if (!a) {
-                error("VARIABLE NOT FOUND");
+                error("2 Variable not found");
                 return 0;
             }
             p++;
@@ -700,14 +705,14 @@ static int parse_lvalue(struct lvalue *lv) {
     lv->var = lookup_var(lv->name, 1);
     if (*p == '(') {                      // LET A$(2 TO 3)=...
         if (!lv->var) {
-            error("VARIABLE NOT FOUND");
+            error("2 Variable not found");
             return 0;
         }
         p++;
         int from, to;
         if (!slice_spec(lv->var->len, &from, &to)) return 0;
         if (!accept_char(')')) {
-            error("MISSING )");
+            error("C Nonsense in BASIC");
             return 0;
         }
         lv->fixed = lv->var->str + from - 1;
@@ -719,7 +724,7 @@ static int parse_lvalue(struct lvalue *lv) {
 static void store(struct lvalue *lv, struct value val) {
     if (error_msg) return;
     if (lv->is_str != val.is_str) {
-        error(lv->is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
+        error(lv->is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
         return;
     }
     if (!lv->is_str) {
@@ -771,7 +776,7 @@ int break_requested;      // Esc was seen by INKEY$ or INPUT
 static struct value factor();
 
 static double invalid_argument() {
-    error("INVALID ARGUMENT");
+    error("A Invalid argument");
     return 0;
 }
 
@@ -801,7 +806,7 @@ static double power(double x, double y) {
 // SIN X^2 is (SIN X)^2, and brackets are optional: SQR 2.
 static double num_arg() {
     struct value v = factor();
-    if (v.is_str) error("NUMBER EXPECTED");
+    if (v.is_str) error("C Nonsense in BASIC");
     return v.num;
 }
 
@@ -850,7 +855,7 @@ static struct value variable_value() {
     } else if (*p == '(') {
         struct array *a = find_array(name, 0);
         if (!a) {
-            error("VARIABLE NOT FOUND");
+            error("2 Variable not found");
             return num_value(0);
         }
         p++;
@@ -868,34 +873,46 @@ static struct value slice(struct value s) {
     p++;
     int from, to;
     if (!slice_spec(s.len, &from, &to)) return str_value("", 0);
-    expect_char(')', "MISSING )");
+    expect_char(')', "C Nonsense in BASIC");
     if (error_msg || from > to) return str_value("", 0);
     return str_value(s.str + from - 1, to - from + 1);
 }
 
 static struct value str_arg() {
     struct value v = factor();
-    if (!error_msg && !v.is_str) error("STRING EXPECTED");
+    if (!error_msg && !v.is_str) error("C Nonsense in BASIC");
     return v;
 }
 
 // VAL: evaluate a string as a numeric expression.
-static double val(struct value s) {
-    char *text = pool_alloc(s.len + 1);
-    unsigned char *tokens = (unsigned char *)pool_alloc(s.len + 2);
+/*
+ * Work out the text s (as typed, not tokenized) as an expression, for
+ * VAL and INPUT. Returns 0 if it isn't a valid expression (leaving
+ * error_msg set).
+ */
+static int eval_text(const char *str, int len, struct value *out) {
+    char *text = pool_alloc(len + 1);
+    unsigned char *tokens = (unsigned char *)pool_alloc(len + 2);
     if (error_msg) return 0;
-    memcpy(text, s.str, s.len);
-    text[s.len] = '\0';
-    if (tokenize(text, tokens, s.len + 2) < 0) return invalid_argument();
+    memcpy(text, str, len);
+    text[len] = '\0';
+    if (tokenize(text, tokens, len + 2) < 0) { error("C Nonsense in BASIC"); return 0; }
     char *saved = p;
     p = (char *)tokens;
-    double v = expr_num();
+    *out = expr();
     skip_space();
-    if (*p) error("INVALID ARGUMENT");
+    if (*p && !error_msg) error("C Nonsense in BASIC");
     p = saved;
-    return v;
+    return !error_msg;
 }
 
+// VAL: work out a string as a numeric expression.
+static double val(struct value s) {
+    struct value v;
+    if (!eval_text(s.str, s.len, &v)) return 0;
+    if (v.is_str) { error("C Nonsense in BASIC"); return 0; }
+    return v.num;
+}
 static struct value copy_to_pool(const char *s, int len) {
     char *d = pool_alloc(len);
     memcpy(d, s, len);
@@ -982,58 +999,58 @@ static struct value fn_call() {
     int is_str;
     if (!read_name(name, &is_str)) return num_value(0);
     if (fn_depth == MAX_FN_DEPTH) {
-        error("OUT OF MEMORY");
+        error("4 Out of memory");
         return num_value(0);
     }
     struct fn_frame *f = &fn_frames[fn_depth];
     // The arguments, worked out here (before the frame is in use).
     struct value args[MAX_PARAMS];
     int nargs = 0;
-    expect_char('(', "SYNTAX ERROR");
+    expect_char('(', "C Nonsense in BASIC");
     skip_space();
     if (*p != ')') {
         do {
-            if (nargs == MAX_PARAMS) { error("PARAMETER ERROR"); break; }
+            if (nargs == MAX_PARAMS) { error("Q Parameter error"); break; }
             args[nargs++] = expr();
         } while (!error_msg && accept_char(','));
     }
-    expect_char(')', "MISSING )");
+    expect_char(')', "C Nonsense in BASIC");
     if (error_msg) return num_value(0);
 
     char *saved = p;
     if (!find_def_fn(name, is_str)) {
         p = saved;
-        error("FN WITHOUT DEF");
+        error("P FN without DEF");
         return num_value(0);
     }
     // DEF FN F(A, B$)=expression
     f->count = 0;
-    expect_char('(', "SYNTAX ERROR");
+    expect_char('(', "C Nonsense in BASIC");
     skip_space();
     if (*p != ')') {
         do {
             int s;
-            if (f->count == MAX_PARAMS) { error("PARAMETER ERROR"); break; }
+            if (f->count == MAX_PARAMS) { error("Q Parameter error"); break; }
             if (!read_name(f->name[f->count], &s)) break;
             f->is_str[f->count] = s;
             if (f->count >= nargs || args[f->count].is_str != s) {
-                error("PARAMETER ERROR");
+                error("Q Parameter error");
                 break;
             }
             f->val[f->count] = args[f->count];
             f->count++;
         } while (accept_char(','));
     }
-    expect_char(')', "SYNTAX ERROR");
-    if (!error_msg && f->count != nargs) error("PARAMETER ERROR");
-    expect_char('=', "SYNTAX ERROR");
+    expect_char(')', "C Nonsense in BASIC");
+    if (!error_msg && f->count != nargs) error("Q Parameter error");
+    expect_char('=', "C Nonsense in BASIC");
     struct value v = num_value(0);
     if (!error_msg) {
         fn_depth++;
         v = expr();
         fn_depth--;
         if (!error_msg && v.is_str != is_str)
-            error(is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
+            error(is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
     }
     p = saved;
     return v;
@@ -1072,7 +1089,7 @@ static struct value primary() {
     } else if (c == '(') {
         p++;
         struct value v = expr();
-        expect_char(')', "MISSING )");
+        expect_char(')', "C Nonsense in BASIC");
         return v;
     } else if (c == T_PI) {
         p++;
@@ -1088,11 +1105,11 @@ static struct value primary() {
         return num_value(rnd());
     } else if (c == T_POINT) {             // POINT (x,y): 1 if ink there
         p++;
-        expect_char('(', "SYNTAX ERROR");
+        expect_char('(', "C Nonsense in BASIC");
         int x = expr_int(0, SCREEN_WIDTH - 1);
-        expect_char(',', "SYNTAX ERROR");
+        expect_char(',', "C Nonsense in BASIC");
         int y = expr_int(0, PLOT_HEIGHT - 1);
-        expect_char(')', "MISSING )");
+        expect_char(')', "C Nonsense in BASIC");
         return num_value(error_msg ? 0 : point(x, y));
     } else if (c == T_FN) {
         p++;
@@ -1100,7 +1117,7 @@ static struct value primary() {
     } else if (isalpha(c)) {
         return variable_value();
     }
-    error("SYNTAX ERROR");
+    error("C Nonsense in BASIC");
     return num_value(0);
 }
 
@@ -1109,7 +1126,7 @@ static struct value power_expr() {
     struct value v = factor();
     while (!error_msg && accept_char('^')) {
         double y = num_arg();
-        if (v.is_str) error("NUMBER EXPECTED");
+        if (v.is_str) error("C Nonsense in BASIC");
         if (!error_msg) v = num_value(power(v.num, y));
     }
     return v;
@@ -1119,7 +1136,7 @@ static struct value power_expr() {
 static struct value unary() {
     if (accept_char('-')) {
         struct value v = unary();
-        if (v.is_str) error("NUMBER EXPECTED");
+        if (v.is_str) error("C Nonsense in BASIC");
         return num_value(-v.num);
     }
     if (accept_char('+')) return unary();
@@ -1133,11 +1150,11 @@ static struct value term() {
         char op = *p++;
         struct value w = unary();
         if (error_msg) break;
-        if (v.is_str || w.is_str) { error("NUMBER EXPECTED"); break; }
+        if (v.is_str || w.is_str) { error("C Nonsense in BASIC"); break; }
         if (op == '*') {
             v.num = check(v.num * w.num);
         } else if (w.num == 0) {
-            error("DIVISION BY ZERO");
+            error("6 Number too big");
         } else {
             v.num = check(v.num / w.num);
         }
@@ -1154,11 +1171,11 @@ static struct value sum() {
         struct value w = term();
         if (error_msg) break;
         if (v.is_str != w.is_str || (v.is_str && op == '-')) {
-            error(v.is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
+            error(v.is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
             break;
         }
         if (v.is_str) {                    // concatenation
-            if (v.len + w.len > MAX_STR) { error("OUT OF MEMORY"); break; }
+            if (v.len + w.len > MAX_STR) { error("4 Out of memory"); break; }
             char *s = pool_alloc(v.len + w.len);
             if (error_msg) break;
             memcpy(s, v.str, v.len);
@@ -1193,7 +1210,7 @@ static struct value comparison() {
         struct value w = sum();
         if (error_msg) break;
         if (v.is_str != w.is_str) {
-            error(v.is_str ? "STRING EXPECTED" : "NUMBER EXPECTED");
+            error(v.is_str ? "C Nonsense in BASIC" : "C Nonsense in BASIC");
             break;
         }
         int c = compare(v, w);
@@ -1208,7 +1225,7 @@ static struct value comparison() {
 static struct value not_expr() {
     if (accept(T_NOT)) {
         struct value v = not_expr();
-        if (v.is_str) error("NUMBER EXPECTED");
+        if (v.is_str) error("C Nonsense in BASIC");
         return num_value(v.num == 0);
     }
     return comparison();
@@ -1220,7 +1237,7 @@ static struct value and_expr() {
     struct value v = not_expr();
     while (!error_msg && accept(T_AND)) {
         struct value w = not_expr();
-        if (w.is_str) { error("NUMBER EXPECTED"); break; }
+        if (w.is_str) { error("C Nonsense in BASIC"); break; }
         if (w.num == 0) v = v.is_str ? str_value("", 0) : num_value(0);
     }
     return v;
@@ -1230,7 +1247,7 @@ static struct value expr() {
     struct value v = and_expr();
     while (!error_msg && accept(T_OR)) {
         struct value w = and_expr();
-        if (v.is_str || w.is_str) { error("NUMBER EXPECTED"); break; }
+        if (v.is_str || w.is_str) { error("C Nonsense in BASIC"); break; }
         if (w.num != 0) v = num_value(1);
     }
     return v;
@@ -1293,7 +1310,7 @@ static void resume(int num, int k, int after) {
     if (num >= 0) {
         int off = line_find(num);
         if (off >= prog_len || line_num(off) != num) {
-            error("STATEMENT LOST");
+            error("N Statement lost");
             return;
         }
         cur_line = off;
@@ -1391,7 +1408,7 @@ static void go_to_line(int num) {
 static void st_let() {
     struct lvalue lv;
     if (!parse_lvalue(&lv)) return;
-    if (!accept_char('=')) { error("SYNTAX ERROR"); return; }
+    if (!accept_char('=')) { error("C Nonsense in BASIC"); return; }
     struct value val = expr();
     store(&lv, val);
 }
@@ -1410,6 +1427,30 @@ static void print_spaces_to(int col) {
     while (cursor_col() < col) print_char(' ');
 }
 
+// , in PRINT: on to the next half of the line.
+static void print_comma() {
+    int next = (cursor_col() / 16 + 1) * 16;
+    if (next >= SCREEN_COLS) print_string("\n");
+    else print_spaces_to(next);
+}
+
+// TAB col: on to that column, on the next line if it's already past.
+static void print_tab(int col) {
+    col %= SCREEN_COLS;
+    if (col < cursor_col()) print_string("\n");
+    print_spaces_to(col);
+}
+
+// AT row,col (the AT already consumed): 0 after an error.
+static int print_at(int really) {
+    int row = expr_int(0, 255);
+    expect_char(',', "C Nonsense in BASIC");
+    int col = expr_int(0, 255);
+    if (error_msg) return 0;
+    if (col >= SCREEN_COLS) { error("B Integer out of range"); return 0; }
+    if (really && !set_cursor(col, row)) { error("5 Out of screen"); return 0; }
+    return 1;
+}
 /*
  * PRINT items separated by ; (nothing between) or , (move to the next
  * half-screen column). AT row,col and TAB col move the cursor. A
@@ -1417,10 +1458,30 @@ static void print_spaces_to(int col) {
  */
 static int colour_item(struct colours *c);
 
-static void st_print() {
+/*
+ * PRINT [#stream;] items, separated by ; (nothing between), , (on to the
+ * next half of the line) or ' (a new line). AT row,col and TAB col move
+ * the print position. Colour items (PRINT INK 2;"RED") last for this
+ * PRINT only, as on the Spectrum. A trailing ; or , leaves the position
+ * after the text.
+ *
+ * Streams 0 and 1 are the lower screen, 2 the upper screen (the default)
+ * and 3 the printer (LPRINT), which isn't there: its output is dropped.
+ */
+static void st_print(int stream) {
     int newline = 1;
-    // Colours given within PRINT (PRINT INK 2;"RED") last for this
-    // PRINT only, as on the Spectrum.
+    if (accept_char('#')) {
+        stream = expr_int(0, 15);
+        if (error_msg) return;
+        if (stream > 3) { error("O Invalid stream"); return; }
+        if (!at_statement_end() && !accept_char(';') && !accept_char(',')) {
+            error("C Nonsense in BASIC");
+            return;
+        }
+    }
+    int printer = stream == 3;
+    int was_lower = using_lower();
+    use_lower(stream < 2);
     struct colours saved, temp;
     get_colours(&saved);
     temp = saved;
@@ -1436,43 +1497,36 @@ static void st_print() {
         }
         if (accept_char('\'')) {            // ' starts a new line
             newline = 0;
-            print_string("\n");
+            if (!printer) print_string("\n");
             continue;
         }
         if (accept_char(',')) {
             newline = 0;
-            int next = (cursor_col() / 16 + 1) * 16;
-            if (next >= screen_cols()) print_string("\n");
-            else print_spaces_to(next);
+            if (!printer) print_comma();
             continue;
         }
         if (accept(T_AT)) {
-            int row = expr_int(0, screen_rows() - 1);
-            expect_char(',', "SYNTAX ERROR");
-            int col = expr_int(0, screen_cols() - 1);
-            if (error_msg) return;
-            set_cursor(col, row);
+            if (!print_at(!printer)) break;
             continue;
         }
         if (accept(T_TAB)) {
-            int col = expr_int(0, 65535) % screen_cols();
-            if (error_msg) return;
-            if (col < cursor_col()) print_string("\n");
-            print_spaces_to(col);
+            int col = expr_int(0, 65535);
+            if (error_msg) break;
+            if (!printer) print_tab(col);
             continue;
         }
         struct value v = expr();
         if (error_msg) break;
-        print_value(v);
+        if (!printer) print_value(v);
         if (!at_statement_end() && *p != ';' && *p != ',' && *p != '\'') {
-            error("SYNTAX ERROR");
+            error("C Nonsense in BASIC");
             break;
         }
     }
-    if (newline && !error_msg) print_string("\n");
+    if (newline && !error_msg && !printer) print_string("\n");
     set_colours(&saved);
+    use_lower(was_lower);
 }
-
 // Skip to the end of the current line.
 static void skip_line() {
     while (*p) p++;
@@ -1481,7 +1535,7 @@ static void skip_line() {
 static void st_if() {
     double cond = expr_num();
     if (error_msg) return;
-    if (!accept(T_THEN)) { error("THEN EXPECTED"); return; }
+    if (!accept(T_THEN)) { error("C Nonsense in BASIC"); return; }
     if (!cond) { skip_line(); return; }
     skip_space();
     if (isdigit(*p)) {                    // IF ... THEN 100
@@ -1527,11 +1581,11 @@ static void st_for() {
     char name[NAME_LEN];
     int is_str;
     if (!read_name(name, &is_str)) return;
-    if (is_str) { error("BAD VARIABLE NAME"); return; }
-    if (!accept_char('=')) { error("SYNTAX ERROR"); return; }
+    if (is_str) { error("C Nonsense in BASIC"); return; }
+    if (!accept_char('=')) { error("C Nonsense in BASIC"); return; }
     double start = expr_num();
     if (error_msg) return;
-    if (!accept(T_TO)) { error("TO EXPECTED"); return; }
+    if (!accept(T_TO)) { error("C Nonsense in BASIC"); return; }
     double limit = expr_num();
     double step = 1;
     if (accept(T_STEP)) step = expr_num();
@@ -1547,7 +1601,7 @@ static void st_for() {
     // A loop that wouldn't run even once is skipped entirely, as on the
     // Spectrum: carry on after the matching NEXT.
     if ((step >= 0 && start > limit) || (step < 0 && start < limit)) {
-        if (!skip_to_next(v)) error("FOR WITHOUT NEXT");
+        if (!skip_to_next(v)) error("I FOR without NEXT");
     }
 }
 
@@ -1557,7 +1611,7 @@ static void st_next() {
     if (!read_name(name, &is_str)) return;
     struct var *v = is_str ? 0 : lookup_var(name, 0);
     if (!v || !v->is_for) {
-        error("NEXT WITHOUT FOR");
+        error("1 NEXT without FOR");
         return;
     }
     double n = check(v->num + v->step);
@@ -1571,7 +1625,7 @@ static void st_gosub() {
     int num = expr_int(0, 65535);
     if (error_msg) return;
     if (gosub_sp == MAX_GOSUB) {
-        error("OUT OF MEMORY");
+        error("4 Out of memory");
         return;
     }
     gosub_stack[gosub_sp].line = current_line_number();
@@ -1582,95 +1636,140 @@ static void st_gosub() {
 
 static void st_return() {
     if (gosub_sp == 0) {
-        error("RETURN WITHOUT GOSUB");
+        error("7 RETURN without GO SUB");
         return;
     }
     gosub_sp--;
     resume(gosub_stack[gosub_sp].line, gosub_stack[gosub_sp].stmt, 1);
 }
 
-static int read_line();
+static int read_line(int cursor);
 extern char input_buf[];
 extern char edit_next[MAX_TEXT + 1];
 extern int last_line;
 
 // Stop at the current statement as if BREAK had been pressed, so that
 // CONTINUE runs it again.
-static void break_here() {
-    break_requested = 1;
-    cur_line = stmt_line;
-    p = stmt_pos;
-    jumped = 1;
+// Is the typed text STOP (which stops the program, in INPUT)?
+static int is_stop(const char *s) {
+    while (*s == ' ') s++;
+    if (!is_word(s, "STOP")) return 0;
+    s += 4;
+    while (*s == ' ') s++;
+    return *s == '\0';
 }
 
+// Read a value for lv in the lower screen. A string is typed between
+// quotes (which may be removed, to type an expression), except with
+// INPUT LINE. If what's typed isn't valid, it's asked for again.
+static void input_value(struct lvalue *lv, int line_mode) {
+    int quoted = lv->is_str && !line_mode;
+    int col = cursor_col(), row = cursor_row();
+    strcpy(input_buf, quoted ? "\"\"" : "");
+    int cursor = quoted ? 1 : -1;
+    for (;;) {
+        set_cursor(col, row);
+        if (read_line(cursor) < 0 || is_stop(input_buf)) {
+            error("H STOP in INPUT");
+            return;
+        }
+        int len = strlen(input_buf);
+        struct value v;
+        if (line_mode) {
+            v = str_value(input_buf, len);
+        } else if (!eval_text(input_buf, len, &v) || v.is_str != lv->is_str) {
+            error_msg = 0;
+            cursor = -1;
+            continue;                     // try again
+        }
+        store(lv, v);
+        return;
+    }
+}
 /*
  * INPUT ["prompt";] var [, var]...
  * Each variable is read from its own line. A number may be typed as any
  * expression, as on the Spectrum; if it isn't valid, it's asked for
  * again.
  */
+/*
+ * INPUT, in the lower screen, as on the Spectrum. Its items are printed as
+ * in PRINT (strings, and expressions in brackets, with ; , ' AT TAB and
+ * colours), and each variable is typed in where it comes. A number may
+ * be typed as any expression. INPUT LINE A$ takes the text as typed.
+ * STOP (or Esc) stops the program: H STOP in INPUT.
+ */
 static void st_input() {
-    int prompted = 0;
-    while (!at_statement_end()) {
-        if (accept_char(';') || accept_char(',')) continue;
-        if (*p == '"') {
-            struct value prompt = factor();
-            print_value(prompt);
-            prompted = 1;
+    use_lower(1);
+    clear_lower();
+    set_scroll_count(upper_rows());       // everything on screen has been seen
+    struct colours temp;
+    get_colours(&temp);
+    while (!at_statement_end() && !error_msg) {
+        if (colour_item(&temp)) {
+            set_colours(&temp);
             continue;
         }
-        struct lvalue lv;
-        if (!parse_lvalue(&lv)) return;
-        for (;;) {
-            if (!prompted) print_string("? ");
-            if (read_line() < 0) {            // Esc
-                break_here();
-                return;
-            }
-            struct value v;
-            if (lv.is_str) {
-                v = str_value(input_buf, strlen(input_buf));
-            } else {
-                v = num_value(val(str_value(input_buf, strlen(input_buf))));
-                if (error_msg) {
-                    error_msg = 0;
-                    print_string("NUMBER EXPECTED - TRY AGAIN\n");
-                    prompted = 0;
-                    continue;
-                }
-            }
-            store(&lv, v);
-            break;
+        if (accept_char(';')) continue;
+        if (accept_char(',')) { print_comma(); continue; }
+        if (accept_char('\'')) { print_string("\n"); continue; }
+        if (accept(T_AT)) { print_at(1); continue; }
+        if (accept(T_TAB)) {
+            int col = expr_int(0, 65535);
+            if (!error_msg) print_tab(col);
+            continue;
         }
-        prompted = 0;
+        skip_space();
+        if (*p == '"') {                  // a prompt
+            struct value v = factor();
+            if (!error_msg) print_value(v);
+            continue;
+        }
+        if (accept_char('(')) {           // (items): printed, as in PRINT
+            while (!error_msg && !accept_char(')')) {
+                if (accept_char(';')) continue;
+                if (accept_char(',')) { print_comma(); continue; }
+                if (accept_char('\'')) { print_string("\n"); continue; }
+                if (at_statement_end()) { error("C Nonsense in BASIC"); break; }
+                struct value v = expr();
+                if (!error_msg) print_value(v);
+            }
+            continue;
+        }
+        int line_mode = accept(T_LINE);
+        struct lvalue lv;
+        if (!parse_lvalue(&lv)) break;
+        if (line_mode && !lv.is_str) { error("C Nonsense in BASIC"); break; }
+        input_value(&lv, line_mode);
     }
+    clear_lower();
+    use_lower(0);
 }
-
 static void st_dim() {
     do {
         char name[NAME_LEN];
         int is_str;
         if (!read_name(name, &is_str)) return;
-        if (!accept_char('(')) { error("SYNTAX ERROR"); return; }
+        if (!accept_char('(')) { error("C Nonsense in BASIC"); return; }
         int dims[MAX_DIMS], nd = 0;
         int esize = is_str ? 1 : (int)sizeof(double);
         int room = HEAP_SIZE / esize;     // more elements than could ever fit
         int count = 1;
         do {
-            if (nd == MAX_DIMS) { error("TOO MANY DIMENSIONS"); return; }
+            if (nd == MAX_DIMS) { error("C Nonsense in BASIC"); return; }
             int d = expr_int(1, 65535);
             if (error_msg) return;
             dims[nd++] = d;
             count = count > room / d ? room + 1 : count * d;
         } while (accept_char(','));
-        expect_char(')', "MISSING )");
+        expect_char(')', "C Nonsense in BASIC");
         if (error_msg) return;
-        if (count > room) { error("OUT OF MEMORY"); return; }
+        if (count > room) { error("4 Out of memory"); return; }
         struct array *a = find_array(name, is_str);
         if (!a) {
             int i = 0;
             while (i < num_arrays && arrays[i].name[0]) i++;
-            if (i == MAX_ARRAYS) { error("OUT OF MEMORY"); return; }
+            if (i == MAX_ARRAYS) { error("4 Out of memory"); return; }
             if (i == num_arrays) num_arrays++;
             a = &arrays[i];
             strcpy(a->name, name);
@@ -1714,13 +1813,13 @@ static void st_read() {
     do {
         struct lvalue lv;
         if (!parse_lvalue(&lv)) return;
-        if (!find_data()) { error("OUT OF DATA"); return; }
+        if (!find_data()) { error("E Out of DATA"); return; }
         char *saved = p;
         p = data_pos;
         struct value v = expr();
         if (accept_char(',')) in_data = 1;
         else if (at_statement_end()) in_data = 0;
-        else error("SYNTAX ERROR");
+        else error("C Nonsense in BASIC");
         data_pos = p;
         p = saved;
         store(&lv, v);
@@ -1752,11 +1851,11 @@ static void st_beep() {
         return;
     }
     double secs = expr_num();
-    expect_char(',', "SYNTAX ERROR");
+    expect_char(',', "C Nonsense in BASIC");
     double pitch = expr_num();
     if (error_msg) return;
     if (secs < 0 || secs > 10 || pitch < -60 || pitch > 69) {
-        error("INTEGER OUT OF RANGE");
+        error("B Integer out of range");
         return;
     }
     double freq = 261.6255653 * num_exp(pitch / 12 * 0.69314718055994530942);
@@ -1770,9 +1869,9 @@ static void st_beep() {
 static int file_name(char *name) {
     struct value v = expr();
     if (error_msg) return 0;
-    if (!v.is_str) { error("STRING EXPECTED"); return 0; }
+    if (!v.is_str) { error("C Nonsense in BASIC"); return 0; }
     if (v.len < 1 || v.len > STORE_NAME_LEN) {
-        error("NAME MUST BE 1-15 CHARACTERS");
+        error("F Invalid file name");
         return 0;
     }
     memcpy(name, v.str, v.len);
@@ -1786,7 +1885,7 @@ static void st_save() {
     int autorun = 0;
     if (accept(T_LINE)) autorun = expr_int(1, 9999);
     if (error_msg) return;
-    if (prog_len == 0) { error("NO PROGRAM TO SAVE"); return; }
+    if (prog_len == 0) { error("F Invalid file name"); return; }
     const char *err = storage_save(name, prog, prog_len, autorun);
     if (err) error(err);
 }
@@ -1815,7 +1914,7 @@ static void st_load() {
     if (!file_name(name)) return;
     int len, autorun;
     const char *err = storage_load(name, load_buf, PROG_SIZE, &len, &autorun);
-    if (!err && !valid_program(load_buf, len)) err = "BAD PROGRAM FILE";
+    if (!err && !valid_program(load_buf, len)) err = "R Bad program file";
     if (err) { error(err); return; }
     memcpy(prog, load_buf, len);
     prog_len = len;
@@ -1863,29 +1962,45 @@ static void st_cat() {
 static int next_statement();
 
 static void st_continue() {
-    if (!cont_ok) { error("CAN'T CONTINUE"); return; }
+    if (!cont_ok) { error("N Statement lost"); return; }
     resume(cont_line, cont_stmt, cont_next);
 }
 
-static void st_colour(void (*set)(int), int max) {
-    int c = expr_int(0, max);
-    if (!error_msg) set(c);
+// INK n, PAPER n etc. as statements: the upper screen's colours.
+static void st_colour(int which) {
+    int n = expr_int(0, 255);
+    if (error_msg) return;
+    struct colours c;
+    get_colours(&c);
+    if (!colour_set(&c, which, n)) error("K Invalid colour");
+    else set_colours(&c);
 }
-
 // INK n, PAPER n etc. as an item within PRINT: updates *c.
+// INK n, PAPER n etc. as an item within PRINT, INPUT, PLOT...: updates *c.
 static int colour_item(struct colours *c) {
     skip_space();
     unsigned char t = *p;
-    int *field = t == T_INK ? &c->ink : t == T_PAPER ? &c->paper :
-                 t == T_BRIGHT ? &c->bright : t == T_INVERSE ? &c->inverse :
-                 t == T_OVER ? &c->over : 0;
-    if (!field) return 0;
+    int which = t == T_INK ? C_INK : t == T_PAPER ? C_PAPER : t == T_FLASH ? C_FLASH :
+                t == T_BRIGHT ? C_BRIGHT : t == T_INVERSE ? C_INVERSE :
+                t == T_OVER ? C_OVER : -1;
+    if (which < 0) return 0;
     p++;
-    int v = expr_int(0, (t == T_INK || t == T_PAPER) ? 7 : 1);
-    if (!error_msg) *field = v;
+    int n = expr_int(0, 255);
+    if (!error_msg && !colour_set(c, which, n)) error("K Invalid colour");
     return 1;
 }
 
+// Colour items before the numbers of PLOT, DRAW and CIRCLE
+// (PLOT INK 2;10,10). They last for the statement: restore *saved after.
+static void graphics_colours(struct colours *saved) {
+    struct colours temp;
+    get_colours(saved);
+    temp = *saved;
+    while (!error_msg && colour_item(&temp)) {
+        if (!accept_char(';') && !accept_char(',')) error("C Nonsense in BASIC");
+    }
+    set_colours(&temp);
+}
 /*
  * Graphics, in Spectrum coordinates: x 0-255 left to right, y 0-175
  * bottom to top. DRAW is relative to the last point plotted.
@@ -1893,24 +2008,36 @@ static int colour_item(struct colours *c) {
 int plot_x, plot_y;
 
 static void st_plot() {
+    struct colours saved;
+    graphics_colours(&saved);
     int x = expr_int(0, SCREEN_WIDTH - 1);
-    expect_char(',', "SYNTAX ERROR");
+    expect_char(',', "C Nonsense in BASIC");
     int y = expr_int(0, PLOT_HEIGHT - 1);
-    if (error_msg) return;
-    plot(x, y);
-    plot_x = x;
-    plot_y = y;
+    if (!error_msg) {
+        plot(x, y);
+        plot_x = x;
+        plot_y = y;
+    }
+    set_colours(&saved);
 }
 
 // DRAW dx,dy [,angle]: a line, or with an angle (in radians), an arc
 // that turns through that angle (anticlockwise if positive).
+static void draw_to(double dx, double dy, double a);
+
 static void st_draw() {
+    struct colours saved;
+    graphics_colours(&saved);
     double dx = expr_num();
-    expect_char(',', "SYNTAX ERROR");
+    expect_char(',', "C Nonsense in BASIC");
     double dy = expr_num();
     double a = 0;
     if (accept_char(',')) a = expr_num();
-    if (error_msg) return;
+    if (!error_msg) draw_to(dx, dy, a);
+    set_colours(&saved);
+}
+
+static void draw_to(double dx, double dy, double a) {
     int x1 = to_int(plot_x + dx, 0, SCREEN_WIDTH - 1);
     int y1 = to_int(plot_y + dy, 0, PLOT_HEIGHT - 1);
     if (error_msg) return;
@@ -1947,13 +2074,15 @@ static void st_draw() {
 }
 
 static void st_circle() {
+    struct colours saved;
+    graphics_colours(&saved);
     int x = expr_int(0, SCREEN_WIDTH - 1);
-    expect_char(',', "SYNTAX ERROR");
+    expect_char(',', "C Nonsense in BASIC");
     int y = expr_int(0, PLOT_HEIGHT - 1);
-    expect_char(',', "SYNTAX ERROR");
+    expect_char(',', "C Nonsense in BASIC");
     int r = expr_int(0, 1000);
-    if (error_msg) return;
-    circle(x, y, r);                       // parts off the screen are skipped
+    if (!error_msg) circle(x, y, r);       // parts off the screen are skipped
+    set_colours(&saved);
 }
 
 // A program line as text: "10 PRINT X". kw: see detokenize.
@@ -1966,30 +2095,114 @@ static void line_to_text(int off, char *out, char *kw, int cap) {
 }
 
 // LIST shows keywords in a colour of their own: blue, or cyan on dark paper.
-static void list_program(int from) {
+/*
+ * Listing, as on the Spectrum: line numbers right-aligned in four
+ * columns, and a > after the number of the current line (the last one
+ * entered or edited). Keywords are shown in a colour of their own (blue,
+ * or cyan on dark paper).
+ */
+int e_ppc;                // the current line
+
+static int listed_length(int off, char *buf, char *kw, int cap) {
+    char num[8];
+    itoa(line_num(off), num);
+    int n = 0;
+    for (int i = strlen(num); i < 4; i++) buf[n++] = ' ';
+    for (int i = 0; num[i]; i++) buf[n++] = num[i];
+    buf[n++] = line_num(off) == e_ppc ? '>' : ' ';
+    memset(kw, 0, n);
+    detokenize(line_text(off), buf + n, kw + n, cap - n);
+    return strlen(buf);
+}
+
+static void list_line(int off) {
     char buf[MAX_TEXT * 4], kw[MAX_TEXT * 4];
     struct colours normal, keyword;
+    listed_length(off, buf, kw, sizeof(buf));
     get_colours(&normal);
     keyword = normal;
-    keyword.ink = normal.paper <= 3 ? 5 : 1;
-    if (keyword.ink == normal.paper) keyword.ink = normal.ink;
+    int paper = (normal.attr >> 3) & 7, ink = normal.attr & 7;
+    int kink = paper <= 3 ? 5 : 1;
+    if (kink == paper) kink = ink;
+    colour_set(&keyword, C_INK, kink);
+    for (int i = 0; buf[i]; i++) {
+        set_colours(kw[i] ? &keyword : &normal);
+        print_char(buf[i]);
+    }
+    set_colours(&normal);
+}
+
+// Rows a line takes when listed.
+static int listed_rows(int off) {
+    char buf[MAX_TEXT * 4], kw[MAX_TEXT * 4];
+    int n = listed_length(off, buf, kw, sizeof(buf));
+    return n ? (n + SCREEN_COLS - 1) / SCREEN_COLS : 1;
+}
+
+static void list_program(int from) {
     for (int off = line_find(from); off < prog_len && !check_break(); off = line_next(off)) {
-        line_to_text(off, buf, kw, sizeof(buf));
-        for (int i = 0; buf[i]; i++) {
-            set_colours(kw[i] ? &keyword : &normal);
-            print_char(buf[i]);
-        }
-        set_colours(&normal);
+        list_line(off);
         print_string("\n");
+        if (scroll_stopped()) {
+            error("D BREAK - CONT repeats");
+            return;
+        }
     }
 }
+
+/*
+ * The automatic listing shown after a line is entered: a screenful,
+ * from the line at the top last time (s_top), moved on if need be so
+ * that the current line is on it.
+ */
+int s_top;
+
+static void auto_list() {
+    screen_echo(0);                   // (tests don't want to see it)
+    clear_screen();
+    if (prog_len == 0) {
+        screen_echo(1);
+        return;
+    }
+    int cur = line_find(e_ppc);
+    if (cur >= prog_len) {            // after the last line: show the last
+        cur = 0;
+        while (line_next(cur) < prog_len) cur = line_next(cur);
+    }
+    int top = line_find(s_top);
+    if (top > cur) top = cur;
+    for (;;) {
+        int rows = 0;
+        for (int off = top; off <= cur; off = line_next(off)) rows += listed_rows(off);
+        if (rows <= upper_rows() || top == cur) break;
+        top = line_next(top);
+    }
+    s_top = line_num(top);
+    int rows = 0;
+    for (int off = top; off < prog_len; off = line_next(off)) {
+        int n = listed_rows(off);
+        if (rows + n > upper_rows()) break;
+        if (rows) print_string("\n");
+        list_line(off);
+        rows += n;
+    }
+    screen_echo(1);
+}
+static void clear_all();
+static void show_banner();
+static void reset_colours();
 
 static void execute_statement() {
     skip_space();
     unsigned char t = *p;
     if (IS_TOKEN(t)) p++;
     switch (t) {
-    case T_PRINT:  st_print(); break;
+    case T_PRINT:  st_print(2); break;
+    case T_LPRINT: st_print(3); break;
+    case T_LLIST:                          // (no printer)
+        if (!at_statement_end()) expr_num();
+        break;
+    case T_COPY:   break;
     case T_LET:    st_let(); break;
     case T_GOTO:   go_to_line(expr_int(0, 65535)); break;
     case T_GOSUB:  st_gosub(); break;
@@ -2017,13 +2230,7 @@ static void execute_statement() {
         cont_line = current_line_number();
         cont_stmt = statement_number(stmt_pos);
         cont_next = 1;
-        if (cur_line >= 0) {
-            char buf[8];
-            itoa(line_num(cur_line), buf);
-            print_string("STOPPED IN LINE ");
-            print_string(buf);
-            print_string("\n");
-        }
+        report_msg = "9 STOP statement";
         running = 0;
         break;
     case T_CONTINUE: st_continue(); break;
@@ -2037,13 +2244,15 @@ static void execute_statement() {
         if (error_msg) break;
         int off = line_find(num);
         if (num <= 0 || off >= prog_len || line_num(off) != num) {
-            error("LINE NOT FOUND");
+            error("N Statement lost");
             break;
         }
         char kw[MAX_TEXT * 4];
         char text[MAX_TEXT * 4];
         line_to_text(off, text, kw, sizeof(text));
         strncpy_safe(edit_next, text, sizeof(edit_next));
+        e_ppc = num;
+        no_report = 1;
         running = 0;
         break;
     }
@@ -2055,37 +2264,53 @@ static void execute_statement() {
         clear_screen();
         plot_x = plot_y = 0;
         break;
-    case T_INK:     st_colour(set_ink, 7); break;
-    case T_PAPER:   st_colour(set_paper, 7); break;
-    case T_BORDER:  st_colour(set_border, 7); break;
-    case T_BRIGHT:  st_colour(set_bright, 1); break;
-    case T_INVERSE: st_colour(set_inverse, 1); break;
-    case T_OVER:    st_colour(set_over, 1); break;
+    case T_INK:     st_colour(C_INK); break;
+    case T_PAPER:   st_colour(C_PAPER); break;
+    case T_FLASH:   st_colour(C_FLASH); break;
+    case T_BRIGHT:  st_colour(C_BRIGHT); break;
+    case T_INVERSE: st_colour(C_INVERSE); break;
+    case T_OVER:    st_colour(C_OVER); break;
+    case T_BORDER: {
+        int n = expr_int(0, 255);
+        if (error_msg) break;
+        if (n > 7) error("K Invalid colour");
+        else set_border(n);
+        break;
+    }
     case T_PLOT:    st_plot(); break;
     case T_DRAW:    st_draw(); break;
     case T_CIRCLE:  st_circle(); break;
     case T_END:    running = 0; break;
-    case T_NEW:
+    case T_NEW:                            // as if switched on again
         cont_ok = 0;
         prog_len = 0;
+        e_ppc = s_top = 0;
         clear_variables();
         reset_run_state();
+        reset_colours();
+        set_border(7);
         clear_screen();
         plot_x = plot_y = 0;
+        show_banner();
+        no_report = 1;
         running = 0;
         break;
-    case T_CLEAR:
-        clear_variables();
-        reset_run_state();
+    case T_CLEAR:                          // CLEAR [n]: n (RAMTOP) is ignored
+        if (!at_statement_end()) expr_num();
+        if (error_msg) break;
+        clear_all();
         break;
-    case T_LIST:
-        list_program(at_statement_end() ? 0 : expr_int(1, 9999));
+    case T_LIST: {
+        int from = at_statement_end() ? 0 : expr_int(0, 9999);
+        if (error_msg) break;
+        if (from) e_ppc = from;
+        list_program(from);
         break;
+    }
     case T_RUN: {                          // RUN [line]
         int num = at_statement_end() ? 0 : expr_int(0, 65535);
         if (error_msg) break;
-        clear_variables();
-        reset_run_state();
+        clear_all();
         cont_ok = 0;
         go_to_line(num);
         break;
@@ -2093,23 +2318,63 @@ static void execute_statement() {
     case T_BEEP:   st_beep(); break;
     default:
         if (isalpha(t)) st_let();          // LET is optional
-        else error("SYNTAX ERROR");
+        else error("C Nonsense in BASIC");
     }
+}
+
+/*
+ * CLEAR (and RUN): as on the Spectrum, it also clears the screen, RESTOREs
+ * and sends PLOT back to the bottom left.
+ */
+static void clear_all() {
+    clear_variables();
+    reset_run_state();
+    clear_screen();
+    plot_x = plot_y = 0;
 }
 
 // Print "ERROR: <msg>", plus " IN LINE <n>" when num >= 0.
-static void print_error(const char *msg, int num) {
-    print_string("ERROR: ");
+int report_shown;         // a report is in the lower screen
+
+/*
+ * Show a report in the lower screen, as the Spectrum does:
+ * "2 Variable not found, 10:1" (line 10, statement 1; line 0 is a typed
+ * command). It stays until a key is pressed.
+ */
+static void print_report(const char *msg, int line, int stmt) {
+    char buf[8];
+    int was_lower = using_lower();
+    use_lower(1);
+    clear_lower();
+    if (msg[0] != '0' && msg[0] != '9') transcript("[ERR]");   // for tests
     print_string(msg);
-    if (num >= 0) {
-        char buf[8];
-        itoa(num, buf);
-        print_string(" IN LINE ");
-        print_string(buf);
-    }
-    print_string("\n");
+    print_string(", ");
+    itoa(line, buf);
+    print_string(buf);
+    print_string(":");
+    itoa(stmt, buf);
+    print_string(buf);
+    transcript("\n");
+    use_lower(was_lower);
+    report_shown = 1;
 }
 
+// The message shown when switched on (and after NEW), where the Spectrum
+// has its copyright line: our own name.
+static void show_banner() {
+    use_lower(1);
+    clear_lower();
+    print_string("x86 BASIC for PCs");
+    transcript("\n");
+    use_lower(0);
+    report_shown = 1;
+}
+
+static void reset_colours() {
+    struct colours c = { 0x38, 0, 0, 0, 0, 0 };   // black ink on white paper
+    use_lower(0);
+    set_colours(&c);
+}
 /*
  * Move p from the end of a statement to the start of the next one.
  * Returns 0 at the end of the program (or of a typed line).
@@ -2127,7 +2392,7 @@ static int next_statement() {
         p = (char *)line_text(cur_line);
         return 1;
     }
-    error("SYNTAX ERROR");
+    error("C Nonsense in BASIC");
     return 0;
 }
 
@@ -2136,24 +2401,29 @@ static int next_statement() {
  * line, when cur_line is -1), an END, STOP, error or BREAK. Errors and
  * BREAK leave CONTINUE set to run the statement again.
  */
+/*
+ * Run statements from p until the end of the program (or of a typed
+ * line, when cur_line is -1), STOP, an error or BREAK; then show the
+ * report. Errors and BREAK leave CONTINUE set to run the statement again.
+ */
 static void run() {
+    int rep_line = 0, rep_stmt = 1;
+    int first = 1;            // (an Esc typed ahead stops it after the first statement)
     running = 1;
+    report_msg = "0 OK";
+    no_report = 0;
+    use_lower(0);
     while (running) {
-        if (break_requested || (cur_line >= 0 && check_break())) {
+        if (break_requested || (!first && check_break())) {
             break_requested = 0;
-            print_string("BREAK");
-            if (cur_line >= 0) {
-                char buf[8];
-                itoa(line_num(cur_line), buf);
-                print_string(" IN LINE ");
-                print_string(buf);
-                cont_ok = 1;
-                cont_line = line_num(cur_line);
-                cont_stmt = statement_number(p);
-                cont_next = 0;
-            }
-            print_string("\n");
-            return;
+            rep_line = current_line_number();
+            rep_stmt = statement_number(p);
+            cont_ok = cur_line >= 0;
+            cont_line = rep_line;
+            cont_stmt = rep_stmt;
+            cont_next = 0;
+            report_msg = "L BREAK into program";
+            break;
         }
         error_msg = 0;
         pool_used = 0;
@@ -2161,10 +2431,14 @@ static void run() {
         jumped = 0;
         stmt_line = cur_line;
         stmt_pos = p;
+        rep_line = current_line_number();
+        rep_stmt = statement_number(p);
         execute_statement();
+        first = 0;
+        use_lower(0);
+        if (!error_msg && scroll_stopped()) error("D BREAK - CONT repeats");
         if (!error_msg && !jumped && running && !next_statement()) running = 0;
         if (error_msg) {
-            print_error(error_msg, stmt_line >= 0 ? line_num(stmt_line) : -1);
             cont_ok = stmt_line >= 0;
             if (cont_ok) {
                 cur_line = stmt_line;
@@ -2172,11 +2446,13 @@ static void run() {
                 cont_stmt = statement_number(stmt_pos);
             }
             cont_next = 0;
-            return;
+            report_msg = error_msg;
+            break;
         }
     }
+    scroll_stopped();
+    if (!no_report) print_report(report_msg, rep_line < 0 ? 0 : rep_line, rep_stmt);
 }
-
 /* ------------------------------------------------------------------------
  * The command line
  * --------------------------------------------------------------------- */
@@ -2192,37 +2468,66 @@ char edit_next[MAX_TEXT + 1];
 static int edit_input(int use_history) {
     strcpy(input_buf, edit_next);
     edit_next[0] = '\0';
-    return edit_line(input_buf, sizeof(input_buf), use_history);
+    return edit_line(input_buf, sizeof(input_buf), use_history, -1);
 }
 
-static int read_line() {
-    return edit_input(0);
+// For INPUT: edit what's in input_buf, with the cursor at cursor.
+static int read_line(int cursor) {
+    return edit_line(input_buf, sizeof(input_buf), 0, cursor);
 }
 
+/*
+ * The command loop. As on the Spectrum: lines are typed in the lower
+ * screen; a line with a number goes into the program and the program is
+ * listed (the automatic listing); anything else is run straight away,
+ * and its report shown until a key is pressed.
+ */
 void basic_run() {
-    while (1) {
-        if (edit_input(1) < 0) continue;     // Esc: forget the line
+    int want_list = 0;        // show the automatic listing
+    int listing_shown = 0;    // it's on the screen
+    show_banner();
+    for (;;) {
+        if (want_list) {
+            auto_list();
+            want_list = 0;
+            listing_shown = 1;
+        }
+        use_lower(1);
+        if (report_shown) {               // the first key clears the report
+            int k = wait_key();
+            clear_lower();
+            if (k != 27) unget_key(k);
+            report_shown = 0;
+        }
+        set_scroll_count(upper_rows());
+        int r = edit_input(1);
+        clear_lower();
+        use_lower(0);
+        if (r < 0) continue;              // Esc: forget the line
         char *s = input_buf;
         while (*s == ' ') s++;
-        if (*s == '\0') continue;
+        if (*s == '\0') {                // Enter on its own: list
+            want_list = 1;
+            continue;
+        }
 
         int num = -1;
         if (isdigit(*s)) {
             num = 0;
             while (isdigit(*s) && num <= 9999) num = num * 10 + (*s++ - '0');
             if (num < 1 || num > 9999) {
-                print_error("LINE NUMBER MUST BE 1-9999", -1);
+                print_report("C Nonsense in BASIC", 0, 1);
                 continue;
             }
             while (*s == ' ') s++;
         }
         int len = tokenize(s, typed_line, sizeof(typed_line));
         if (len < 0) {
-            print_error("LINE TOO LONG", num);
+            print_report("G No room for line", 0, 1);
             continue;
         }
         if (num > 0) {
-            last_line = num;
+            last_line = e_ppc = num;
             // FOR loops, GO SUB and CONTINUE survive editing, as on the
             // Spectrum (they refer to line numbers).
             data_mark();
@@ -2230,10 +2535,17 @@ void basic_run() {
                 line_delete(num);         // just a number: delete the line
             } else {
                 const char *err = line_store(num, typed_line, len);
-                if (err) print_error(err, num);
+                if (err) print_report(err, 0, 1);
             }
             data_unmark();
+            want_list = 1;
         } else {
+            if (listing_shown) {          // (tests don't want to see this)
+                screen_echo(0);
+                clear_screen();
+                screen_echo(1);
+            }
+            listing_shown = 0;
             cur_line = -1;
             p = (char *)typed_line;
             run();
