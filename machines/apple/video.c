@@ -176,6 +176,10 @@ static int double_res(void) {
 // A character cell w dots wide (14: 40 columns, 7: 80) at pixel x.
 static void draw_char(unsigned char *px, int x, int w, int code, int cursor, int r) {
     int inverse, flash;
+    if (cursor && apple_model == APPLE_I) {   // (its cursor: a flashing @)
+        code = 0xC0;
+        cursor = 0;
+    }
     const unsigned char *g = glyph(code, &inverse, &flash);
     if (flash) has_flash[r] = 1;
     int inv = inverse ^ (flash && flash_on) ^ cursor;
@@ -197,8 +201,9 @@ static void draw_text_row(unsigned char *px, int r) {
         for (int c = 0; c < 80; c++)
             draw_char(px, c * 7, 7, apple_ram(!(c & 1), a + c / 2), cur && cursor_col == c, r);
     } else {
+        int bank = apple_model == APPLE_I;        // (the terminal's screen: text.c)
         for (int c = 0; c < 40; c++)
-            draw_char(px, c * 14, 14, apple_ram(0, a + c), cur && cursor_col == c, r);
+            draw_char(px, c * 14, 14, apple_ram(bank, a + c), cur && cursor_col == c, r);
     }
 }
 

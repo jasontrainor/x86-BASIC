@@ -514,5 +514,72 @@ acolour "apple dhgr bars"   "DHGR${NL}BARS${NL}" 10,10=0 50,10=1 200,10=5 420,10
 acolour "apple dgr bars"    "DGR${NL}BARS${NL}" 3,10=0 40,10=1 200,10=5 555,10=15
 acolour "apple mixed"       "HGR${NL}BARS${NL}HOME${NL}" 50,10=3 50,165=0
 
+# --- Integer BASIC (machines/intbasic/): the 1977 machine, then the 1976 one ---
+# host_machine NAME: build machine NAME (with what its "uses" file names)
+# for the host, as tests/build/NAME_host.
+host_machine() {
+    local inc="-Icore -Imachines/$1" src="machines/$1/*.c" u
+    for u in $(cat "machines/$1/uses" 2>/dev/null); do inc+=" -Imachines/$u"; src+=" machines/$u/*.c"; done
+    # shellcheck disable=SC2086
+    gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
+        -Wall $inc -DHOST_TEST -o "tests/build/$1_host" tests/host_stub.c $src \
+        core/storage.c core/fat.c core/string.c core/num.c core/font.c || exit 1
+}
+host_machine a2int
+host_machine a1basic
+BIN=tests/build/a2int_host
+ABIN=tests/build/a2int_host
+CC=$'\x03'
+check "int print"         "PRINT 2+3*4;\" \";-7/2;\" \";7 MOD 3;\" \";2^10${NL}" "${NL}14 -3 1 1024${NL}"
+check "int program"       "10 FOR I=1 TO 3${NL}20 PRINT I;\" \";I*I${NL}30 NEXT I${NL}40 END${NL}RUN${NL}" "RUN${NL}1 1${NL}2 4${NL}3 9${NL}>"
+check "int list"          "20 PRINT \"B\":END${NL}10 for i=1to 10 step 2:print i;:next i${NL}LIST${NL}" "LIST${NL}   10 FOR I=1 TO 10 STEP 2: PRINT I;: NEXT I${NL}   20 PRINT \"B\": END${NL}>"
+check "int list range"    "10 REM A${NL}20 REM B${NL}30 REM C${NL}LIST 20${NL}LIST 20,30${NL}" "LIST 20${NL}   20 REM B${NL}>LIST 20,30${NL}   20 REM B${NL}   30 REM C${NL}"
+check "int delete"        "10 REM A${NL}20 REM B${NL}30 REM C${NL}10${NL}DEL 20,25${NL}LIST${NL}" "LIST${NL}   30 REM C${NL}>"
+check "int range"         "PRINT 32767+0${NL}PRINT 32767+1${NL}PRINT 40000${NL}PRINT 1/0${NL}PRINT 200*200${NL}" "${NL}32767${NL}" "PRINT 32767+1${NL}[TONE 1000 100]*** >32767 ERR${NL}" "PRINT 40000${NL}[TONE 1000 100]*** >32767 ERR" "PRINT 1/0${NL}[TONE 1000 100]*** >32767 ERR" "PRINT 200*200${NL}[TONE 1000 100]*** >32767 ERR"
+check "int compare"       "PRINT 1=1;2#2;1<>2;3>2;2<=1;2>=2;5 AND 0;5 OR 0;NOT 7${NL}" "${NL}101101010${NL}"
+check "int syntax"        "10 PRINT (1${NL}LIST${NL}PRINT 1+${NL}FROB${NL}" "10 PRINT (1${NL}[TONE 1000 100]*** SYNTAX ERR${NL}>LIST${NL}>" "PRINT 1+${NL}[TONE 1000 100]*** SYNTAX ERR" "FROB${NL}[TONE 1000 100]*** SYNTAX ERR"
+check "int syntax first"  "PRINT 6*7:PRINT 1+${NL}" "!42"
+check "int stopped at"    "10 PRINT 1${NL}20 GOTO 99${NL}RUN${NL}" "${NL}1${NL}[TONE 1000 100]*** BAD BRANCH ERR${NL}STOPPED AT 20${NL}"
+check "int no end"        "10 PRINT 5${NL}RUN${NL}" "${NL}5${NL}[TONE 1000 100]*** NO END ERR${NL}>" "!STOPPED"
+check "int if quirk"      "IF 1=2 THEN PRINT \"X\":PRINT \"Y\"${NL}IF 1 THEN PRINT \"Z\"${NL}" "${NL}Y${NL}" "${NL}Z${NL}" "!${NL}X${NL}"
+check "int if line"       "10 IF 2>1 THEN 30${NL}20 PRINT \"NO\"${NL}30 PRINT \"YES\":END${NL}RUN${NL}" "${NL}YES${NL}" "!${NL}NO${NL}"
+check "int names"         "SCORE=5:TOTAL=3:PRINTER=2:PRINT SCORE*TOTAL*PRINTER${NL}LONGNAME1=4:LONGNAME2=6:PRINT LONGNAME1+LONGNAME2${NL}" "${NL}30${NL}" "${NL}10${NL}"
+check "int no spaces"     "A=1:B=1${NL}IFA=BTHENPRINT\"EQ\"${NL}FORI=1TO3:PRINTI;:NEXTI${NL}" "${NL}EQ${NL}" "${NL}123${NL}"
+check "int strings"       "DIM A\$(10),B\$(3)${NL}A\$=\"HELLO\":B\$=\"!\"${NL}PRINT A\$(2,3);A\$(4);LEN(A\$)${NL}A\$(LEN(A\$)+1)=B\$:PRINT A\$${NL}IF A\$=\"HELLO!\" THEN PRINT \"SAME\"${NL}PRINT ASC(B\$)${NL}" "${NL}ELLO5${NL}" "${NL}HELLO!${NL}" "${NL}SAME${NL}" "${NL}161${NL}"
+check "int string errors" "DIM A\$(3)${NL}A\$=\"ABCD\"${NL}A\$=\"AB\":PRINT A\$(2,5)${NL}DIM A\$(5)${NL}A=\"X\"${NL}" "*** STR OVFL ERR" "*** RANGE ERR" "*** DIM ERR" "A=\"X\"${NL}[TONE 1000 100]*** SYNTAX ERR"
+check "int arrays"        "DIM A(5):FOR I=0 TO 5:A(I)=I*I:NEXT I:PRINT A(5)+A(2)${NL}PRINT A(6)${NL}" "${NL}29${NL}" "*** RANGE ERR"
+check "int gosub"         "10 GOSUB 100:PRINT \"BACK\":END${NL}100 PRINT \"SUB\":RETURN${NL}RUN${NL}RETURN${NL}" "${NL}SUB${NL}BACK${NL}" "RETURN${NL}[TONE 1000 100]*** BAD RETURN ERR"
+check "int gosub depth"   "10 GOSUB 10${NL}RUN${NL}" "*** >8 GOSUBS ERR${NL}STOPPED AT 10"
+check "int for depth"     "10 FOR A=1 TO 2:FOR B=1 TO 2:FOR C=1 TO 2:FOR D=1 TO 2:FOR E=1 TO 2:FOR F=1 TO 2:FOR G=1 TO 2:FOR H=1 TO 2:FOR I=1 TO 2${NL}RUN${NL}NEXT Q${NL}" "*** >8 FORS ERR" "NEXT Q${NL}[TONE 1000 100]*** BAD NEXT ERR"
+check "int for once"      "FOR I=5 TO 1:PRINT \"IN\";I:NEXT I:PRINT I${NL}FOR I=10 TO 1 STEP -4:PRINT I;:NEXT I${NL}" "${NL}IN5${NL}6${NL}" "${NL}1062${NL}"
+check "int input"         "10 INPUT \"AGE \",A${NL}20 DIM N\$(10):INPUT N\$${NL}30 PRINT N\$;\" \";A:END${NL}RUN${NL}4X${NL}2*21${NL}BOB${NL}" "AGE 4X${NL}RETYPE LINE${NL}AGE 2*21${NL}BOB${NL}BOB 42${NL}"
+check "int input two"     "10 INPUT A,B:PRINT A+B:END${NL}RUN${NL}3${NL}4${NL}RUN${NL}5,6${NL}" "?3${NL}??4${NL}7${NL}" "?5,6${NL}11${NL}"
+check "int ctrl-c con"    "10 X=X+1:IF X<30000 THEN 10${NL}20 PRINT \"DONE\":END${NL}RUN${NL}${CC}PRINT X>0${NL}CON${NL}" "STOPPED AT 10${NL}>PRINT X>0${NL}1${NL}>CON${NL}DONE${NL}"
+check "int rnd"           "FOR I=1 TO 50:R=RND(6):IF R<0 OR R>5 THEN PRINT \"BAD\":NEXT I:PRINT \"OK\"${NL}PRINT RND(0)${NL}" "${NL}OK${NL}" "!${NL}BAD" "*** RANGE ERR"
+check "int poke peek"     "POKE 768,200:PRINT PEEK(768)${NL}POKE 768,256${NL}" "${NL}200${NL}" "*** >255 ERR"
+check "int auto"          "AUTO 100,5${NL}PRINT 1${NL}END${NL}${NL}LIST${NL}" "100 PRINT 1${NL}105 END${NL}110 ${NL}>LIST${NL}  100 PRINT 1${NL}  105 END${NL}>"
+check "int trace dsp"     "10 TRACE:DSP X${NL}20 X=7${NL}30 NOTRACE:END${NL}RUN${NL}" "#20 ${NL}#20 X=7${NL}#30 "
+check "int pop"           "10 GOSUB 20:PRINT \"NO\":END${NL}20 POP:PRINT \"POPPED\":END${NL}RUN${NL}" "${NL}POPPED${NL}" "!${NL}NO${NL}"
+check "int new clr"       "10 PRINT 1${NL}A=5:CLR:PRINT A${NL}NEW${NL}LIST${NL}" "CLR:PRINT A${NL}0${NL}" "NEW${NL}>LIST${NL}>"
+check "int lower case"    "print \"hi\"${NL}" "PRINT \"HI\"${NL}HI${NL}"
+check "int save load"     "10 PRINT \"SAVED\":END${NL}SAVE MY PROG${NL}NEW${NL}LOAD MY PROG${NL}RUN${NL}CATALOG${NL}DELETE MY PROG${NL}LOAD MY PROG${NL}" "${NL}SAVED${NL}" " I 002 MY PROG${NL}" "FILE NOT FOUND${NL}"
+check "int dos syntax"    "LOAD A,S6,D1${NL}" "FILE NOT FOUND"
+printf '10 PRINT "FROM A LISTING"\r\n20 END\r\n' > "$TD/listing.bas"
+python3 tests/make_disk.py "$TD/a2int.img" /A2INT/GAME.BAS="$TD/listing.bas"
+DISK_IMAGE="$TD/a2int.img" check "int listing"  "RUN GAME.BAS${NL}CATALOG${NL}" "${NL}FROM A LISTING${NL}" " I 002 GAME.BAS"
+acheck "int gr"           "GR${NL}COLOR=3:PLOT 5,5:HLIN 0,39 AT 30:VLIN 0,39 AT 39${NL}PRINT SCRN(5,5);SCRN(6,5);SCRN(39,10)${NL}PLOT 40,0${NL}" "${NL}303${NL}>PLOT 40,0${NL}*** RANGE ERR${NL}>"
+acolour "int gr colour"   "GR${NL}COLOR=3:PLOT 5,5:COLOR=13:HLIN 0,39 AT 30${NL}" 75,22=3 75,26=0 300,122=13
+acheck "int vtab tab"     "CALL -936:VTAB 10:TAB 20:PRINT \"HERE\"${NL}" "${NL}                   HERE${NL}"
+acheck "int text"         "GR${NL}TEXT${NL}PRINT \"TEXT\"${NL}" ">PRINT \"TEXT\"${NL}TEXT${NL}>"
+BIN=tests/build/a1basic_host
+ABIN=tests/build/a1basic_host
+check "a1 basic"          "print \"hello\";2*3${NL}10 PRINT 1${NL}RUN${NL}" "PRINT \"HELLO\";2*3${NL}HELLO6${NL}" "${NL}1${NL}[TONE 1000 100]*** NO END ERR"
+check "a1 no graphics"    "GR${NL}PRINT PDL(0)${NL}VTAB 2${NL}" "GR${NL}[TONE 1000 100]*** SYNTAX ERR" "VTAB 2${NL}[TONE 1000 100]*** SYNTAX ERR"
+check "a1 rub out"        "PRINT 12_3${NL}PRINT 45${ESC}PRINT 6${NL}" "PRINT 12_3${NL}13${NL}" "PRINT 45\\${NL}>PRINT 6${NL}6${NL}"
+check "a1 tab"            "PRINT \"A\";:TAB 5:PRINT \"B\"${NL}" "${NL}A   B${NL}"
+check "a1 terminal io"    "PRINT PEEK(-12271)${NL}POKE -12270,65:POKE -12270,141:PRINT \"!\"${NL}" "${NL}A${NL}!${NL}"
+acheck "a1 screen"        "$(for i in $(seq 1 30); do printf 'PRINT %d\n' $i; done)${NL}" "${NL}>PRINT 30${NL}30${NL}" "!PRINT 10${NL}"
+BIN=tests/build/basic_host
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

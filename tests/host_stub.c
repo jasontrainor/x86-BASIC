@@ -81,6 +81,12 @@ int plat_read_key(void) {
     return (unsigned char)input[-1];
 }
 
+/* HOST_BUTTONS: the modifier keys held down (plat_buttons()). */
+int plat_buttons(void) {
+    const char *b = getenv("HOST_BUTTONS");
+    return b ? atoi(b) : 0;
+}
+
 void plat_idle(void) {
     if (!*input) {                  /* waiting for a key that will never come */
         fflush(stdout);

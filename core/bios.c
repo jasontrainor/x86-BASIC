@@ -284,6 +284,15 @@ void plat_restart_menu(void) {
     restart_boot();
 }
 
+int plat_buttons(void) {
+    unsigned char shift, flags, extra;
+    __asm__ __volatile__ ("movb 0x0417, %0" : "=q" (shift) : : "memory");
+    __asm__ __volatile__ ("movb 0x0418, %0" : "=q" (flags) : : "memory");
+    __asm__ __volatile__ ("movb 0x0496, %0" : "=q" (extra) : : "memory");
+    // 0x418 bit 1: left Alt; 0x496 bit 3: right Alt (on an enhanced keyboard)
+    return ((flags >> 1) & 1) | ((extra >> 2) & 2) | (shift & 3 ? 4 : 0);
+}
+
 int plat_menu_wanted(void) {
     unsigned int note;
     unsigned char shift;

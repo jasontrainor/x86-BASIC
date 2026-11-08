@@ -94,12 +94,46 @@ def run(mode):
     return good
 
 
+def run_basic(mode, machine, typed, want):
+    """Boot an image with just this BASIC machine, type a line, and look
+    for what it should print."""
+    if mode.startswith('uefi') and not q.ovmf():
+        return True
+    with tempfile.TemporaryDirectory() as tmp:
+        image = os.path.join(tmp, machine + '.img')
+        subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'mkimage.py'), image,
+                        '--machines', machine], check=True)
+        mon_path = os.path.join(tmp, 'mon.sock')
+        proc = subprocess.Popen(q.qemu_args(mode, image, mon_path),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            mon = q.Monitor(mon_path)
+            ok = wait_text(mon, tmp, '>', seconds=60) is not None
+            if ok:
+                q.type_keys(mon, typed)
+                ok = wait_text(mon, tmp, want) is not None
+            print(f'[{mode}] {"PASS" if ok else "FAIL"} {machine}')
+            if not ok:
+                print(screen(mon, tmp).text())
+            return ok
+        finally:
+            proc.kill()
+            proc.wait()
+
+
+BASICS = [
+    ('a2int', 'PRINT 6*7\nGR\nCOLOR=3:PLOT 1,1\n', '42'),
+    ('a1basic', 'PRINT 6*7\n', '42'),
+]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--mode', default='all', choices=['hdd', 'uefi', 'all'])
     a = ap.parse_args()
     modes = ['hdd', 'uefi'] if a.mode == 'all' else [a.mode]
-    ok = all([run(m) for m in modes])
+    ok = all([run(m) for m in modes] +
+             [run_basic(m, *b) for m in modes for b in BASICS])
     sys.exit(0 if ok else 1)
 
 

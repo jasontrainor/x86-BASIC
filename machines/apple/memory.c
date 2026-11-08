@@ -27,6 +27,12 @@
  *   $C00C/D      80COL off/on           $C054/5* page 1/page 2
  *   $C00E/F      ALTCHARSET off/on      $C056/7* low/high resolution
  *   $C05E/F*     double resolution on/off (with 80COL on)
+ *   $C061-$C063  buttons 0-2: bit 7 set while pressed
+ *
+ * The 1976 model has no soft switches, just the terminal's: $D010 the
+ * last key (bit 7 set), $D011 bit 7 set while a key is waiting (reading
+ * $D010 takes it), $D012 written to show a character. All else below
+ * $D000 is RAM.
  */
 #include "apple.h"
 #include "string.h"
@@ -45,6 +51,7 @@ __attribute__((noinline, noclone)) static unsigned char *ram(int aux) {
 int text_latch(void);                     // text.c: the keyboard, for $C000
 void text_strobe(void);                   // $C010
 int text_any_key(void);
+int apple_key(void);
 void plat_click(void);
 
 void apple_init(int model) {
@@ -122,6 +129,7 @@ static int io(unsigned int addr, int write) {
         }
         return (on ? 0x80 : 0) | (text_latch() & 0x7F);
     }
+    if (a >= 0x61 && a <= 0x63) return apple_button(a - 0x61) ? 0x80 : 0;
     if (a >= 0x30 && a < 0x40) {
         plat_click();
         return 0;
@@ -139,8 +147,27 @@ static int io(unsigned int addr, int write) {
     return 0;                             // buttons, paddles, slots: nothing there
 }
 
+// The 1976 terminal's keyboard and display.
+static int last_key;
+static int terminal(unsigned int addr, int write, int value) {
+    switch (addr & 3) {
+    case 0:                               // $D010: the key
+        if (!write && apple_key_waiting()) last_key = apple_key() | 0x80;
+        return last_key;
+    case 1: return apple_key_waiting() ? 0x80 : 0;
+    case 2:
+        if (write) apple_cout(value & 0x7F);
+        return 0;                         // (always ready for another)
+    }
+    return 0;
+}
+
 int apple_peek(unsigned int addr) {
     addr &= 0xFFFF;
+    if (apple_model == APPLE_I) {
+        if (addr < 0xD000) return ram(0)[addr];
+        return (addr & 0xFFF0) == 0xD010 ? terminal(addr, 0, 0) : 0;
+    }
     if (addr < 0xC000) return ram(bank(addr, 0))[addr];
     if (addr < 0xC100) return io(addr, 0);
     // The bytes programs read to tell which model they're on.
@@ -152,6 +179,11 @@ int apple_peek(unsigned int addr) {
 
 void apple_poke(unsigned int addr, int value) {
     addr &= 0xFFFF;
+    if (apple_model == APPLE_I) {
+        if (addr < 0xD000) ram(0)[addr] = value;
+        else if ((addr & 0xFFF0) == 0xD010) terminal(addr, 1, value);
+        return;
+    }
     if (addr < 0xC000) {
         int b = bank(addr, 1);
         ram(b)[addr] = value;

@@ -295,6 +295,10 @@ static int f10_pressed(void) {
     return 0;
 }
 
+int plat_buttons(void) {
+    return 0;
+}
+
 void plat_restart_menu(void) {
     bs->Exit(uefi_image, EFI_SUCCESS, 0, 0);
 }

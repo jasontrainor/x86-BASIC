@@ -50,6 +50,11 @@ int plat_read_key(void);
 #define KEY_END    0x106
 #define KEY_DELETE 0x107
 
+// The modifier keys held down, for machines that use them as buttons
+// (the Apple II's): bit 0 left Alt, bit 1 right Alt (AltGr), bit 2
+// Shift. (The BIOS knows; UEFI firmware doesn't say, so there it's 0.)
+int plat_buttons(void);
+
 // Wait a little (until the next interrupt, say) when there is nothing
 // to do but wait for a key.
 void plat_idle(void);

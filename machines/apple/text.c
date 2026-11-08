@@ -12,6 +12,12 @@
  * Keyboard: the Apple has a one-key latch, read at $C000 (bit 7 set
  * while a key is waiting) and cleared at $C010. Keys typed faster than
  * that is read wait in a queue behind it, rather than being lost.
+ *
+ * The 1976 terminal (APPLE_I) is simpler: characters go on at the
+ * bottom, the screen scrolls up, and nothing else - no window, no
+ * cursor moves, no inverse, no lower case. Its cursor is a flashing @,
+ * and it shows 60 characters a second. Its screen is kept in the
+ * auxiliary 64KB, which that model's programs can't reach.
  */
 #include "apple.h"
 #include "platform.h"
@@ -20,6 +26,14 @@
 #define BLANK 0xA0                        // a space, in normal text
 
 static int col80;                         // the IIe's 80-column firmware is on
+int apple_slow = 1;
+
+#ifdef HOST_TEST
+void host_echo(char c);                   // (the tests read what's printed)
+#define ECHO(c) host_echo(c)
+#else
+#define ECHO(c) ((void)0)
+#endif
 
 int video_flash_phase(void);
 
@@ -48,7 +62,7 @@ static void cell_addr(int col, int row, int *aux, unsigned int *addr) {
         *aux = !(col & 1);
         *addr = base + col / 2;
     } else {
-        *aux = 0;
+        *aux = apple_model == APPLE_I;
         *addr = base + col;
     }
 }
@@ -154,9 +168,48 @@ static int screen_code(int c) {
     return (c | 0x80) & inv;
 }
 
+// The 1976 terminal: 60 characters a second (due counts thirds of a ms).
+static unsigned long due;
+static void collect(void);
+static void pace(void) {
+    if (!apple_slow) return;
+    unsigned long now = plat_timer_ms() * 3;
+    if (due < now || due > now + 100) due = now;
+    while (plat_timer_ms() * 3 < due) collect();
+    due += 50;
+}
+
+static void terminal_out(int c) {
+    if (c == 13) {
+        pace();
+        ECHO('\n');
+        set_zp(ZP_CH, 0);
+        line_feed();
+    } else if (c >= 32 && c < 127) {
+        pace();
+        if (c >= 0x60) c -= 0x20;         // (upper case only)
+        ECHO(c);
+        put_cell(apple_cursor_col(), apple_cursor_row(), c | 0x80);
+        int ch = zp(ZP_CH) + 1;
+        if (ch >= 40) {
+            set_zp(ZP_CH, 0);
+            line_feed();
+        } else {
+            set_zp(ZP_CH, ch);
+        }
+    }                                     // (it ignores other controls)
+}
+
 void apple_cout(int c) {
     int l, w, t, b;
     c &= 0x7F;
+    if (apple_model == APPLE_I) {
+        terminal_out(c);
+        return;
+    }
+    if (c == 13) ECHO('\n');
+    else if (c >= 32 && c < 127) ECHO(apple_model == APPLE_IIE || c < 0x60 ? c : c - 0x20);
+    else if (c == 8) ECHO(8);
     if (c >= 32 && c < 127) {
         window(&l, &w, &t, &b);
         put_cell(apple_cursor_col(), apple_cursor_row(), screen_code(c));
@@ -219,6 +272,21 @@ void apple_print(const char *s) {
     while (*s) apple_cout(*s++);
 }
 
+void apple_text(void) {
+    if (apple_model == APPLE_I) return;
+    apple_poke(0xC051, 0);                // text
+    apple_poke(0xC054, 0);                // page 1
+    set_zp(ZP_WNDLFT, 0);
+    set_zp(ZP_WNDWDTH, width());
+    set_zp(ZP_WNDTOP, 0);
+    set_zp(ZP_WNDBTM, 24);
+    set_zp(ZP_CV, 23);                    // (the firmware's TEXT: VTAB 24)
+}
+
+void apple_setinv(int on) {
+    set_zp(ZP_INVFLG, on ? 0x3F : 0xFF);
+}
+
 void apple_80col(int on) {
     if (apple_model != APPLE_IIE) return;
     col80 = on;
@@ -232,6 +300,7 @@ void apple_80col(int on) {
 
 void text_init(void) {
     col80 = 0;
+    due = 0;
     set_zp(ZP_WNDLFT, 0);
     set_zp(ZP_WNDWDTH, 40);
     set_zp(ZP_WNDTOP, 0);
@@ -250,9 +319,41 @@ static unsigned char queue[QUEUE];
 static int q_head, q_len;
 static int latch;                         // $C000: the key, bit 7 while waiting
 
+static int paddle[4] = { 127, 127, 127, 127 };
+
+int apple_paddle(int n) {
+    return paddle[n & 3];
+}
+
+int apple_button(int n) {
+    return n >= 0 && n < 3 && (plat_buttons() >> n) & 1;
+}
+
+static void move_paddle(int n, int by) {
+    int v = paddle[n] + by;
+    paddle[n] = v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
 // A PC key as the Apple keyboard would type it, or -1.
 static int translate(int k) {
     int iie = apple_model == APPLE_IIE;
+    switch (k) {                          // (the arrows also move the paddles)
+    case KEY_LEFT:  move_paddle(0, -16); break;
+    case KEY_RIGHT: move_paddle(0, 16); break;
+    case KEY_UP:    move_paddle(1, -16); break;
+    case KEY_DOWN:  move_paddle(1, 16); break;
+    }
+    if (apple_model == APPLE_I) {
+        if (k == 9) {                     // Tab: 60 characters a second, or fast
+            apple_slow = !apple_slow;
+            return -1;
+        }
+        if (k == 8 || k == KEY_LEFT) return '_';   // its rub-out
+        if (k >= 0x100) return -1;
+        if (k == '\n') return 13;
+        if (k >= 'a' && k <= 'z') return k - 32;
+        return k & 0x7F;
+    }
     switch (k) {
     case KEY_LEFT:   return 8;
     case KEY_RIGHT:  return 21;
@@ -296,6 +397,11 @@ int text_any_key(void) {
 int apple_key_waiting(void) {
     collect();
     return (latch & 0x80) != 0;
+}
+
+int apple_key_peek(void) {
+    collect();
+    return latch & 0x80 ? latch & 0x7F : -1;
 }
 
 int apple_key(void) {
@@ -369,8 +475,40 @@ static int escape(void) {
     }
 }
 
+// The 1976 terminal's line input: _ (or Backspace) rubs out the last
+// character, showing a _; Esc or Ctrl+X cancels the line.
+static int terminal_getln(int prompt, char *buf, int cap) {
+restart:
+    if (prompt) apple_cout(prompt);
+    int n = 0;
+    for (;;) {
+        int k = apple_wait_key();
+        if (k == '_') {
+            if (n > 0) n--;
+            apple_cout('_');
+        } else if (k == 27 || k == 24) {
+            apple_cout('\\');
+            apple_cout(13);
+            goto restart;
+        } else if (k == 13) {
+            apple_cout(13);
+            buf[n] = '\0';
+            return n;
+        } else if (k >= 32 && k < 127) {
+            buf[n++] = k;
+            apple_cout(k);
+        }
+        if (n >= cap - 1) {
+            apple_cout('\\');
+            apple_cout(13);
+            goto restart;
+        }
+    }
+}
+
 int apple_getln(int prompt, char *buf, int cap) {
     if (cap > 256) cap = 256;
+    if (apple_model == APPLE_I) return terminal_getln(prompt, buf, cap);
 restart:
     if (prompt) apple_cout(prompt);
     int n = 0;
