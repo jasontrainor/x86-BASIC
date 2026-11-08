@@ -33,7 +33,7 @@ UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-re
               -include kernel/uefi/hidden.h -O2 -Wall -Ikernel -DUEFI_KERNEL
 UEFI_OBJS = $(patsubst %,build/uefi/%.o,uefi $(SHARED))
 
-.PHONY: all test boot-test clean FORCE
+.PHONY: all test boot-test run-listing clean FORCE
 
 all: os.img
 
@@ -96,6 +96,14 @@ test:
 # check a short BASIC session on screen.
 boot-test: os.img
 	tests/qemu_smoke.py --mode all
+
+# make run-listing LISTING=game.bas [MODE=uefi] [WAIT=20]: boot the image
+# with that listing on it, LOAD and RUN it, and save the screen as game.png.
+MODE ?= hdd
+WAIT ?= 10
+run-listing: build/boot.bin build/kernel.bin build/BOOTX64.EFI
+	@test -n "$(LISTING)" || { echo "usage: make run-listing LISTING=game.bas" >&2; exit 2; }
+	tools/run_listing.py $(LISTING) --mode $(MODE) --wait $(WAIT)
 
 clean:
 	rm -rf build tests/build os.img

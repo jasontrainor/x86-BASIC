@@ -269,7 +269,7 @@ The two versions look and behave the same.
     make test         # interpreter tests on the host, with ASan/UBSan
     make boot-test    # boot os.img in QEMU and type a BASIC session
 
-`make test` runs about 280 tests of the interpreter, including a program
+`make test` runs about 300 tests of the interpreter, including a program
 written the way Spectrum listings are (`tests/listings/demo.bas`).
 `make boot-test` boots the image five ways: BIOS floppy, BIOS hard disk,
 BIOS USB stick, UEFI USB stick and UEFI hard disk. It reads the text back
@@ -279,6 +279,9 @@ GitHub Actions for every push (`.github/workflows/ci.yml`).
 
 `tests/qemu_try.py 'PRINT 1+1\n'` boots the image, types something and
 prints what's on the screen, for trying things out.
+`make run-listing LISTING=game.bas` boots the image with that listing on
+it, runs it, and saves the screen as `game.png` (`MODE=uefi`, `WAIT=20`
+to change how it boots and how long it runs first).
 
 ## How it works
 

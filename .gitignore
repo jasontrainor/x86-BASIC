@@ -11,3 +11,4 @@ __pycache__/
 
 # Build directory
 build/
+tests/listings/*.png
