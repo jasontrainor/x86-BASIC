@@ -17,13 +17,14 @@
 #include "storage.h"
 #include "platform.h"
 #include "string.h"
+#include "mem.h"
 
 #define DIR_LBA       STORE_LBA
 #define SLOT_LBA(i)   (STORE_LBA + 1 + (i) * STORE_SLOT_SECTORS)
 #define MAGIC         "X86BASIC-SAVES1"
 #define ENTRY(i)      (dir + 32 + (i) * 32)
 
-static unsigned char dir[512];
+HIGH_MEM static unsigned char dir[512];
 
 static unsigned int get16(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static void put16(unsigned char *p, unsigned int v) { p[0] = v; p[1] = v >> 8; }

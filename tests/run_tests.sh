@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Ikernel -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/storage.c kernel/string.c kernel/num.c || exit 1
+    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/storage.c kernel/string.c kernel/num.c kernel/memory.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
@@ -180,6 +180,31 @@ check "bad stream"        "PRINT #5;1${NL}" "O Invalid stream, 0:1"
 check "lprint ignored"    "LPRINT \"PAPER\": LLIST: COPY: PRINT 3${NL}" "${NL}3${NL}" "!PAPER${NL}" "![ERR]"
 SCROLL_PROMPT=1 check "scroll prompt no"  "10 FOR I=1 TO 30: PRINT I: NEXT I${NL}RUN${NL}n" "scroll?" "D BREAK - CONT repeats, 10:2" "!${NL}25${NL}"
 SCROLL_PROMPT=1 check "scroll prompt yes" "10 FOR I=1 TO 30: PRINT I: NEXT I${NL}RUN${NL}y" "scroll?" "${NL}30${NL}" "0 OK, 10:3"
+# --- The Spectrum's memory: PEEK, POKE, UDGs, system variables ----------
+check "peek poke ram"     "POKE 30000,77: POKE 30001,-1: PRINT PEEK 30000;\" \";PEEK 30001;\" \";PEEK 100${NL}" "${NL}77 255 0${NL}"
+check "poke range"        "POKE 70000,1${NL}POKE 30000,256${NL}" "B Integer out of range, 0:1" "B Integer out of range, 0:1"
+check "chars sysvar"      "PRINT PEEK 23606+256*PEEK 23607;\" \";PEEK 23675+256*PEEK 23676${NL}" "${NL}15360 65368${NL}"
+check "rom font"          "PRINT PEEK 15616;PEEK (15616+33*8+1)>0${NL}" "${NL}01${NL}"
+check "display memory"    "CLS: PLOT 0,175: PLOT 255,0: PRINT AT 5,0;PEEK 16384;\" \";PEEK 22463${NL}" "]128 1${NL}"
+check "poke display"      "CLS: POKE 16384,255: PRINT AT 5,0;POINT (0,175);POINT (7,175);POINT (8,175)${NL}" "]110${NL}"
+check "attributes memory" "PRINT ATTR (0,0): POKE 22529,79: PRINT ATTR (0,1);\" \";PEEK 22529${NL}" "${NL}56${NL}79 79${NL}"
+check "udg"               "PRINT USR \"a\";\" \";USR \"U\"${NL}FOR i=0 TO 7: POKE USR \"b\"+i,BIN 11110000: NEXT i: CLS: PRINT \"\\b\": PRINT PEEK 16384${NL}" "${NL}65368 65528${NL}" "${NL}240${NL}"
+check "udg starts as letter" "CLS: PRINT \"\\c\": PRINT SCREEN\$ (0,0)${NL}" "${NL}C${NL}"
+check "bin"               "PRINT BIN 1010;\" \";BIN;\" \";BIN 11111111${NL}" "${NL}10 0 255${NL}"
+check "val string"        "LET b\$=\"X\": PRINT VAL\$ \"b\$+\"\"Y\"\"\"${NL}" "${NL}XY${NL}"
+check "screen string"     "CLS: PRINT \"Q\";: INVERSE 1: PRINT \"R\": INVERSE 0: PRINT SCREEN\$ (0,0);SCREEN\$ (0,1);\"[\";SCREEN\$ (0,2);\"]\"${NL}" "${NL}QR[ ]${NL}"
+check "usr machine code"  "RANDOMIZE USR 32768${NL}" "A Machine code not supported, 0:1"
+check "usr 0 resets"      "10 PRINT 1${NL}PRINT USR 0${NL}LIST${NL}" "x86 BASIC for PCs${NL}LIST${NL}0 OK"
+check "seed sysvar"       "RANDOMIZE 300: PRINT PEEK 23670+256*PEEK 23671${NL}" "${NL}300${NL}"
+check "frames"            "LET a=PEEK 23672: PAUSE 10: PRINT PEEK 23672<>a${NL}" "${NL}1${NL}"
+check "coords"            "PLOT 10,20: PRINT PEEK 23677;\" \";PEEK 23678${NL}" "${NL}10 20${NL}"
+check "keyword chars"     "PRINT CHR\$ 245;\"X\";CHR\$ 199${NL}" "${NL}PRINT X<=${NL}"
+check "custom charset"    "CLS: POKE 23606,8: PRINT \"A\";: POKE 23606,0: PRINT SCREEN\$ (0,0)${NL}" "${NL}AB${NL}"
+check "caps lock"         "10 POKE 23658,8: INPUT a\$: POKE 23658,0: PRINT a\$${NL}RUN${NL}abc${NL}" "${NL}ABC${NL}"
+check "out border"        "OUT 254,2: PRINT IN 65278${NL}" "[BORDER 2]255${NL}"
+check "quotes in strings"  "10 PRINT \"say \"\"hi\"\"\";LEN \"\"\"\"${NL}RUN${NL}LIST${NL}" "${NL}say \"hi\"1${NL}" "10>PRINT \"say \"\"hi\"\"\"; LEN \"\"\"\"${NL}"
+check "graphics escapes"  "PRINT CODE \"\\a\";\" \";CODE \"\\u\";\" \";CODE \"\\::\";\" \";CODE \"\\  \";\" \";CODE \"\\'.\";\" \";CODE \"\\*\";\" \";CODE \"\\{65}\";\" \";CODE \"\\\\\";LEN \"\\x\"${NL}" "${NL}144 164 143 128 134 127 65 922${NL}"
+check "pound sign"        "PRINT CODE \"\`\"${NL}" "${NL}96${NL}"
 check "gosub return"      "10 GOSUB 100: PRINT \"BACK\"${NL}20 END${NL}100 PRINT \"SUB\"${NL}110 RETURN${NL}RUN${NL}" "${NL}SUB${NL}BACK${NL}"
 check "nested gosub"      "10 GOSUB 100${NL}20 PRINT 3*3: END${NL}100 GOSUB 200: PRINT 2*2: RETURN${NL}200 PRINT 1*1: RETURN${NL}RUN${NL}" "${NL}1${NL}4${NL}9${NL}"
 check "return no gosub"   "RETURN${NL}" "7 RETURN without GO SUB, 0:"

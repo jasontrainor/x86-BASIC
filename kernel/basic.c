@@ -20,6 +20,7 @@
 #include "num.h"
 #include "editor.h"
 #include "storage.h"
+#include "memory.h"
 
 /* ------------------------------------------------------------------------
  * Tokens
@@ -36,6 +37,7 @@ enum {
     T_INT, T_SGN, T_SQR, T_SIN, T_COS, T_TAN, T_ATN, T_ASN, T_ACS, T_LN,
     T_EXP, T_RND, T_LEN, T_VAL, T_CODE, T_CHRS, T_STRS, T_INKEYS, T_POINT,
     T_DEFFN, T_FN, T_FLASH, T_LPRINT, T_LLIST, T_COPY,
+    T_PEEK, T_POKE, T_USR, T_BIN, T_VALS, T_ATTR, T_SCREENS, T_IN, T_OUT,
     T_LE, T_GE, T_NE,
     T_END_OF_TOKENS
 };
@@ -50,6 +52,7 @@ static const char *const token_names[] = {
     "INT", "SGN", "SQR", "SIN", "COS", "TAN", "ATN", "ASN", "ACS", "LN",
     "EXP", "RND", "LEN", "VAL", "CODE", "CHR$", "STR$", "INKEY$", "POINT",
     "DEF FN", "FN", "FLASH", "LPRINT", "LLIST", "COPY",
+    "PEEK", "POKE", "USR", "BIN", "VAL$", "ATTR", "SCREEN$", "IN", "OUT",
     "<=", ">=", "<>",
 };
 _Static_assert(sizeof(token_names) / sizeof(token_names[0]) == T_END_OF_TOKENS - T_PRINT,
@@ -90,6 +93,44 @@ static int is_word(const char *s, const char *word) {
 }
 
 /*
+ * Characters that can't be typed on a PC keyboard are written in strings
+ * as escapes, as the zmakebas tool for Spectrum listings has them:
+ *
+ *   \a to \u   the user-defined graphics (CHR$ 144-164)
+ *   \ followed by two of space ' . :   a block graphic (CHR$ 128-143): the
+ *              left and right halves of the cell, ' the top quarter, .
+ *              the bottom one, : both
+ *   \*         the copyright sign (CHR$ 127)
+ *   \{n}       character n
+ *   \\         a backslash
+ *
+ * (The pound sign is CHR$ 96, the ` key, as on the Spectrum.) If s starts
+ * with one, returns its character and moves s past it; otherwise -1.
+ */
+static int block_half(char c, int top, int bottom) {
+    return c == ' ' ? 0 : c == '\'' ? top : c == '.' ? bottom : c == ':' ? top | bottom : -1;
+}
+
+static int escape(const char **sp) {
+    const char *s = *sp;
+    if (s[0] != '\\') return -1;
+    char c = s[1];
+    if (c >= 'a' && c <= 'u') { *sp += 2; return 144 + c - 'a'; }
+    if (c == '\\') { *sp += 2; return '\\'; }
+    if (c == '*') { *sp += 2; return 127; }
+    if (c == '{' && isdigit(s[2])) {
+        int n = 0, i = 2;
+        while (isdigit(s[i]) && n < 1000) n = n * 10 + s[i++] - '0';
+        if (s[i] != '}' || n > 255 || n == 0) return -1;
+        *sp += i + 1;
+        return n;
+    }
+    int left = block_half(c, 2, 8), right = c ? block_half(s[2], 1, 4) : -1;
+    if (left >= 0 && right >= 0) { *sp += 3; return 128 + left + right; }
+    return -1;
+}
+
+/*
  * Tokenize the typed line src into dst (at most cap bytes, including the
  * terminating 0). Returns the length including the 0, or -1 if it
  * doesn't fit.
@@ -111,8 +152,17 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
         char c = *src;
         if (rest_raw) { PUT(c); src++; continue; }
         if (c == '"') {              // a string: copy up to the closing quote
-            PUT(*src++);
-            while (*src && *src != '"') PUT(*src++);
+            PUT(*src++);             //   ("" inside it is a quote)
+            while (*src && (*src != '"' || src[1] == '"')) {
+                if (*src == '"') {
+                    PUT(*src++);
+                    PUT(*src++);
+                    continue;
+                }
+                int e = escape(&src);
+                if (e >= 0) PUT(e);
+                else PUT(*src++);
+            }
             if (*src) PUT(*src++);
             continue;
         }
@@ -126,7 +176,7 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
             int t = 0;
             if (len <= 10) {
                 word[len] = '\0';
-                if (src[len] == '$') {      // CHR$, STR$, INKEY$
+                if (src[len] == '$') {      // CHR$, STR$, INKEY$, VAL$, SCREEN$
                     word[len] = '$';
                     word[len + 1] = '\0';
                     t = find_token(word);
@@ -417,7 +467,7 @@ struct array {
 HIGH_MEM struct array arrays[MAX_ARRAYS];
 int num_arrays = 0;
 
-#define HEAP_SIZE (192 * 1024)
+#define HEAP_SIZE (128 * 1024)
 HIGH_MEM __attribute__((aligned(8))) unsigned char heap[HEAP_SIZE];
 int heap_used = 0;
 
@@ -835,6 +885,8 @@ static struct value numeric_function(int t) {
 }
 
 static struct value *fn_param(const char *name, int is_str);
+static int eval_text(const char *str, int len, struct value *out);
+static struct value copy_to_pool(const char *s, int len);
 
 static struct value variable_value() {
     char name[NAME_LEN];
@@ -1056,6 +1108,89 @@ static struct value fn_call() {
     return v;
 }
 
+// IN port: only the keyboard is there, read as the Spectrum's: the high
+// byte selects half-rows of keys (a 0 bit each), and a key held down
+// reads as a 0 in bits 0-4. Anything else reads 255.
+static int in_port(int port) {
+    static const char *const half_rows[8] = {
+        "\001ZXCV", "ASDFG", "QWERT", "12345", "09876", "POIUY", "\rLKJH", " \002MNB",
+    };
+    if (port & 1) return 255;
+    int k = held_key(), bits = 0x1F;
+    if (k >= 0) {
+        char c = k == 13 ? '\r' : toupper(k);
+        for (int r = 0; r < 8; r++) {
+            if (port & (0x100 << r)) continue;
+            for (int b = 0; b < 5; b++)
+                if (half_rows[r][b] == c) bits &= ~(1 << b);
+        }
+    }
+    return 0xE0 | bits;
+}
+
+int reset_requested;      // USR 0: start again, as if switched on
+
+// (row, col) for ATTR and SCREEN$
+static int cell_args(int *row, int *col) {
+    expect_char('(', "C Nonsense in BASIC");
+    *row = expr_int(0, SCREEN_ROWS - 1);
+    expect_char(',', "C Nonsense in BASIC");
+    *col = expr_int(0, SCREEN_COLS - 1);
+    expect_char(')', "C Nonsense in BASIC");
+    return !error_msg;
+}
+
+static struct value spectrum_function(int t) {
+    int row, col;
+    switch (t) {
+    case T_PEEK:
+        return num_value(mem_peek(to_int(num_arg(), 0, 65535)));
+    case T_IN:
+        return num_value(in_port(to_int(num_arg(), 0, 65535)));
+    case T_BIN: {                          // BIN 10110: a number in binary
+        double n = 0;
+        skip_space();
+        while (*p == '0' || *p == '1') n = n * 2 + (*p++ - '0');
+        return num_value(n);
+    }
+    case T_USR: {
+        struct value v = factor();
+        if (error_msg) return num_value(0);
+        if (v.is_str) {                    // USR "a": where UDG a is
+            int c = v.len == 1 ? (unsigned char)v.str[0] : 0;
+            if (c >= 'A' && c <= 'U') c += 'a' - 'A';
+            if (c >= 144 && c <= 164) c = c - 144 + 'a';
+            if (c < 'a' || c > 'u') { error("A Invalid argument"); return num_value(0); }
+            return num_value(mem_peek16(SYS_UDG) + (c - 'a') * 8);
+        }
+        if (to_int(v.num, 0, 65535) == 0 && !error_msg) {
+            reset_requested = 1;           // USR 0 resets the Spectrum
+            return num_value(0);
+        }
+        if (!error_msg) error("A Machine code not supported");
+        return num_value(0);
+    }
+    case T_VALS: {                         // VAL$ "expression": a string
+        struct value v = str_arg(), r;
+        if (error_msg) return str_value("", 0);
+        if (!eval_text(v.str, v.len, &r)) return str_value("", 0);
+        if (!r.is_str) { error("C Nonsense in BASIC"); return str_value("", 0); }
+        return r;
+    }
+    case T_ATTR:
+        if (!cell_args(&row, &col)) return num_value(0);
+        return num_value(screen_attr(row, col));
+    case T_SCREENS: {
+        if (!cell_args(&row, &col)) return str_value("", 0);
+        int c = screen_char(row, col);
+        if (c < 0) return str_value("", 0);
+        char ch = c;
+        return copy_to_pool(&ch, 1);
+    }
+    }
+    return num_value(0);
+}
+
 static struct value primary();
 
 static struct value factor() {
@@ -1074,11 +1209,25 @@ static struct value primary() {
     double n;
     if (num_parse((const char **)&p, &n)) {
         return num_value(check(n));
-    } else if (c == '"') {
+    } else if (c == '"') {              // "text", with "" for a quote
         const char *start = ++p;
-        while (*p && *p != '"') p++;
+        int quotes = 0;
+        while (*p && (*p != '"' || p[1] == '"')) {
+            if (*p == '"') { quotes++; p++; }
+            p++;
+        }
         struct value v = str_value(start, p - start);
         if (*p == '"') p++;
+        if (quotes) {
+            char *d = pool_alloc(v.len - quotes);
+            if (error_msg) return str_value("", 0);
+            int n = 0;
+            for (int i = 0; i < v.len; i++) {
+                d[n++] = start[i];
+                if (start[i] == '"') i++;
+            }
+            v = str_value(d, n);
+        }
         return v;
     } else if (c == '-') {
         p++;
@@ -1114,6 +1263,9 @@ static struct value primary() {
     } else if (c == T_FN) {
         p++;
         return fn_call();
+    } else if (c >= T_PEEK && c <= T_IN && c != T_POKE) {
+        p++;
+        return spectrum_function(c);
     } else if (isalpha(c)) {
         return variable_value();
     }
@@ -1413,9 +1565,38 @@ static void st_let() {
     store(&lv, val);
 }
 
+/*
+ * Characters 165-255 print as the Spectrum's keywords, as they do there
+ * (its keywords are single characters with those codes).
+ */
+static const char *const spectrum_keywords[] = {
+    "RND", "INKEY$", "PI", "FN", "POINT", "SCREEN$", "ATTR", "AT", "TAB",
+    "VAL$", "CODE", "VAL", "LEN", "SIN", "COS", "TAN", "ASN", "ACS", "ATN",
+    "LN", "EXP", "INT", "SQR", "SGN", "ABS", "PEEK", "IN", "USR", "STR$",
+    "CHR$", "NOT", "BIN", "OR", "AND", "<=", ">=", "<>", "LINE", "THEN",
+    "TO", "STEP", "DEF FN", "CAT", "FORMAT", "MOVE", "ERASE", "OPEN #",
+    "CLOSE #", "MERGE", "VERIFY", "BEEP", "CIRCLE", "INK", "PAPER", "FLASH",
+    "BRIGHT", "INVERSE", "OVER", "OUT", "LPRINT", "LLIST", "STOP", "READ",
+    "DATA", "RESTORE", "NEW", "BORDER", "CONTINUE", "DIM", "REM", "FOR",
+    "GO TO", "GO SUB", "INPUT", "LOAD", "LIST", "LET", "PAUSE", "NEXT",
+    "POKE", "PRINT", "PLOT", "RUN", "SAVE", "RANDOMIZE", "IF", "CLS", "DRAW",
+    "CLEAR", "RETURN", "COPY",
+};
+_Static_assert(sizeof(spectrum_keywords) / sizeof(spectrum_keywords[0]) == 256 - 165,
+               "spectrum_keywords should cover 165-255");
+
 static void print_value(struct value v) {
     if (v.is_str) {
-        for (int i = 0; i < v.len; i++) print_char(v.str[i]);
+        for (int i = 0; i < v.len; i++) {
+            unsigned char c = v.str[i];
+            if (c >= 165) {
+                const char *k = spectrum_keywords[c - 165];
+                print_string(k);
+                if (isalpha(k[0])) print_char(' ');
+            } else {
+                print_char(c);
+            }
+        }
     } else {
         char buf[24];
         num_format(v.num, buf);
@@ -2192,6 +2373,23 @@ static void clear_all();
 static void show_banner();
 static void reset_colours();
 
+// NEW, and USR 0: start again as if just switched on.
+static void new_program() {
+    cont_ok = 0;
+    prog_len = 0;
+    e_ppc = s_top = 0;
+    clear_variables();
+    reset_run_state();
+    mem_reset();
+    reset_colours();
+    set_border(7);
+    clear_screen();
+    plot_x = plot_y = 0;
+    show_banner();
+    no_report = 1;
+    running = 0;
+}
+
 static void execute_statement() {
     skip_space();
     unsigned char t = *p;
@@ -2282,18 +2480,7 @@ static void execute_statement() {
     case T_CIRCLE:  st_circle(); break;
     case T_END:    running = 0; break;
     case T_NEW:                            // as if switched on again
-        cont_ok = 0;
-        prog_len = 0;
-        e_ppc = s_top = 0;
-        clear_variables();
-        reset_run_state();
-        reset_colours();
-        set_border(7);
-        clear_screen();
-        plot_x = plot_y = 0;
-        show_banner();
-        no_report = 1;
-        running = 0;
+        new_program();
         break;
     case T_CLEAR:                          // CLEAR [n]: n (RAMTOP) is ignored
         if (!at_statement_end()) expr_num();
@@ -2316,6 +2503,20 @@ static void execute_statement() {
         break;
     }
     case T_BEEP:   st_beep(); break;
+    case T_POKE: {
+        int a = expr_int(0, 65535);
+        expect_char(',', "C Nonsense in BASIC");
+        int v = expr_int(-255, 255);
+        if (!error_msg) mem_poke(a, v);
+        break;
+    }
+    case T_OUT: {                          // OUT 254,n sets the border
+        int port = expr_int(0, 65535);
+        expect_char(',', "C Nonsense in BASIC");
+        int v = expr_int(0, 255);
+        if (!error_msg && !(port & 1)) set_border(v & 7);
+        break;
+    }
     default:
         if (isalpha(t)) st_let();          // LET is optional
         else error("C Nonsense in BASIC");
@@ -2435,6 +2636,11 @@ static void run() {
         rep_stmt = statement_number(p);
         execute_statement();
         first = 0;
+        if (reset_requested) {
+            reset_requested = 0;
+            new_program();
+            break;
+        }
         use_lower(0);
         if (!error_msg && scroll_stopped()) error("D BREAK - CONT repeats");
         if (!error_msg && !jumped && running && !next_statement()) running = 0;
@@ -2457,13 +2663,13 @@ static void run() {
  * The command line
  * --------------------------------------------------------------------- */
 
-char input_buf[MAX_TEXT + 1];
+HIGH_MEM char input_buf[MAX_TEXT + 1];
 int last_line;            // the last line number entered, for EDIT
-unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
+HIGH_MEM unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
 
 // Read a line into input_buf with the line editor, starting with
 // whatever is in edit_next (put there by EDIT). Returns -1 for Esc.
-char edit_next[MAX_TEXT + 1];
+char edit_next[MAX_TEXT + 1];      // (low memory: accessed directly)
 
 static int edit_input(int use_history) {
     strcpy(input_buf, edit_next);
@@ -2485,6 +2691,7 @@ static int read_line(int cursor) {
 void basic_run() {
     int want_list = 0;        // show the automatic listing
     int listing_shown = 0;    // it's on the screen
+    mem_reset();
     show_banner();
     for (;;) {
         if (want_list) {

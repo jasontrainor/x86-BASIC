@@ -67,6 +67,15 @@ void set_colours(const struct colours *c);
 void set_border(int c);               // 0-7; also the lower screen's paper
 int border_colour(void);
 
+// The screen as the Spectrum's memory holds it (for PEEK and POKE):
+// pixel row y (0-191, from the top), byte col (0-31); attributes.
+int screen_byte(int y, int col);
+void screen_set_byte(int y, int col, int v);
+int screen_attr(int row, int col);
+void screen_set_attr(int row, int col, int v);
+struct colours *permanent_colours(void);   // the upper screen's
+int screen_char(int row, int col);    // SCREEN$: the character there, or -1
+
 // Graphics: x 0-255 across, y 0-175 up from the bottom (as on the
 // Spectrum), in the upper screen's colours. Points off the screen are
 // ignored.
@@ -82,6 +91,8 @@ int poll_key(void);           // next key, or -1 if none (doesn't wait)
 int key_waiting(void);        // 1 if a key has been pressed (doesn't take it)
 int check_break(void);        // 1 if Esc or Ctrl+C has been pressed
 void unget_key(int k);        // put a key back, to be read next
+int last_key(void);           // the last key read (LAST_K)
+int held_key(void);           // a key pressed just now, or -1 (for IN)
 
 // Time and sound
 unsigned long timer_ms(void);

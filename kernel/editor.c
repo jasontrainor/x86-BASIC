@@ -16,12 +16,14 @@
 #include "platform.h"
 #include "string.h"
 #include "mem.h"
+#include "memory.h"
 
 #define HISTORY 16
 #define HIST_LEN 1024
 HIGH_MEM static char history[HISTORY][HIST_LEN];
 static int hist_count;            // entries used
 static int hist_newest;           // index of the most recent entry
+HIGH_MEM static char draft[HIST_LEN];     // the line being typed, while browsing
 
 static void remember(const char *line) {
     if (!*line) return;
@@ -86,7 +88,6 @@ int edit_line(char *buf, int cap, int use_history, int cursor) {
     redraw(0, 0);
 
     int browsing = -1;                    // history entries back, -1: none
-    static char draft[HIST_LEN];          // the line being typed, while browsing
     int result = 0;
     for (;;) {
         move_cursor();
@@ -97,6 +98,8 @@ int edit_line(char *buf, int cap, int use_history, int cursor) {
             result = -1;
             break;
         } else if (k >= 32 && k < 127) {
+            if ((mem_peek(SYS_FLAGS2) & 8) && k >= 'a' && k <= 'z')
+                k -= 'a' - 'A';               // CAPS LOCK (POKE 23658,8)
             if (len < cap - 1) {
                 memmove(text + pos + 1, text + pos, len - pos + 1);
                 text[pos] = k;

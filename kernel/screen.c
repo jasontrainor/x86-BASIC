@@ -11,6 +11,7 @@
 #include "platform.h"
 #include "string.h"
 #include "mem.h"
+#include "memory.h"
 
 // The host test build records what is printed (see tests/host_stub.c).
 #ifdef HOST_TEST
@@ -27,7 +28,7 @@ static int echo = 1;
 
 HIGH_MEM static unsigned char bitmap[SCREEN_HEIGHT][SCREEN_COLS];
 HIGH_MEM static unsigned char attrs[SCREEN_ROWS][SCREEN_COLS];
-static unsigned char dirty[SCREEN_ROWS][SCREEN_COLS];   // changed, not yet drawn
+HIGH_MEM static unsigned char dirty[SCREEN_ROWS][SCREEN_COLS];   // changed, not yet drawn
 
 /*
  * The two parts of the screen, each with a print position and colours.
@@ -113,12 +114,18 @@ static void flash_tick(void) {
  * Text
  * --------------------------------------------------------------------- */
 
-// The 8 rows of character code ch. 128-143 are the Spectrum's block
-// graphics: 2x2 quarter-cell blocks, bit 0 top right, bit 1 top left,
-// bit 2 bottom right, bit 3 bottom left.
+// The 8 rows of character code ch, as on the Spectrum: 32-127 from the
+// character set CHARS points to (normally the font, in the "ROM"), 144-164
+// the user-defined graphics UDG points to, and 128-143 block graphics:
+// 2x2 quarter-cell blocks, bit 0 top right, bit 1 top left, bit 2 bottom
+// right, bit 3 bottom left.
 static void glyph(unsigned char ch, unsigned char *rows) {
     if (ch >= 32 && ch <= 127) {
-        memcpy(rows, font[ch - 32], 8);
+        unsigned int a = mem_peek16(SYS_CHARS) + ch * 8;
+        for (int y = 0; y < 8; y++) rows[y] = mem_peek(a + y);
+    } else if (ch >= 144 && ch <= 164) {
+        unsigned int a = mem_peek16(SYS_UDG) + (ch - 144) * 8;
+        for (int y = 0; y < 8; y++) rows[y] = mem_peek(a + y);
     } else if (ch >= 128 && ch <= 143) {
         int n = ch - 128;
         unsigned char top = ((n & 2) ? 0xF0 : 0) | ((n & 1) ? 0x0F : 0);
@@ -324,6 +331,42 @@ void show_cursor(int on) {
 }
 
 /* ------------------------------------------------------------------------
+ * The screen's memory, for PEEK and POKE
+ * --------------------------------------------------------------------- */
+
+int screen_byte(int y, int col) { return bitmap[y][col]; }
+int screen_attr(int r, int c)   { return attrs[r][c]; }
+
+void screen_set_byte(int y, int col, int v) {
+    bitmap[y][col] = v;
+    draw(col, y / 8);
+}
+
+void screen_set_attr(int r, int c, int v) {
+    attrs[r][c] = v;
+    draw(c, r);
+}
+
+struct colours *permanent_colours(void) { return &upper.colour; }
+
+// SCREEN$: the character (32-127) whose shape is in cell (c, r), drawn
+// normally or inverted; -1 if none.
+int screen_char(int r, int c) {
+    for (int ch = 32; ch <= 127; ch++) {
+        unsigned char rows[8];
+        glyph(ch, rows);
+        int same = 1, inverse = 1;
+        for (int y = 0; y < 8; y++) {
+            unsigned char b = bitmap[r * 8 + y][c];
+            if (b != rows[y]) same = 0;
+            if (b != (unsigned char)~rows[y]) inverse = 0;
+        }
+        if (same || inverse) return ch;
+    }
+    return -1;
+}
+
+/* ------------------------------------------------------------------------
  * Colours
  * --------------------------------------------------------------------- */
 
@@ -441,7 +484,7 @@ void circle(int cx, int cy, int r) {
  * --------------------------------------------------------------------- */
 
 #define KEYQ_SIZE 256
-static int keyq[KEYQ_SIZE];
+HIGH_MEM static int keyq[KEYQ_SIZE];
 static int keyq_head, keyq_len;
 
 // Esc and Ctrl+C (BREAK) go into the queue as 27, in order, so that keys
@@ -455,13 +498,30 @@ static void collect_keys(void) {
     }
 }
 
+static int last_k;
+static unsigned long last_k_time;
+
 int poll_key(void) {
     collect_keys();
     if (!keyq_len) return -1;
     int k = keyq[keyq_head];
     keyq_head = (keyq_head + 1) % KEYQ_SIZE;
     keyq_len--;
+    if (k < 0x100) {
+        last_k = k == '\n' ? 13 : k;
+        last_k_time = timer_ms();
+    }
     return k;
+}
+
+int last_key(void) { return last_k; }
+
+// For IN: a PC keyboard only says when a key goes down (and repeats), not
+// whether it's still held, so a key counts as held for a moment after.
+int held_key(void) {
+    collect_keys();
+    while (keyq_len && keyq[keyq_head] != 27) poll_key();   // (leave BREAK be)
+    return last_k && timer_ms() - last_k_time < 150 ? last_k : -1;
 }
 
 void unget_key(int k) {

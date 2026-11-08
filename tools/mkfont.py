@@ -78,7 +78,7 @@ GLYPHS = {
     ']': '.##../..#../..#../..#../..#../.##..',
     '^': '..#../.#.#./#...#',
     '_': '//////#####',
-    '`': '.#.../..#..',
+    '`': '..##./.#..#/.#.../####./.#.../.#.../#####',   # the Spectrum's 96 is a pound sign
     'a': '//.####/#...#/#...#/.####',
     'b': '#..../#..../####./#...#/#...#/####.',
     'c': '//.###./#..../#..../.###.',
@@ -122,12 +122,20 @@ def glyph_rows(ch):
     return rows
 
 
+# 127 is a copyright sign, as on the Spectrum (just the symbol: programs
+# use it for their own notices).
+COPYRIGHT = '.####./#....#/#.##.#/#.#..#/#.##.#/#....#/.####.'
+
+
 def font_table():
-    """Rows for codes 32-127; 127 is a solid block."""
+    """Rows for codes 32-127, laid out as the Spectrum's character set
+    (96 is a pound sign and 127 a copyright sign)."""
     table = {}
     for code in range(32, 127):
         table[code] = glyph_rows(chr(code))
-    table[127] = [0xFF] * 8
+    GLYPHS['\x7f'] = COPYRIGHT
+    table[127] = glyph_rows('\x7f')
+    del GLYPHS['\x7f']
     return table
 
 
@@ -142,7 +150,7 @@ def main():
              '// Characters 32-127, 8 bytes each (top row first, bit 7 = left).',
              'const unsigned char font[96][8] = {']
     for code, rows in font_table().items():
-        name = {92: 'backslash', 127: 'block'}.get(code, chr(code))
+        name = {92: 'backslash', 96: 'pound', 127: 'copyright'}.get(code, chr(code))
         lines.append('    { %s },  // %s' % (', '.join('0x%02X' % b for b in rows), name))
     lines.append('};')
     with open(out, 'w') as f:

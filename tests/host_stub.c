@@ -15,6 +15,7 @@
 #include "platform.h"
 
 void basic_run(void);
+void screen_init(void);
 
 static const char *input;
 int host_scroll_prompt;             /* ask "scroll?" (env SCROLL_PROMPT) */
@@ -85,6 +86,7 @@ int plat_disk_write(unsigned int lba, const void *buf) {
 int main(int argc, char **argv) {
     input = argc > 1 ? argv[1] : "";
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;
+    screen_init();                  /* as kernel_start() does */
     basic_run();
     return 0;
 }
