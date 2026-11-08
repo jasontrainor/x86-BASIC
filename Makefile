@@ -4,15 +4,17 @@ LD = ld
 
 # --- The 16-bit kernel, booted by the BIOS --------------------------------
 #
-# -O2 rather than -Os: at -Os GCC turns copy loops into movsb and similar
-# string instructions, which only reach the first 64KB in 16-bit code
-# (see tools/check16.sh). Floating point uses the x87 FPU only: SSE
+# -Os: the code, its small data and the stack must all fit in the first
+# 64KB. GCC likes to turn copy loops into movsb and similar string
+# instructions, which only reach the first 64KB in 16-bit code; the
+# stringop and loop-pattern options stop that, and tools/check16.sh
+# checks that none slipped through. Floating point uses the x87 FPU only: SSE
 # instructions fault until an OS enables them, and this kernel never does.
 BIOS_CFLAGS = -m16 -march=i686 -mtune=generic -mfpmath=387 -mno-mmx -mno-sse -mno-sse2 \
               -ffreestanding -fno-PIE -fno-pic -fno-stack-protector -nostdlib \
               -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
               -fno-tree-loop-distribute-patterns -mstringop-strategy=loop \
-              -O2 -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 \
+              -Os -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 \
               -Wall -Ikernel -DBIOS_KERNEL
 
 SHARED = kernel screen font editor storage string num basic
