@@ -83,8 +83,27 @@ int plat_disk_write(unsigned int lba, const void *buf) {
     return 0;
 }
 
+/* DISK_IMAGE: start with this disk image instead of a blank disk;
+   DISK_OUT: write the disk out here at the end. */
+static void save_disk(void) {
+    FILE *f = fopen(getenv("DISK_OUT"), "wb");
+    if (f) {
+        fwrite(disk, 1, sizeof(disk), f);
+        fclose(f);
+    }
+}
+
 int main(int argc, char **argv) {
     input = argc > 1 ? argv[1] : "";
+    if (getenv("DISK_IMAGE")) {
+        FILE *f = fopen(getenv("DISK_IMAGE"), "rb");
+        if (!f || fread(disk, 1, sizeof(disk), f) == 0) {
+            perror("DISK_IMAGE");
+            return 1;
+        }
+        fclose(f);
+    }
+    if (getenv("DISK_OUT")) atexit(save_disk);
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;
     screen_init();                  /* as kernel_start() does */
     basic_run();

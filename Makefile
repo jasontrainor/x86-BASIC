@@ -16,7 +16,7 @@ BIOS_CFLAGS = -m16 -march=i686 -mtune=generic -mfpmath=387 -mno-mmx -mno-sse -mn
               -Os -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 \
               -Wall -Ikernel -DBIOS_KERNEL
 
-SHARED = kernel screen font editor storage string num memory basic
+SHARED = kernel screen font editor storage fat string num memory basic
 BIOS_C_OBJS = $(patsubst %,build/bios/%.o,bios $(SHARED))
 BIOS_OBJS = build/bios/kernel_entry.o build/bios/bios_string.o $(BIOS_C_OBJS)
 HEADERS = $(wildcard kernel/*.h kernel/uefi/*.h)
@@ -33,7 +33,7 @@ UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-re
               -include kernel/uefi/hidden.h -O2 -Wall -Ikernel -DUEFI_KERNEL
 UEFI_OBJS = $(patsubst %,build/uefi/%.o,uefi $(SHARED))
 
-.PHONY: all test boot-test clean
+.PHONY: all test boot-test clean FORCE
 
 all: os.img
 
@@ -76,8 +76,18 @@ build/boot.bin: boot/boot.asm boot/print.asm boot/disk_load.asm build/kernel.bin
 
 # One image for both: BIOS boot code and kernel, plus an EFI system
 # partition with the UEFI kernel (see tools/mkimage.py).
-os.img: build/boot.bin build/kernel.bin build/BOOTX64.EFI tools/mkimage.py
-	python3 tools/mkimage.py build/boot.bin build/kernel.bin build/BOOTX64.EFI $@
+#
+# make LISTINGS="game.bas other.bas" also puts those files (text listings,
+# with DOS 8.3 names) on the FAT partition, for LOAD "GAME.BAS".
+LISTINGS ?=
+
+# (Remembers LISTINGS, so that changing it rebuilds os.img.)
+build/listings: FORCE
+	@mkdir -p build
+	@echo '$(LISTINGS)' | cmp -s - $@ || echo '$(LISTINGS)' > $@
+
+os.img: build/boot.bin build/kernel.bin build/BOOTX64.EFI tools/mkimage.py build/listings $(LISTINGS)
+	python3 tools/mkimage.py build/boot.bin build/kernel.bin build/BOOTX64.EFI $@ $(LISTINGS)
 
 test:
 	tests/run_tests.sh

@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Ikernel -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/storage.c kernel/string.c kernel/num.c kernel/memory.c || exit 1
+    -o "$BIN" tests/host_stub.c kernel/basic.c kernel/screen.c kernel/font.c kernel/editor.c kernel/storage.c kernel/fat.c kernel/string.c kernel/num.c kernel/memory.c || exit 1
 
 pass=0; fail=0
 # check NAME INPUT EXPECTED [EXPECTED...]
@@ -347,6 +347,41 @@ check "directory full"    "10 PRINT 1${NL}FOR i=1 TO 130: SAVE STR\$ i: NEXT i${
 BIG=""; for i in $(seq 1 150); do BIG+="$i REM ${A200}${NL}"; done
 check "big program"       "${BIG}SAVE \"BIG\"${NL}NEW${NL}LOAD \"BIG\"${NL}LIST 97${NL}" "LIST 97${NL}  97>REM" "![ERR]"
 check "save in program"   "10 SAVE \"SELF\"${NL}20 PRINT 6*7${NL}RUN${NL}CAT${NL}" "${NL}42${NL}" "SELF "
+
+# --- Text listings on the FAT partition ---------------------------------------
+TD=tests/build/text
+mkdir -p "$TD"
+printf '# a test listing\r\n\r\n10 REM hello\r\n20 PRINT "HI";\\\r\n" THERE"\r\n30 LET x=6*7: PRINT x\r\n' > "$TD/hello.bas"
+printf '10 PRINT 1\n20 PRINT 1+\nPRINT 2\n30 PRINT 3\n' > "$TD/bad.bas"
+printf '20 PRINT "merged"\n40 PRINT "four"\n' > "$TD/merge.txt"
+python3 tests/make_disk.py "$TD/disk.img" HELLO.BAS="$TD/hello.bas" BAD.BAS="$TD/bad.bas" MERGE.TXT="$TD/merge.txt"
+export DISK_IMAGE="$TD/disk.img"
+check "text load"         "LOAD \"hello.bas\"${NL}LIST${NL}RUN${NL}" "LIST${NL}  10 REM hello${NL}  20 PRINT \"HI\";\" THERE\"${NL}  30 LET x=6*7: PRINT x${NL}" "${NL}HI THERE${NL}42${NL}" "![ERR]"
+check "text bad line"     "LOAD \"bad.bas\"${NL}${NL}${ESC}LIST${NL}" "C Nonsense in BASIC, 0:1" "[ERR]20 PRINT 1+?${NL}" "  20 PRINT 1+${NL}  30 PRINT 3${NL}"
+check "text merge"        "10 PRINT \"one\"${NL}30 PRINT \"three\"${NL}MERGE \"merge.txt\"${NL}RUN${NL}" "${NL}one${NL}merged${NL}three${NL}four${NL}" "![ERR]"
+check "text cat"          "CAT${NL}" "HELLO.BAS       84 TEXT${NL}BAD.BAS         42 TEXT${NL}MERGE.TXT       34 TEXT${NL}" "!BOOTX64"
+check "text names"        "SAVE \"toolongname.bas\"${NL}SAVE \"a.bas\" CODE 0,1${NL}LOAD \"nothere.bas\"${NL}" "F Invalid file name, 0:1" "F Invalid file name, 0:1" "R Program not found, 0:1"
+# Round trip: SAVE as text, the file as expected, LOAD it back the same.
+printf '%s\n' '10 PRINT "\a\::\'"'"'.\*\\\{200}x""y": REM \b and \{7}' '20 LET a$=CHR$ 65+"`": GO TO 10' > "$TD/rt.expected"
+DISK_OUT="$TD/rt.img" check "text save"  "$(cat "$TD/rt.expected")${NL}SAVE \"rt.bas\"${NL}VERIFY \"rt.bas\"${NL}20 PRINT${NL}VERIFY \"rt.bas\"${NL}" "VERIFY \"rt.bas\"${NL}0 OK, 0:1" "R Tape loading error, 0:1"
+python3 tests/fatfile.py "$TD/rt.img" RT.BAS > "$TD/rt.got" 2>&1
+if cmp -s "$TD/rt.expected" "$TD/rt.got"; then pass=$((pass+1)); echo "PASS text file contents"
+else fail=$((fail+1)); echo "FAIL text file contents"; diff "$TD/rt.expected" "$TD/rt.got" | sed 's/^/    | /'; fi
+DISK_IMAGE="$TD/rt.img" DISK_OUT="$TD/rt2.img" check "text reload" "LOAD \"rt.bas\"${NL}SAVE \"rt2.bas\"${NL}SAVE \"rt.bas\"${NL}ERASE \"hello.bas\"${NL}CAT${NL}" "RT.BAS          " "RT2.BAS         " "!HELLO.BAS" "![ERR]"
+python3 tests/fatfile.py "$TD/rt2.img" RT2.BAS > "$TD/rt2.got" 2>&1
+if cmp -s "$TD/rt.expected" "$TD/rt2.got" && python3 tests/fatfile.py "$TD/rt2.img" --fsck > "$TD/fsck.out" 2>&1; then
+    pass=$((pass+1)); echo "PASS text file reload and fsck"
+else fail=$((fail+1)); echo "FAIL text file reload and fsck"; cat "$TD/fsck.out" | sed 's/^/    | /'; diff "$TD/rt.expected" "$TD/rt2.got" | sed 's/^/    | /'; fi
+# Bigger than one cluster, replaced by a smaller one, then the disk filled up.
+BIGT=""; for i in $(seq 1 60); do BIGT+="$i REM ${A200}${NL}"; done
+DISK_OUT="$TD/big.img" check "text big"   "${BIGT}SAVE \"big.bas\"${NL}NEW${NL}LOAD \"big.bas\"${NL}LIST 60${NL}NEW${NL}10 PRINT 1${NL}SAVE \"big.bas\"${NL}CAT${NL}" "  60>REM ${A200}" "BIG.BAS         11 TEXT" "![ERR]"
+if python3 tests/fatfile.py "$TD/big.img" --fsck > "$TD/fsck.out" 2>&1; then pass=$((pass+1)); echo "PASS text big fsck"
+else fail=$((fail+1)); echo "FAIL text big fsck"; sed 's/^/    | /' "$TD/fsck.out"; fi
+DISK_OUT="$TD/full.img" check "text disk full"    "${BIGT}FOR i=1 TO 50: SAVE \"big\"+STR\$ i+\".bas\": NEXT i${NL}PRINT i${NL}" "R Disk full, 0:2" "${NL}33${NL}"
+if python3 tests/fatfile.py "$TD/full.img" --fsck > "$TD/fsck.out" 2>&1; then pass=$((pass+1)); echo "PASS text full fsck"
+else fail=$((fail+1)); echo "FAIL text full fsck"; sed 's/^/    | /' "$TD/fsck.out"; fi
+unset DISK_IMAGE
+check "text no fat"       "LOAD \"x.bas\"${NL}" "R No FAT partition, 0:1"
 
 # --- BREAK --------------------------------------------------------------------
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "L BREAK into program, 10:" "${NL}25${NL}"

@@ -19,7 +19,7 @@
 #include "memory.h"
 
 #define HISTORY 16
-#define HIST_LEN 1024
+#define HIST_LEN 768             // (lines are up to 760 characters)
 HIGH_MEM static char history[HISTORY][HIST_LEN];
 static int hist_count;            // entries used
 static int hist_newest;           // index of the most recent entry

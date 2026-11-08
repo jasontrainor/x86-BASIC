@@ -2,7 +2,11 @@
 """
 Build os.img: a 1.44MB disk image that boots on both kinds of PC.
 
-    tools/mkimage.py boot.bin kernel.bin BOOTX64.EFI os.img
+    tools/mkimage.py boot.bin kernel.bin BOOTX64.EFI os.img [listing...]
+
+Any listings (text files with DOS 8.3 names, such as game.bas) go in the
+root directory of the EFI system partition, where LOAD "GAME.BAS" finds
+them.
 
 Layout (512-byte sectors):
 
@@ -129,8 +133,21 @@ def fat12_image(files, sectors, hidden):
     return img
 
 
+def dos_name(path):
+    """The 8.3 name for a listing file, or exit with an error."""
+    import os
+    name = os.path.basename(path).upper()
+    base, dot, ext = name.partition('.')
+    ok = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&\'()-@^_`{}~')
+    if not (1 <= len(base) <= 8 and len(ext) <= 3 and '.' not in ext and
+            set(base + ext) <= ok):
+        sys.exit('%s: listings need DOS 8.3 names, such as GAME.BAS' % path)
+    return name
+
+
 def main():
     boot_path, kernel_path, efi_path, out_path = sys.argv[1:5]
+    listings = {dos_name(p): open(p, 'rb').read() for p in sys.argv[5:]}
     boot = open(boot_path, 'rb').read()
     kernel = open(kernel_path, 'rb').read()
     efi = open(efi_path, 'rb').read()
@@ -140,7 +157,9 @@ def main():
     img = bytearray(IMAGE_SECTORS * SECTOR)
     img[:SECTOR] = boot
     img[SECTOR:SECTOR + len(kernel)] = kernel
-    esp = fat12_image({'EFI/BOOT/BOOTX64.EFI': efi}, ESP_SECTORS, ESP_START)
+    files = {'EFI/BOOT/BOOTX64.EFI': efi}
+    files.update(listings)
+    esp = fat12_image(files, ESP_SECTORS, ESP_START)
     img[ESP_START * SECTOR:] = esp
     with open(out_path, 'wb') as f:
         f.write(img)

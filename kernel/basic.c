@@ -20,6 +20,7 @@
 #include "num.h"
 #include "editor.h"
 #include "storage.h"
+#include "fat.h"
 #include "memory.h"
 #include "platform.h"
 
@@ -142,6 +143,7 @@ static int escape(const char **sp) {
  * that matches one, in any case, so names may contain keywords
  * (TOTAL, FORM) and keywords may be followed directly by digits
  * (GOTO10). Spaces around keywords are dropped; LIST puts them back.
+ * Escapes (see escape()) are taken in strings and REM text.
  * The two-word keywords GO TO, GO SUB and DEF FN are recognised with or
  * without the space. Names are kept as typed (LIST shows them that way) but
  * compared in any case. The text of strings and of REM comments is kept
@@ -153,7 +155,12 @@ static int tokenize(const char *src, unsigned char *dst, int cap) {
 #define PUT(c) do { if (n >= cap - 1) return -1; dst[n++] = (c); } while (0)
     while (*src) {
         char c = *src;
-        if (rest_raw) { PUT(c); src++; continue; }
+        if (rest_raw) {              // (escapes work in REM text too)
+            int e = escape(&src);
+            if (e >= 0) PUT(e);
+            else PUT(*src++);
+            continue;
+        }
         if (c == '"') {              // a string: copy up to the closing quote
             PUT(*src++);             //   ("" inside it is a quote)
             while (*src && (*src != '"' || src[1] == '"')) {
@@ -228,10 +235,12 @@ static void detokenize(const unsigned char *src, char *out, char *kw, int cap) {
     int in_str = 0;
     int is_kw = 0;
 #define OUT(c) do { if (n < cap - 1) { if (kw) kw[n] = is_kw; out[n++] = (c); } } while (0)
+    int rem = 0;          // after REM, the rest is text (any character)
     for (; *src; src++) {
         unsigned char c = *src;
-        if (c == '"') in_str = !in_str;
-        if (in_str || !IS_TOKEN(c)) { OUT(c); continue; }
+        if (c == '"' && !rem) in_str = !in_str;
+        if (in_str || rem || !IS_TOKEN(c)) { OUT(c); continue; }
+        if (c == T_REM) rem = 1;
         // Spaced as the Spectrum lists them: a space after each keyword
         // (but not RND, INKEY$ or PI, which take nothing after them), and
         // one before each, except functions (LET A=INT (RND*6)).
@@ -493,7 +502,7 @@ struct array {
 HIGH_MEM struct array arrays[MAX_ARRAYS];
 int num_arrays = 0;
 
-#define HEAP_SIZE (128 * 1024)
+#define HEAP_SIZE (96 * 1024)
 HIGH_MEM __attribute__((aligned(8))) unsigned char heap[HEAP_SIZE];
 int heap_used = 0;
 
@@ -2300,6 +2309,200 @@ static int file_kind(unsigned int *start, unsigned int *len) {
 
 HIGH_MEM unsigned char load_buf[PROG_SIZE];
 
+/*
+ * Listings as text files, on the FAT partition (see fat.c): a name ending
+ * .BAS or .TXT is one. The text is as LIST shows it, one line per line,
+ * with the characters a PC can't show written as escapes (see escape()),
+ * as zmakebas, the tool for making Spectrum tape files from listings,
+ * has them. Reading one, blank lines and lines starting with # are
+ * skipped, and a \ at the end of a line joins the next one to it. Each
+ * line is checked as if typed; one that doesn't make sense is kept as it
+ * is, and the first is put in the editor with its ?, to be put right.
+ */
+// A line as listed, and which of its characters are keywords (for LIST,
+// EDIT and text files; kept out of the stack).
+HIGH_MEM char list_buf[MAX_TEXT * 4], list_kw[MAX_TEXT * 4];
+
+#define TEXT_SIZE (64 * 1024)
+HIGH_MEM unsigned char text_buf[TEXT_SIZE];
+HIGH_MEM char text_line[MAX_TEXT * 8];
+HIGH_MEM unsigned char text_tokens[MAX_TEXT + 1];
+
+static int syntax_check(char *text);
+static int source_offset(const char *s, int k, const unsigned char *tokens);
+static void line_to_text(int off, char *out, char *kw, int cap);
+extern char edit_next[];
+static int edit_cursor;
+
+static int is_text_name(const char *name) {
+    int n = strlen(name);
+    if (n < 4 || name[n - 4] != '.') return 0;
+    const char *ext = name + n - 3;
+    return (toupper(ext[0]) == 'B' && toupper(ext[1]) == 'A' && toupper(ext[2]) == 'S') ||
+           (toupper(ext[0]) == 'T' && toupper(ext[1]) == 'X' && toupper(ext[2]) == 'T');
+}
+
+static char block_char(int top, int bottom) {
+    return top ? (bottom ? ':' : '\'') : (bottom ? '.' : ' ');
+}
+
+// The program line at off as text, with escapes, and a newline. Returns its length.
+static int export_line(int off, char *out) {
+    char *buf = list_buf, *kw = list_kw;
+    line_to_text(off, buf, kw, sizeof(list_buf));
+    int n = 0, in_str = 0, rem = 0;
+    for (int i = 0; buf[i]; i++) {
+        unsigned char c = buf[i];
+        if (!rem && kw[i] && i >= 2 && memcmp(buf + i - 2, "REM", 3) == 0 && kw[i - 2] &&
+            !kw[i + 1]) {
+            rem = 1;                       // the rest of the line is REM text
+            if (buf[i + 1] == ' ') out[n++] = c, c = buf[++i];
+        } else if (c == '"' && !rem) {
+            in_str = !in_str;
+        }
+        if (!in_str && !rem) {
+            out[n++] = c;
+        } else if (c == '\\') {
+            out[n++] = '\\';
+            out[n++] = '\\';
+        } else if (c == 127) {
+            out[n++] = '\\';
+            out[n++] = '*';
+        } else if (c >= 128 && c <= 143) {
+            out[n++] = '\\';
+            out[n++] = block_char(c & 2, c & 8);
+            out[n++] = block_char(c & 1, c & 4);
+        } else if (c >= 144 && c <= 164) {
+            out[n++] = '\\';
+            out[n++] = 'a' + c - 144;
+        } else if (c < 32 || c >= 165) {
+            char num[8];
+            itoa(c, num);
+            out[n++] = '\\';
+            out[n++] = '{';
+            for (int k = 0; num[k]; k++) out[n++] = num[k];
+            out[n++] = '}';
+        } else {
+            out[n++] = c;
+        }
+    }
+    while (!rem && n > 0 && out[n - 1] == ' ') n--;   // (LIST's space after STOP etc.)
+    out[n++] = '\n';
+    return n;
+}
+
+// The whole program as text in text_buf; its length, or -1 if too long.
+static int program_to_text() {
+    int n = 0;
+    for (int off = 0; off < prog_len; off = line_next(off)) {
+        int m = export_line(off, text_line);
+        if (n + m > TEXT_SIZE) return -1;
+        memcpy(text_buf + n, text_line, m);
+        n += m;
+    }
+    return n;
+}
+
+// The next line of the text in text_buf[*i..len) into text_line, joining
+// lines that end with \. Returns 0 at the end; -1 if a line is too long.
+static int next_text_line(int *i, int len) {
+    int n = 0, too_long = 0;
+    for (;;) {
+        while (*i < len && text_buf[*i] != '\n' && text_buf[*i] != '\r') {
+            if (n < MAX_TEXT) text_line[n++] = text_buf[*i];
+            else too_long = 1;
+            (*i)++;
+        }
+        if (*i < len && text_buf[*i] == '\r') (*i)++;
+        if (*i < len && text_buf[*i] == '\n') (*i)++;
+        if (n > 0 && text_line[n - 1] == '\\' && *i < len) {
+            n--;                           // carries on on the next line
+            continue;
+        }
+        break;
+    }
+    text_line[n] = '\0';
+    return too_long ? -1 : 1;
+}
+
+// Add the lines of the text in text_buf (len bytes) to the program.
+static void text_to_program(int len) {
+    int i = 0, bad_seen = 0;
+    while (i < len && !error_msg) {
+        int r = next_text_line(&i, len);
+        if (r < 0) { error("G No room for line"); break; }
+        char *t = text_line;
+        while (*t == ' ' || *t == '\t') t++;
+        if (*t == '\0' || *t == '#') continue;
+        int num = 0, bad = -1;
+        char *q = t;
+        while (isdigit(*q) && num <= 9999) num = num * 10 + (*q++ - '0');
+        if (q == t || num < 1 || num > 9999) {
+            bad = 0;                       // no line number
+        } else {
+            while (*q == ' ') q++;
+            int n = tokenize(q, text_tokens, sizeof(text_tokens));
+            if (n < 0) { error("G No room for line"); break; }
+            if (n > 1) bad = syntax_check((char *)text_tokens);
+            if (bad >= 0) bad = (q - text_line) + source_offset(q, bad, text_tokens);
+            const char *e = n > 1 ? line_store(num, text_tokens, n) : 0;
+            if (e) { error(e); break; }
+        }
+        if (bad >= 0 && !bad_seen) {      // the first bad line, to be put right
+            bad_seen = 1;
+            strncpy_safe(edit_next, text_line, MAX_TEXT + 1);
+            edit_cursor = bad;
+            edit_show_error();
+        }
+    }
+    if (bad_seen) error("C Nonsense in BASIC");
+}
+
+// SAVE, LOAD, VERIFY, MERGE or ERASE (t) of a text file.
+static void text_file(int t, const char *name) {
+    const char *err = 0;
+    int len = 0;
+    if (t == T_SAVE) {
+        len = program_to_text();
+        err = len < 0 ? "4 Out of memory" : fat_write(name, text_buf, len);
+    } else if (t == T_ERASE) {
+        err = fat_erase(name);
+    } else {
+        err = fat_read(name, text_buf, TEXT_SIZE, &len);
+    }
+    if (err || t == T_SAVE || t == T_ERASE) {
+        if (err) error(err);
+        return;
+    }
+    if (t == T_VERIFY) {                   // the same as the program would save as?
+        int k = 0;
+        for (int off = 0; off < prog_len; off = line_next(off)) {
+            int m = export_line(off, text_line);
+            for (int j = 0; j < m; j++) {
+                if (k < len && text_buf[k] == '\r') k++;
+                if (k >= len || text_buf[k++] != (unsigned char)text_line[j]) {
+                    error("R Tape loading error");
+                    return;
+                }
+            }
+        }
+        if (k < len) error("R Tape loading error");
+        return;
+    }
+    if (t == T_LOAD) {
+        prog_len = 0;
+        clear_variables();
+        reset_run_state();
+        cont_ok = 0;
+        running = 0;
+        text_to_program(len);
+        return;
+    }
+    data_mark();                          // MERGE
+    text_to_program(len);
+    data_unmark();
+}
+
 static void st_save() {
     char name[STORE_NAME_LEN + 1];
     if (!file_name(name)) return;
@@ -2308,6 +2511,11 @@ static void st_save() {
     int kind = file_kind(&start, &len), param = 0;
     if (kind == FILE_PROGRAM && accept(T_LINE)) param = expr_int(1, 9999);
     if (error_msg || checking) return;
+    if (is_text_name(name)) {
+        if (kind == FILE_PROGRAM) text_file(T_SAVE, name);
+        else error("F Invalid file name");
+        return;
+    }
     const char *err;
     if (kind == FILE_BYTES) {
         if (len > PROG_SIZE) { error("4 Out of memory"); return; }
@@ -2346,6 +2554,11 @@ static void st_load(int t) {
     if (error_msg) return;
     if (kind == FILE_BYTES && t == T_MERGE) { error("C Nonsense in BASIC"); return; }
     if (checking) return;
+    if (is_text_name(name)) {
+        if (kind == FILE_PROGRAM) text_file(t, name);
+        else error("F Invalid file name");
+        return;
+    }
     int len, param;
     const char *err = storage_load(name, kind, load_buf, PROG_SIZE, &len, &param);
     if (!err && kind == FILE_PROGRAM && !valid_program(load_buf, len)) err = "R Bad program file";
@@ -2396,6 +2609,10 @@ static void st_load(int t) {
 static void st_erase() {
     char name[STORE_NAME_LEN + 1];
     if (!file_name(name) || checking) return;
+    if (is_text_name(name)) {
+        text_file(T_ERASE, name);
+        return;
+    }
     const char *err = storage_erase(name);
     if (err) error(err);
 }
@@ -2422,11 +2639,21 @@ static void cat_entry(const char *name, int len, int param, int type) {
     print_string("\n");
 }
 
+static void cat_text(const char *name, int len) {
+    char buf[12];
+    print_string(name);
+    for (int i = strlen(name); i < 16; i++) print_char(' ');
+    itoa(len, buf);
+    print_string(buf);
+    print_string(" TEXT\n");
+}
+
 static void st_cat() {
     if (checking) return;
     int free_files, free_kb;
     const char *err = storage_list(cat_entry, &free_files, &free_kb);
     if (err) { error(err); return; }
+    fat_list(cat_text);                   // (none, if there's no FAT partition)
     char buf[8];
     itoa(free_files ? free_kb : 0, buf);  // (no room in the directory: none)
     print_string(buf);
@@ -2578,9 +2805,6 @@ static void line_to_text(int off, char *out, char *kw, int cap) {
  */
 int e_ppc;                // the current line
 
-// A line as listed, and which of its characters are keywords (for LIST
-// and EDIT; kept out of the stack, which is small in the BIOS kernel).
-HIGH_MEM char list_buf[MAX_TEXT * 4], list_kw[MAX_TEXT * 4];
 
 static int listed_length(int off, char *buf, char *kw, int cap) {
     char num[8];
@@ -2906,6 +3130,8 @@ static int next_statement() {
  */
 static int syntax_check(char *text) {
     unsigned long saved_cost = cost_us;
+    char *saved_p = p;
+    int saved_jumped = jumped, saved_then = then_part, saved_pool = pool_used;
     checking = 1;
     error_msg = 0;
     pool_used = 0;
@@ -2925,7 +3151,10 @@ static int syntax_check(char *text) {
         p++;
     }
     checking = 0;
-    then_part = 0;
+    then_part = saved_then;
+    jumped = saved_jumped;
+    pool_used = saved_pool;
+    p = saved_p;
     cost_us = saved_cost;
     int bad = error_msg ? (int)(error_pos - text) : -1;
     error_msg = 0;
@@ -3006,7 +3235,7 @@ HIGH_MEM unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
 // whatever is in edit_next (put there by EDIT). Returns -1 for Esc.
 HIGH_MEM char edit_next[MAX_TEXT + 1];
 
-static int edit_cursor = -1;      // where the cursor starts in edit_next
+static int edit_cursor = -1;      // where the cursor starts in edit_next (-1: the end)
 
 static int edit_input(int use_history) {
     strcpy(input_buf, edit_next);
@@ -3016,15 +3245,16 @@ static int edit_input(int use_history) {
     return edit_line(input_buf, sizeof(input_buf), use_history, cursor);
 }
 
-// Where, in the typed text s, the tokenized text's offset k comes from:
-// the shortest start of s that tokenizes to the same first k bytes.
-static int source_offset(const char *s, int k) {
+// Where, in the typed text s, offset k of its tokenized form (tokens)
+// comes from: the shortest start of s that tokenizes to the same first k
+// bytes.
+static int source_offset(const char *s, int k, const unsigned char *tokens) {
     int n = strlen(s);
     for (int len = 0; len < n; len++) {
         memcpy(list_buf, s, len);
         memset(list_buf + len, 0, 1);
         int m = tokenize(list_buf, (unsigned char *)list_kw, sizeof(list_kw));
-        if (m - 1 >= k && memcmp(list_kw, typed_line, k) == 0) {
+        if (m - 1 >= k && memcmp(list_kw, tokens, k) == 0) {
             while (s[len] == ' ') len++;  // (the ? goes on what follows)
             return len;
         }
@@ -3035,7 +3265,7 @@ static int source_offset(const char *s, int k) {
 // A line that doesn't make sense goes back to the editor, with a
 // flashing ? where it stops making sense (and a rasp), as on the Spectrum.
 static void refuse_line(const char *s, int bad) {
-    int mark = (s - input_buf) + source_offset(s, bad);
+    int mark = (s - input_buf) + source_offset(s, bad, typed_line);
     strcpy(edit_next, input_buf);
     edit_cursor = mark;
     edit_show_error();
