@@ -106,11 +106,12 @@ check "name too long"     "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFG=1${NL}" "ERROR: NAM
 
 # --- Numbers ---------------------------------------------------------------
 check "decimals"          "PRINT 7/2${NL}PRINT 1/3${NL}PRINT 2/3${NL}PRINT .5+.25${NL}" "${NL}3.5${NL}" "${NL}0.33333333${NL}" "${NL}0.66666667${NL}" "${NL}0.75${NL}"
-check "negative decimal"  "PRINT -1/4${NL}PRINT 0-0.001${NL}" "${NL}-0.25${NL}" "${NL}-0.001${NL}"
-check "big whole numbers" "PRINT 2147483647+1${NL}PRINT 65536*65536${NL}" "${NL}2147483648${NL}" "${NL}4294967296${NL}"
+check "negative decimal"  "PRINT -1/4${NL}PRINT 0-0.001${NL}" "${NL}-0.25${NL}" "${NL}-.001${NL}"
+check "big whole numbers" "PRINT 2147483647+1${NL}PRINT 65536*65536${NL}" "${NL}2.1474836E+9${NL}" "${NL}4.2949673E+9${NL}"
 check "exponent output"   "PRINT 1E15${NL}PRINT 12345678912345${NL}PRINT 1/1E7${NL}" "${NL}1E+15${NL}" "${NL}1.2345679E+13${NL}" "${NL}1E-7${NL}"
 check "exponent input"    "PRINT 1.5E3${NL}PRINT 25E-2${NL}" "${NL}1500${NL}" "${NL}0.25${NL}"
-check "small fixed"       "PRINT 0.00012${NL}" "${NL}0.00012${NL}"
+check "spectrum formats"  "PRINT 12345678;\" \";123456789;\" \";1E8${NL}PRINT .00001;\" \";.000001;\" \";0.5;\" \";2/3;\" \";PI${NL}" "${NL}12345678 1.2345679E+8 1E+8${NL}" "${NL}.00001 1E-6 0.5 0.66666667 3.1415927${NL}"
+check "small fixed"       "PRINT 0.00012${NL}" "${NL}.00012${NL}"
 check "rounding"          "PRINT 0.1+0.2${NL}PRINT 1/3*3${NL}" "${NL}0.3${NL}" "${NL}1${NL}"
 check "literal too big"   "PRINT 1E400${NL}" "ERROR: NUMBER TOO BIG"
 check "multiply overflow" "PRINT 1E200*1E200${NL}" "ERROR: NUMBER TOO BIG"
@@ -194,6 +195,7 @@ check "restore"           "10 READ A: RESTORE: READ B${NL}20 PRINT A+B${NL}30 DA
 check "restore line"      "10 RESTORE 40: READ A: PRINT A${NL}30 DATA 1${NL}40 DATA 2${NL}RUN${NL}" "${NL}2${NL}"
 check "data skipped"      "10 DATA 1,\"A:B\",3: PRINT 4*4${NL}RUN${NL}" "${NL}16${NL}"
 check "rnd"               "RANDOMIZE 1: A=RND: RANDOMIZE 1: B=RND${NL}PRINT A=B;A>=0;A<1${NL}" "${NL}111${NL}"
+check "rnd from power on" "PRINT RND${NL}RANDOMIZE 1: PRINT RND${NL}" "${NL}.0011291504${NL}" "${NL}.0022735596${NL}"
 check "rnd varies"        "RANDOMIZE 5: PRINT RND=RND${NL}" "${NL}0${NL}"
 check "inkey"             "10 K\$=INKEY\$: IF K\$=\"\" THEN GOTO 10${NL}20 PRINT \"KEY \";K\$${NL}RUN${NL}X" "KEY X${NL}"
 check "pause"             "PAUSE 5: PRINT 6*7${NL}" "${NL}42${NL}"

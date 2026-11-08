@@ -547,22 +547,21 @@ static void store(struct lvalue *lv, struct value val) {
 }
 
 /* ------------------------------------------------------------------------
- * Random numbers (xorshift32), seeded from the timer at startup
+ * Random numbers, as on the Spectrum: a 16-bit seed that starts at 0 when
+ * the computer is switched on, so a program that doesn't use RANDOMIZE
+ * gets the same "random" numbers every time, just as it would there.
  * --------------------------------------------------------------------- */
 
-static unsigned int rnd_state = 1;
+unsigned int rnd_seed = 0;
 
+// RANDOMIZE n; 0 takes the seed from the clock.
 static void randomize(unsigned int seed) {
-    rnd_state = seed ? seed : 1;
+    rnd_seed = seed ? seed : (unsigned int)(timer_ms() / 20) & 0xFFFF;
 }
 
 static double rnd() {
-    unsigned int x = rnd_state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    rnd_state = x;
-    return x / 4294967296.0;              // 0 <= RND < 1
+    rnd_seed = (75 * (rnd_seed + 1)) % 65537 - 1;
+    return rnd_seed / 65536.0;            // 0 <= RND < 1
 }
 
 int break_requested;      // Esc was seen by INKEY$ or INPUT
@@ -1638,15 +1637,11 @@ static void execute_statement() {
     case T_RESTORE:
         restore(at_statement_end() ? 0 : expr_int(1, 9999));
         break;
-    case T_RANDOMIZE:
-        if (at_statement_end()) {
-            randomize(timer_ms() * 2654435761u);
-        } else {
-            double n = expr_num();
-            if (!error_msg) randomize(n ? (unsigned int)to_int(n, 1, 2147483647)
-                                        : timer_ms() * 2654435761u);
-        }
+    case T_RANDOMIZE: {
+        int n = at_statement_end() ? 0 : expr_int(0, 65535);
+        if (!error_msg) randomize(n);
         break;
+    }
     case T_PAUSE: {
         int n = expr_int(0, 65535);
         if (!error_msg) pause(n);
@@ -1836,7 +1831,6 @@ static int read_line() {
 }
 
 void basic_run() {
-    randomize(timer_ms() * 2654435761u);
     while (1) {
         if (edit_input(1) < 0) continue;     // Esc: forget the line
         char *s = input_buf;

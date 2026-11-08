@@ -85,63 +85,55 @@ double num_pow10(int n) {
 // Infinity and NaN are the only values for which x - x isn't 0.
 int num_is_finite(double x) { return x - x == 0; }
 
+/*
+ * Print a number the way the Spectrum does: rounded to 8 significant
+ * digits, without trailing zeros. With b digits before the decimal point,
+ * it's written out in full for b from -4 to 8, and in E-format
+ * otherwise (1E+8, 1.5E-7). As on the Spectrum, a single 0 is written
+ * before the point only when b is 0: 0.5, but .05 and .00123.
+ */
 void num_format(double x, char *buf) {
-    char *b = buf;
+    char *o = buf;
     if (x == 0) { strcpy(buf, "0"); return; }   // (also -0)
-    if (x < 0) { *b++ = '-'; x = -x; }
+    if (x < 0) { *o++ = '-'; x = -x; }
 
-    if (x < 1e10 && num_floor(x) == x) {
-        // Whole numbers: every digit (exact; doubles hold them exactly).
-        char tmp[12];
-        int n = 0;
-        while (x >= 1) {
-            double q = num_floor(x / 10);
-            tmp[n++] = '0' + (int)(x - q * 10);
-            x = q;
-        }
-        while (n) *b++ = tmp[--n];
-        *b = '\0';
-        return;
-    }
-
-    // Otherwise 8 significant digits: x = 0.ddddddd * 10^(e+1)
-    int e = (int)num_floor(num_log10(x));
-    double m = x / num_pow10(e);
-    if (m >= 10) { m /= 10; e++; }        // log10 can be off by one ulp
-    if (m < 1)   { m *= 10; e--; }
-    int d = (int)num_round(m * 1e7);
-    if (d >= 100000000) { d = 10000000; e++; }   // 9.99999999 -> 10
-    char dig[9];
+    // x = 0.d1d2...d8 * 10^b
+    int b = (int)num_floor(num_log10(x)) + 1;
+    double m = x / num_pow10(b - 1);
+    if (m >= 10) { m /= 10; b++; }        // log10 can be off by one ulp
+    if (m < 1)   { m *= 10; b--; }
+    double r = num_round(m * 1e7);
+    if (r >= 1e8) { r = 1e7; b++; }       // 9.99999999 -> 10
+    int d = (int)r;
+    char dig[8];
     for (int i = 7; i >= 0; i--) { dig[i] = '0' + d % 10; d /= 10; }
     int nd = 8;
     while (nd > 1 && dig[nd - 1] == '0') nd--;
 
-    if (e >= 0 && e < 10) {                 // 123.456
-        for (int i = 0; i <= e; i++) *b++ = i < nd ? dig[i] : '0';
-        if (nd > e + 1) {
-            *b++ = '.';
-            for (int i = e + 1; i < nd; i++) *b++ = dig[i];
+    if (b >= -4 && b <= 8) {
+        if (b == 0) *o++ = '0';
+        for (int i = 0; i < b; i++) *o++ = i < nd ? dig[i] : '0';
+        if (nd > b) {
+            *o++ = '.';
+            for (int i = b; i < 0; i++) *o++ = '0';
+            for (int i = b > 0 ? b : 0; i < nd; i++) *o++ = dig[i];
         }
-    } else if (e < 0 && e >= -5) {          // 0.00123
-        *b++ = '0';
-        *b++ = '.';
-        for (int i = -1; i > e; i--) *b++ = '0';
-        for (int i = 0; i < nd; i++) *b++ = dig[i];
-    } else {                                // 1.23E+15, 4E-7
-        *b++ = dig[0];
+    } else {
+        *o++ = dig[0];
         if (nd > 1) {
-            *b++ = '.';
-            for (int i = 1; i < nd; i++) *b++ = dig[i];
+            *o++ = '.';
+            for (int i = 1; i < nd; i++) *o++ = dig[i];
         }
-        *b++ = 'E';
-        *b++ = e < 0 ? '-' : '+';
+        int e = b - 1;
+        *o++ = 'E';
+        *o++ = e < 0 ? '-' : '+';
         if (e < 0) e = -e;
         char tmp[6];
         int n = 0;
         do { tmp[n++] = '0' + e % 10; e /= 10; } while (e);
-        while (n) *b++ = tmp[--n];
+        while (n) *o++ = tmp[--n];
     }
-    *b = '\0';
+    *o = '\0';
 }
 
 int num_parse(const char **sp, double *out) {
