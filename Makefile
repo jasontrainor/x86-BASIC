@@ -44,10 +44,14 @@ UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-re
 
 all: os.img
 
-# $(call machine,NAME): the rules for one machine's two kernels.
+# $(call machine,NAME): the rules for one machine's two kernels. A
+# machine can also be built with the code in other directories under
+# machines/ that its file "uses" names (machines/apple/, say).
 define machine
-$(1)_SRC := $$(basename $$(notdir $$(wildcard machines/$(1)/*.c)))
-$(1)_HEADERS := $$(wildcard machines/$(1)/*.h)
+$(1)_DIRS := machines/$(1) $$(addprefix machines/,$$(shell cat machines/$(1)/uses 2>/dev/null))
+$(1)_SRC := $$(basename $$(notdir $$(wildcard $$(addsuffix /*.c,$$($(1)_DIRS)))))
+$(1)_HEADERS := $$(wildcard $$(addsuffix /*.h,$$($(1)_DIRS)))
+$(1)_INC := $$(addprefix -I,$$($(1)_DIRS))
 $(1)_BIOS_C := $$(patsubst %,build/$(1)/bios/%.o,bios $$(CORE) $$($(1)_SRC))
 $(1)_BIOS := build/$(1)/bios/kernel_entry.o build/$(1)/bios/bios_string.o $$($(1)_BIOS_C)
 $(1)_UEFI := $$(patsubst %,build/$(1)/uefi/%.o,uefi $$(CORE) $$($(1)_SRC))
@@ -56,22 +60,19 @@ build/$(1)/bios build/$(1)/uefi:
 	mkdir -p $$@
 
 build/$(1)/bios/%.o: core/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/bios
-	$$(CC) $$(BIOS_CFLAGS) -Imachines/$(1) -c $$< -o $$@
+	$$(CC) $$(BIOS_CFLAGS) $$($(1)_INC) -c $$< -o $$@
 
-build/$(1)/bios/%.o: machines/$(1)/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/bios
-	$$(CC) $$(BIOS_CFLAGS) -Imachines/$(1) -c $$< -o $$@
+$$(foreach d,$$($(1)_DIRS),$$(eval $$(call machine_dir,$(1),$$(d))))
 
 build/$(1)/bios/%.o: core/%.asm Makefile | build/$(1)/bios
 	$$(ASM) -f elf32 $$< -o $$@
 
 build/$(1)/uefi/%.o: core/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/uefi
-	$$(CC) $$(UEFI_CFLAGS) -Imachines/$(1) -c $$< -o $$@
+	$$(CC) $$(UEFI_CFLAGS) $$($(1)_INC) -c $$< -o $$@
 
 build/$(1)/uefi/%.o: core/uefi/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/uefi
-	$$(CC) $$(UEFI_CFLAGS) -Imachines/$(1) -c $$< -o $$@
+	$$(CC) $$(UEFI_CFLAGS) $$($(1)_INC) -c $$< -o $$@
 
-build/$(1)/uefi/%.o: machines/$(1)/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/uefi
-	$$(CC) $$(UEFI_CFLAGS) -Imachines/$(1) -c $$< -o $$@
 
 build/$(1)/kernel.bin: $$($(1)_BIOS) core/bios.ld tools/check16.sh
 	sh tools/check16.sh $$($(1)_BIOS_C)
@@ -87,7 +88,20 @@ build/$(1)/BOOTX64.EFI: $$($(1)_UEFI)
 		$$($(1)_UEFI) -o $$@
 endef
 
-$(foreach m,$(MACHINES) chooser,$(eval $(call machine,$(m))))
+# $(call machine_dir,NAME,DIR): compiling machine NAME's code in DIR.
+define machine_dir
+build/$(1)/bios/%.o: $(2)/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/bios
+	$$(CC) $$(BIOS_CFLAGS) $$($(1)_INC) -c $$< -o $$@
+
+build/$(1)/uefi/%.o: $(2)/%.c $$(HEADERS) $$($(1)_HEADERS) Makefile | build/$(1)/uefi
+	$$(CC) $$(UEFI_CFLAGS) $$($(1)_INC) -c $$< -o $$@
+endef
+
+# Machines that are built but not put on images unless asked for
+# (IMAGE_MACHINES): a2video tests the Apple screen and keyboard.
+TEST_MACHINES = a2video
+
+$(foreach m,$(MACHINES) $(TEST_MACHINES) chooser,$(eval $(call machine,$(m))))
 
 # --- Disk images -----------------------------------------------------------
 #
@@ -151,10 +165,12 @@ test:
 	tests/run_tests.sh
 
 # Boot os.img headless in QEMU as floppy, hard disk and USB stick, and
-# check a short BASIC session on screen; then the chooser's menu.
-boot-test: os.img build/boot.bin $(CHOOSER) $(call kernels,$(MACHINES))
+# check a short BASIC session on screen; then the chooser's menu, and the
+# Apple screen (with the a2video test machine).
+boot-test: os.img build/boot.bin $(CHOOSER) $(call kernels,$(MACHINES) $(TEST_MACHINES))
 	tests/qemu_smoke.py --mode all
 	tests/qemu_menu.py
+	tests/qemu_apple.py
 
 # make run-listing LISTING=game.bas [MODE=uefi] [WAIT=20]: boot the image
 # with that listing on it, LOAD and RUN it, and save the screen as game.png.

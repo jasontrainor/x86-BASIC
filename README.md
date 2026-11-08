@@ -267,6 +267,49 @@ keeps its last 64KB). The pound sign, © and block graphics come out as
 their Unicode characters, and UDGs as the letters they start as. `COPY`
 prints the text on the screen; pictures don't come out.
 
+## The Apple II-style machines (in progress)
+
+Machines for listings written for the 1976–1983 Integer and
+floating-point BASICs of the Apple I, II, II Plus and IIe are being
+built. Their hardware is shared, in `machines/apple/`; the BASICs aren't
+there yet. What is:
+
+- **Memory and soft switches:** 64KB of memory, plus the IIe's 64KB of
+  auxiliary memory, with the I/O switches at `$C000`–`$C0FF` (the
+  keyboard, the speaker, text/graphics, mixed, page 2, high resolution,
+  and the IIe's 80STORE, RAMRD, RAMWRT, ALTZP, 80COL, ALTCHARSET and
+  double resolution). PEEK and POKE see what programs expect there,
+  including the bytes that tell the models apart. There is no ROM: those
+  addresses read as 0.
+- **The screen,** drawn from memory as the video hardware does it:
+  - text: 40 or 80 columns, inverse and flashing characters, the IIe's
+    lower case, and MouseText symbols drawn for this project;
+  - low resolution (40×48 in 16 colours) and high resolution (280×192),
+    with the colours a TV makes of the dot patterns;
+  - the IIe's double low and high resolution;
+  - mixed text and graphics, and page 2.
+
+  It's a 560×192 picture, shown twice as tall. On the BIOS that's VGA
+  mode 12h (640×480 in 16 colours).
+- **The firmware's screen handling:** the text window, cursor and
+  inverse mode live in zero page (`POKE 32,10` moves the window's left
+  edge), with scrolling and the IIe's 80-column control characters.
+- **The keyboard:** the key latch at `$C000`, with typed-ahead keys
+  queued behind it. Before the IIe the keyboard types upper case only.
+- **Line input as the monitor reads it:** the left arrow backs up, the
+  right arrow copies the character on the screen, Esc then I J K M (or
+  the arrows) moves the cursor around, and Ctrl+X cancels the line.
+
+None of it comes from an Apple ROM, character set or manual text. The
+characters are this project's own font, the colours were worked out for
+it, and the menu names are neutral. "Apple", "Apple II" and "Applesoft"
+are trademarks of Apple Inc., and are used here only to say what
+listings these machines are for.
+
+`make image-a2video` builds an image with a test machine for all this
+(`machines/a2video/`): a `]` prompt that takes commands such as `HGR`,
+`BARS`, `80`, `CHARS` and `POKE`, listed at the top of its source.
+
 ## Booting a real PC from a USB stick
 
 **Write the image (Linux):**
@@ -316,7 +359,7 @@ The two versions look and behave the same.
     make boot-test    # boot os.img in QEMU and type a BASIC session,
                       # then try the chooser's menu
 
-`make test` runs about 300 tests of the interpreter, including a program
+`make test` runs about 330 tests of the interpreter and the Apple layer, including a program
 written the way Spectrum listings are (`tests/listings/demo.bas`).
 `make boot-test` boots the image five ways: BIOS floppy, BIOS hard disk,
 BIOS USB stick, UEFI USB stick and UEFI hard disk. It reads the text back
@@ -324,7 +367,10 @@ from screenshots. It uses KVM when available, because QEMU's emulator
 doesn't enforce some CPU rules that real PCs do. Then
 `tests/qemu_menu.py` boots images with two machines, BIOS and UEFI: the
 menu, choosing, F10 twice back to it, `MENU=NEVER`, and Shift held at
-start. The same tests run on
+start. `tests/qemu_apple.py` boots the Apple test machine and reads its
+screen back (`tests/apple_screen.py`): line input, colours, 80 columns.
+`make test` also runs the Apple layer on the host, checking the text and
+colours of the picture it draws. The same tests run on
 GitHub Actions for every push (`.github/workflows/ci.yml`).
 
 `tests/qemu_try.py 'PRINT 1+1\n'` boots the image, types something and
@@ -340,6 +386,9 @@ to change how it boots and how long it runs first).
                            partition table)
     machines/chooser/      the chooser: BOOT.CFG, the menu, and starting
                            a machine's kernel (start.c)
+    machines/apple/        the Apple II-style hardware the Apple machines
+                           share: memory.c, video.c, text.c
+    machines/a2video/      a test machine for it
     core/                  shared by every machine:
       kernel_entry.asm     16-bit start-up: moves the code to its segment
                            and sets up "unreal mode" so the real-mode
@@ -365,7 +414,8 @@ to change how it boots and how long it runs first).
 
 Each machine (`machines/NAME/`) is built, with `core/`, into its own
 pair of kernels: `build/NAME/kernel.bin` for the BIOS and
-`build/NAME/BOOTX64.EFI` for UEFI. Everything above the platform layer
+`build/NAME/BOOTX64.EFI` for UEFI, with any shared code its `uses` file
+names (`apple`). Everything above the platform layer
 (`core/platform.h`) is shared by the BIOS and UEFI kernels and the host
 tests; a machine provides `machine_start()` (`core/machine.h`).
 

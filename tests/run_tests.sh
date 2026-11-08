@@ -449,5 +449,70 @@ DISK_IMAGE= check "text no fat"       "LOAD \"x.bas\"${NL}" "R No FAT partition,
 # --- BREAK --------------------------------------------------------------------
 check "break stops loop"  "10 GOTO 10${NL}RUN${NL}${ESC}PRINT 5*5${NL}" "L BREAK into program, 10:" "${NL}25${NL}"
 
+# --- The Apple layer (machines/apple/), through the a2video test machine ----
+ABIN=tests/build/a2video_host
+gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -Wall -Icore -Imachines/a2video -Imachines/apple -DHOST_TEST \
+    -o "$ABIN" tests/host_stub.c machines/a2video/*.c machines/apple/*.c \
+    core/storage.c core/fat.c core/string.c core/num.c core/font.c || exit 1
+# acheck NAME INPUT [--80] EXPECTED...: as check, but each EXPECTED is
+# looked for in the screen as read back from the picture (inverse
+# characters in [brackets]), or with "out:" in what the program printed.
+acheck() {
+    local name=$1 in=$2; shift 2
+    local col80=""
+    if [[ ${1:-} == --80 ]]; then col80=--80; shift; fi
+    local out scr ok=1
+    out=$(SCREEN_OUT=tests/build/apple.ppm timeout 10 "$ABIN" "$in" 2>&1; echo "<EOF>")
+    scr=$(python3 tests/apple_screen.py tests/build/apple.ppm $col80)
+    if [[ $out == *AddressSanitizer* || $out == *"runtime error"* ]]; then ok=0; fi
+    for want in "$@"; do
+        local where=$scr w=$want
+        if [[ $w == out:* ]]; then where=$out; w=${w:4}; fi
+        if [[ $w == !* ]]; then [[ $where == *"${w:1}"* ]] && ok=0
+        else [[ $where == *"$w"* ]] || ok=0; fi
+    done
+    if ((ok)); then pass=$((pass+1)); echo "PASS $name"
+    else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$scr" | head -24; sed 's/^/    | /' <<<"$out" | tail -5; fi
+}
+# acolour NAME INPUT X,Y=COLOUR...: the colour (palette index) at picture dots.
+acolour() {
+    local name=$1 in=$2; shift 2
+    SCREEN_OUT=tests/build/apple.ppm timeout 10 "$ABIN" "$in" > /dev/null 2>&1
+    local ok=1 got=""
+    for want in "$@"; do
+        local c
+        c=$(python3 tests/apple_screen.py tests/build/apple.ppm --colour "${want%=*}")
+        got+=" ${want%=*}=$c"
+        [[ $c == "${want#*=}" ]] || ok=0
+    done
+    if ((ok)); then pass=$((pass+1)); echo "PASS $name"
+    else fail=$((fail+1)); echo "FAIL $name:$got"; fi
+}
+acheck "apple getln"        "HELLO${NL}" "VIDEO TEST${NL}]HELLO${NL}?HELLO${NL}]"
+acheck "apple left arrow"   "HELX${L}LO${NL}" "?HELLO${NL}"
+acheck "apple ctrl-x"       "JUNK"$'\x18'"MORE${NL}" "]JUNK\\${NL}]MORE${NL}?MORE${NL}"
+acheck "apple right arrow"  "ABCD${NL}${ESC}IIA${R}${R}${R}${NL}" "${NL}]ABCD${NL}?BCDD${NL}"
+acheck "apple esc clear"    "ABCD${NL}${ESC}@XY${NL}" "XY${NL}?XY" "!ABCD"
+acheck "apple inverse"      "INVERSE${NL}WORLD${NL}NORMAL${NL}" "[?WORLD]${NL}" "${NL}[]NORMAL]${NL}"
+acheck "apple scroll"       "$(for i in $(seq 1 30); do printf 'LINE%d\n' $i; done)${NL}" "]LINE30${NL}?LINE30" "!LINE10${NL}" "?LINE19"
+acheck "apple window"       "WINDOW 10,12,5,10${NL}HOME${NL}ABCDEFGHIJKLMNOP${NL}" "          ]ABCDEFGHIJK${NL}          LMNOP" "VIDEO TEST"
+acheck "apple wrap"         "$(printf 'X%.0s' $(seq 1 45))${NL}" "]XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX${NL}XXXXXX${NL}?XXX"
+acheck "apple switches"     "FLAG -16358${NL}GR${NL}FLAG -16358${NL}TEXT${NL}FLAG -16356${NL}FLAG -16353${NL}" "]FLAG -16358${NL}1${NL}]GR${NL}]FLAG -16358${NL}0${NL}]TEXT${NL}]FLAG -16356${NL}0${NL}]FLAG -16353${NL}0${NL}"
+acheck "apple switches 80"  "80${NL}FLAG -16353${NL}FLAG -16360${NL}" --80 "]FLAG -16353${NL}1${NL}]FLAG -16360${NL}1${NL}"
+acheck "apple model iie"    "PEEK 64435${NL}PEEK 64448${NL}" "${NL}6${NL}" "${NL}224${NL}"
+acheck "apple model ii+"    "MODEL II+${NL}PEEK 64435${NL}abc${NL}" "${NL}234${NL}" "?ABC" "!abc"
+acheck "apple lower case"   "Hello${NL}" "?Hello${NL}"
+acheck "apple chars"        "HOME${NL}CHARS${NL}" "[@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_]" "${NL}@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_${NL} !\"#\$%&'()*+,-./0123456789:;<=>?${NL}" "\`abcdefghijklmnopqrstuvwxyz{|}~"
+acheck "apple mousetext"    "HOME${NL}CHARS${NL}POKE -16369,0${NL}" "${NL}]#############[ ]#################${NL}[\`abcdefghijklmnopqrstuvwxyz{|}~]#${NL}"
+acheck "apple 80 columns"   "80${NL}Eighty columns, with a line long enough to show that it really has 80 of them!${NL}" --80 "]Eighty columns, with a line long enough to show that it really has 80 of them!${NL}?Eighty"
+acheck "apple speaker"      "PEEK -16336${NL}PEEK -16336${NL}" "out:[CLICKS 2]"
+acheck "apple page 2"       "POKE 2048,193${NL}POKE -16299,0${NL}" "!VIDEO" "A"
+acolour "apple lores bars"  "GR${NL}BARS${NL}" 7,0=0 35,0=0 45,0=1 77,0=2 553,0=15 280,150=8
+acolour "apple hires bars"  "HGR${NL}BARS${NL}" 50,10=3 160,10=12 280,10=6 400,10=9 500,10=15 50,170=0
+acolour "apple dhgr bars"   "DHGR${NL}BARS${NL}" 10,10=0 50,10=1 200,10=5 420,10=12 555,10=15
+acolour "apple dgr bars"    "DGR${NL}BARS${NL}" 3,10=0 40,10=1 200,10=5 555,10=15
+acolour "apple mixed"       "HGR${NL}BARS${NL}HOME${NL}" 50,10=3 50,165=0
+
 echo "$pass passed, $fail failed"
 ((fail == 0))
