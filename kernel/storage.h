@@ -10,10 +10,18 @@
 #define STORE_SLOT_SECTORS  64    // 32KB: the whole program store
 #define STORE_NAME_LEN      15
 
-// Each returns 0 on success or an error message.
-const char *storage_save(const char *name, const unsigned char *data, int len, int autorun);
-const char *storage_load(const char *name, unsigned char *data, int cap, int *len, int *autorun);
+// A saved file is a program (param: the line to RUN after loading, or
+// 0) or bytes (param: the address they were saved from).
+enum { FILE_PROGRAM, FILE_BYTES };
+
+// Each returns 0 on success or an error message. A load with name ""
+// takes the first file of that type.
+const char *storage_save(const char *name, const unsigned char *data, int len, int param,
+                         int type);
+const char *storage_load(const char *name, int type, unsigned char *data, int cap, int *len,
+                         int *param);
 const char *storage_erase(const char *name);
-const char *storage_list(void (*each)(const char *name, int len, int autorun), int *free_slots);
+const char *storage_list(void (*each)(const char *name, int len, int param, int type),
+                         int *free_slots);
 
 #endif

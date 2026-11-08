@@ -39,6 +39,7 @@ enum {
     T_EXP, T_RND, T_LEN, T_VAL, T_CODE, T_CHRS, T_STRS, T_INKEYS, T_POINT,
     T_DEFFN, T_FN, T_FLASH, T_LPRINT, T_LLIST, T_COPY,
     T_PEEK, T_POKE, T_USR, T_BIN, T_VALS, T_ATTR, T_SCREENS, T_IN, T_OUT,
+    T_MERGE, T_VERIFY,
     T_LE, T_GE, T_NE,
     T_END_OF_TOKENS
 };
@@ -54,6 +55,7 @@ static const char *const token_names[] = {
     "EXP", "RND", "LEN", "VAL", "CODE", "CHR$", "STR$", "INKEY$", "POINT",
     "DEF FN", "FN", "FLASH", "LPRINT", "LLIST", "COPY",
     "PEEK", "POKE", "USR", "BIN", "VAL$", "ATTR", "SCREEN$", "IN", "OUT",
+    "MERGE", "VERIFY",
     "<=", ">=", "<>",
 };
 _Static_assert(sizeof(token_names) / sizeof(token_names[0]) == T_END_OF_TOKENS - T_PRINT,
@@ -2139,14 +2141,22 @@ static void st_beep() {
 }
 
 /*
- * SAVE "name" [LINE n], LOAD "name", ERASE "name", CAT: programs saved
- * on the boot disk (see storage.c).
+ * SAVE, LOAD, VERIFY and MERGE, as on the Spectrum but with the boot disk
+ * for a tape (see storage.c):
+ *
+ *   SAVE "name" [LINE n]       the program (LOAD runs it from line n)
+ *   SAVE "name" CODE start,len bytes of memory, SAVE "name" SCREEN$ the screen
+ *   LOAD "name", LOAD "name" CODE [start[,len]], LOAD "name" SCREEN$
+ *   VERIFY: check a SAVE against what's in memory; MERGE: add a saved
+ *   program's lines to this one
+ *
+ * LOAD "" (and VERIFY "", MERGE "") take the first file of the kind.
  */
 static int file_name(char *name) {
     struct value v = expr();
     if (error_msg) return 0;
     if (!v.is_str) { error("C Nonsense in BASIC"); return 0; }
-    if (v.len < 1 || v.len > STORE_NAME_LEN) {
+    if (v.len > STORE_NAME_LEN) {
         error("F Invalid file name");
         return 0;
     }
@@ -2155,14 +2165,41 @@ static int file_name(char *name) {
     return 1;
 }
 
+// What follows the name: CODE [start[,len]], SCREEN$ or nothing (a
+// program). Returns FILE_BYTES or FILE_PROGRAM; for bytes, *start and
+// *len are set if given (otherwise left as they are).
+static int file_kind(unsigned int *start, unsigned int *len) {
+    if (accept(T_SCREENS)) {
+        *start = 16384;
+        *len = 6912;
+        return FILE_BYTES;
+    }
+    if (!accept(T_CODE)) return FILE_PROGRAM;
+    if (!at_statement_end()) {
+        *start = expr_int(0, 65535);
+        if (accept_char(',')) *len = expr_int(0, 65535);
+    }
+    return FILE_BYTES;
+}
+
+HIGH_MEM unsigned char load_buf[PROG_SIZE];
+
 static void st_save() {
     char name[STORE_NAME_LEN + 1];
     if (!file_name(name)) return;
-    int autorun = 0;
-    if (accept(T_LINE)) autorun = expr_int(1, 9999);
+    if (!name[0]) { error("F Invalid file name"); return; }
+    unsigned int start = 0, len = 0;
+    int kind = file_kind(&start, &len), param = 0;
+    if (kind == FILE_PROGRAM && accept(T_LINE)) param = expr_int(1, 9999);
     if (error_msg) return;
-    if (prog_len == 0) { error("F Invalid file name"); return; }
-    const char *err = storage_save(name, prog, prog_len, autorun);
+    const char *err;
+    if (kind == FILE_BYTES) {
+        if (len > PROG_SIZE) { error("4 Out of memory"); return; }
+        for (unsigned int i = 0; i < len; i++) load_buf[i] = mem_peek(start + i);
+        err = storage_save(name, load_buf, len, start, FILE_BYTES);
+    } else {
+        err = storage_save(name, prog, prog_len, param, FILE_PROGRAM);
+    }
     if (err) error(err);
 }
 
@@ -2170,9 +2207,8 @@ static void st_save() {
 static int valid_program(const unsigned char *data, int len) {
     int off = 0, last = 0;
     while (off < len) {
-        if (off + 4 > len) return 0;
-        int num = data[off] | (data[off + 1] << 8);
         if (off + LINE_HEAD + 1 > len) return 0;
+        int num = data[off] | (data[off + 1] << 8);
         int n = data[off + 2] | (data[off + 3] << 8);
         if (num <= last || num > 9999 || n < 1 || n > MAX_TEXT + 1 ||
             off + LINE_HEAD + n > len) return 0;
@@ -2185,22 +2221,56 @@ static int valid_program(const unsigned char *data, int len) {
     return 1;
 }
 
-HIGH_MEM unsigned char load_buf[PROG_SIZE];
-
-static void st_load() {
+// LOAD, VERIFY and MERGE (t is which).
+static void st_load(int t) {
     char name[STORE_NAME_LEN + 1];
     if (!file_name(name)) return;
-    int len, autorun;
-    const char *err = storage_load(name, load_buf, PROG_SIZE, &len, &autorun);
-    if (!err && !valid_program(load_buf, len)) err = "R Bad program file";
+    unsigned int start = 0, want = 0;
+    int kind = file_kind(&start, &want);
+    if (error_msg) return;
+    if (kind == FILE_BYTES && t == T_MERGE) { error("C Nonsense in BASIC"); return; }
+    int len, param;
+    const char *err = storage_load(name, kind, load_buf, PROG_SIZE, &len, &param);
+    if (!err && kind == FILE_PROGRAM && !valid_program(load_buf, len)) err = "R Bad program file";
     if (err) { error(err); return; }
+    if (kind == FILE_BYTES) {
+        if (!start) start = param;        // (CODE alone: where it came from)
+        if (want && (int)want < len) {
+            if (t == T_LOAD) { error("R Tape loading error"); return; }
+            len = want;
+        }
+        for (int i = 0; i < len; i++) {
+            if (t == T_VERIFY) {
+                if (mem_peek(start + i) != load_buf[i]) { error("R Tape loading error"); return; }
+            } else {
+                mem_poke(start + i, load_buf[i]);
+            }
+        }
+        return;
+    }
+    if (t == T_VERIFY) {
+        if (len != prog_len || memcmp(load_buf, prog, len) != 0) error("R Tape loading error");
+        return;
+    }
+    if (t == T_MERGE) {                   // each line goes in, replacing any same-numbered one
+        data_mark();
+        for (int off = 0; off < len && !error_msg; ) {
+            int num = load_buf[off] | (load_buf[off + 1] << 8);
+            int n = load_buf[off + 2] | (load_buf[off + 3] << 8);
+            const char *e = line_store(num, load_buf + off + LINE_HEAD, n);
+            if (e) error(e);
+            off += LINE_HEAD + n;
+        }
+        data_unmark();
+        return;
+    }
     memcpy(prog, load_buf, len);
     prog_len = len;
     clear_variables();
     reset_run_state();
     cont_ok = 0;
-    if (autorun) {
-        go_to_line(autorun);              // SAVE ... LINE n: run it
+    if (param) {
+        go_to_line(param);                // SAVE ... LINE n: run it
     } else {
         running = 0;
     }
@@ -2213,16 +2283,24 @@ static void st_erase() {
     if (err) error(err);
 }
 
-static void cat_entry(const char *name, int len, int autorun) {
+static void cat_entry(const char *name, int len, int param, int type) {
     char buf[8];
     print_string(name);
     for (int i = strlen(name); i < 16; i++) print_char(' ');
-    itoa(len, buf);
-    print_string(buf);
-    if (autorun) {
-        itoa(autorun, buf);
-        print_string(" LINE ");
+    if (type == FILE_BYTES && param == 16384 && len == 6912) {
+        print_string("SCREEN$");
+    } else {
+        itoa(len, buf);
         print_string(buf);
+        if (type == FILE_BYTES) {
+            itoa(param, buf);
+            print_string(" CODE ");
+            print_string(buf);
+        } else if (param) {
+            itoa(param, buf);
+            print_string(" LINE ");
+            print_string(buf);
+        }
     }
     print_string("\n");
 }
@@ -2533,7 +2611,9 @@ static void execute_statement() {
         break;
     case T_CONTINUE: st_continue(); break;
     case T_SAVE:   st_save(); break;
-    case T_LOAD:   st_load(); break;
+    case T_LOAD:   st_load(T_LOAD); break;
+    case T_VERIFY: st_load(T_VERIFY); break;
+    case T_MERGE:  st_load(T_MERGE); break;
     case T_ERASE:  st_erase(); break;
     case T_CAT:    st_cat(); break;
     case T_EDIT: {

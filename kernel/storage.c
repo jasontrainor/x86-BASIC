@@ -1,5 +1,5 @@
 /*
- * Saving programs on the boot disk (SAVE, LOAD, CAT, ERASE).
+ * Saving programs and bytes on the boot disk (SAVE, LOAD, CAT, ERASE...).
  *
  * Programs are kept in a reserved area of the disk image, as raw sectors
  * (see the layout in boot/boot.asm): a directory sector, then one fixed
@@ -11,9 +11,11 @@
  *          with 2-byte line lengths)
  *   32-..  STORE_SLOTS entries of 32 bytes:
  *            0-15  name, NUL-padded (empty: the slot is free)
- *            16-17 program length in bytes
- *            18-19 line to RUN after loading (SAVE ... LINE n), or 0
- *            20-23 checksum of the program bytes
+ *            16-17 length in bytes
+ *            18-19 programs: the line to RUN after loading (SAVE ...
+ *                  LINE n), or 0; bytes: the address they came from
+ *            20-23 checksum of the bytes
+ *            24    0: a program, 1: bytes (SAVE ... CODE, SCREEN$)
  */
 #include "storage.h"
 #include "platform.h"
@@ -70,7 +72,8 @@ static const char *check_name(const char *name) {
     return 0;
 }
 
-const char *storage_save(const char *name, const unsigned char *data, int len, int autorun) {
+const char *storage_save(const char *name, const unsigned char *data, int len, int param,
+                         int type) {
     const char *err = check_name(name);
     if (!err) err = read_dir();
     if (err) return err;
@@ -90,19 +93,28 @@ const char *storage_save(const char *name, const unsigned char *data, int len, i
     memset(e, 0, 32);
     memcpy(e, name, strlen(name));
     put16(e + 16, len);
-    put16(e + 18, autorun);
+    put16(e + 18, param);
     put32(e + 20, checksum(data, len));
+    e[24] = type;
     if (plat_disk_write(DIR_LBA, dir) < 0) return "R Disk error";
     return 0;
 }
 
-const char *storage_load(const char *name, unsigned char *data, int cap, int *len, int *autorun) {
-    const char *err = check_name(name);
+const char *storage_load(const char *name, int type, unsigned char *data, int cap, int *len,
+                         int *param) {
+    const char *err = name[0] ? check_name(name) : 0;
     if (!err) err = read_dir();
     if (err) return err;
-    int slot = find(name);
+    int slot = -1;
+    if (name[0]) {
+        slot = find(name);
+    } else {                              // LOAD "": the first of its kind
+        for (int i = 0; i < STORE_SLOTS && slot < 0; i++)
+            if (ENTRY(i)[0] && ENTRY(i)[24] == type) slot = i;
+    }
     if (slot < 0) return "R Program not found";
     unsigned char *e = ENTRY(slot);
+    if (e[24] != type) return "R Wrong kind of file";
     int n = get16(e + 16);
     if (n > cap || n > STORE_SLOT_SECTORS * 512) return "R Bad program file";
     unsigned char sector[512];
@@ -112,7 +124,7 @@ const char *storage_load(const char *name, unsigned char *data, int cap, int *le
     }
     if (checksum(data, n) != get32(e + 20)) return "R Bad program file";
     *len = n;
-    *autorun = get16(e + 18);
+    *param = get16(e + 18);
     return 0;
 }
 
@@ -127,7 +139,8 @@ const char *storage_erase(const char *name) {
     return 0;
 }
 
-const char *storage_list(void (*each)(const char *name, int len, int autorun), int *free_slots) {
+const char *storage_list(void (*each)(const char *name, int len, int param, int type),
+                         int *free_slots) {
     const char *err = read_dir();
     if (err) return err;
     *free_slots = 0;
@@ -140,7 +153,7 @@ const char *storage_list(void (*each)(const char *name, int len, int autorun), i
         char name[STORE_NAME_LEN + 1];
         memcpy(name, e, STORE_NAME_LEN);
         name[STORE_NAME_LEN] = '\0';
-        each(name, get16(e + 16), get16(e + 18));
+        each(name, get16(e + 16), get16(e + 18), e[24]);
     }
     return 0;
 }
