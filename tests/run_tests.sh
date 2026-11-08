@@ -150,6 +150,7 @@ check "variable not found" "PRINT Q+1${NL}" "2 Variable not found, 0:"
 check "run clears vars"   "A=5${NL}10 PRINT A${NL}RUN${NL}" "2 Variable not found, 10:"
 check "print ; at end"    "PRINT 1+1;: PRINT 3+3${NL}" "${NL}26${NL}"
 check "list detokenizes"  "10 print a:goto 10${NL}20 if a<=b then print \"if\"${NL}LIST${NL}" "  10 PRINT a: GO TO 10${NL}  20>IF a<=b THEN PRINT \"if\"${NL}"
+check "list spacing"      "10 let x=int (rnd*6)+1: if not x then print at 0,0;tab 3;code inkey\$;pi: stop${NL}LIST${NL}" "  10>LET x=INT (RND*6)+1: IF NOT x THEN PRINT AT 0,0;TAB 3;CODE INKEY\$;PI: STOP ${NL}"
 check "list rem keeps text" "10 rem Hello print${NL}LIST${NL}" "  10>REM Hello print${NL}"
 
 # --- More statements ---------------------------------------------------------
@@ -204,10 +205,14 @@ check "keyword chars"     "PRINT CHR\$ 245;\"X\";CHR\$ 199${NL}" "${NL}PRINT X<=
 check "custom charset"    "CLS: POKE 23606,8: PRINT \"A\";: POKE 23606,0: PRINT SCREEN\$ (0,0)${NL}" "${NL}AB${NL}"
 check "caps lock"         "10 POKE 23658,8: INPUT a\$: POKE 23658,0: PRINT a\$${NL}RUN${NL}abc${NL}" "${NL}ABC${NL}"
 check "out border"        "OUT 254,2: PRINT IN 65278${NL}" "[BORDER 2]255${NL}"
-check "quotes in strings"  "10 PRINT \"say \"\"hi\"\"\";LEN \"\"\"\"${NL}RUN${NL}LIST${NL}" "${NL}say \"hi\"1${NL}" "10>PRINT \"say \"\"hi\"\"\"; LEN \"\"\"\"${NL}"
+check "quotes in strings"  "10 PRINT \"say \"\"hi\"\"\";LEN \"\"\"\"${NL}RUN${NL}LIST${NL}" "${NL}say \"hi\"1${NL}" "10>PRINT \"say \"\"hi\"\"\";LEN \"\"\"\"${NL}"
 check "graphics escapes"  "PRINT CODE \"\\a\";\" \";CODE \"\\u\";\" \";CODE \"\\::\";\" \";CODE \"\\  \";\" \";CODE \"\\'.\";\" \";CODE \"\\*\";\" \";CODE \"\\{65}\";\" \";CODE \"\\\\\";LEN \"\\x\"${NL}" "${NL}144 164 143 128 134 127 65 922${NL}"
 check "pound sign"        "PRINT CODE \"\`\"${NL}" "${NL}96${NL}"
 check "deep nesting"      "10 DEF FN r(n)=FN r(n)${NL}20 PRINT FN r(1)${NL}RUN${NL}PRINT ((((((((((2))))))))))${NL}" "4 Out of memory, 20:1" "${NL}2${NL}"
+# A listing written the way Spectrum programs are (tests/listings/demo.bas):
+# UDGs from DATA with BIN, string arrays, colours in PRINT, slicing, arcs,
+# PRINT #0, VAL of an expression. RND starts from the power-on seed.
+check "spectrum listing"  "$(cat tests/listings/demo.bas)${NL}RUN${NL}" "  1. ALICE      0${NL}" "OLLING MESSAGE SCR${NL}" "SCORE: 8 86 8${NL}" "9 STOP statement, 210:1" "![ERR]"
 check "gosub return"      "10 GOSUB 100: PRINT \"BACK\"${NL}20 END${NL}100 PRINT \"SUB\"${NL}110 RETURN${NL}RUN${NL}" "${NL}SUB${NL}BACK${NL}"
 check "nested gosub"      "10 GOSUB 100${NL}20 PRINT 3*3: END${NL}100 GOSUB 200: PRINT 2*2: RETURN${NL}200 PRINT 1*1: RETURN${NL}RUN${NL}" "${NL}1${NL}4${NL}9${NL}"
 check "return no gosub"   "RETURN${NL}" "7 RETURN without GO SUB, 0:"

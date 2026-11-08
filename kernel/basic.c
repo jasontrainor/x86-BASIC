@@ -232,16 +232,18 @@ static void detokenize(const unsigned char *src, char *out, char *kw, int cap) {
         unsigned char c = *src;
         if (c == '"') in_str = !in_str;
         if (in_str || !IS_TOKEN(c)) { OUT(c); continue; }
+        // Spaced as the Spectrum lists them: a space after each keyword
+        // (but not RND, INKEY$ or PI, which take nothing after them), and
+        // one before each, except functions (LET A=INT (RND*6)).
         const char *name = token_name(c);
         int word = isalpha(name[0]);
-        if (word && n > 0 && out[n - 1] != ' ' && out[n - 1] != '(') OUT(' ');
+        int function = (c >= T_PI && c <= T_POINT) || c == T_FN || c == T_AT || c == T_TAB ||
+                       c == T_NOT || (c >= T_PEEK && c <= T_IN && c != T_POKE);
+        if (word && !function && n > 0 && out[n - 1] != ' ') OUT(' ');
         is_kw = 1;
         while (*name) OUT(*name++);
         is_kw = 0;
-        unsigned char next = src[1];
-        if (word && next && next != ' ' && next != ':' && next != ';' &&
-            next != ',' && next != ')')
-            OUT(' ');
+        if (word && c != T_RND && c != T_INKEYS && c != T_PI && src[1] != ' ') OUT(' ');
     }
     out[n] = '\0';
 #undef OUT
@@ -2544,6 +2546,8 @@ static void auto_list() {
         if (rows) print_string("\n");
         list_line(off);
         rows += n;
+        key_waiting();                // (keep keys typed meanwhile: the
+                                      // BIOS only holds 15)
     }
     screen_echo(1);
 }
