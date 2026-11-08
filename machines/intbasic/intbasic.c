@@ -97,8 +97,22 @@ static void error(const char *e) {
     if (!err) err = e;
 }
 
-static void out(int c) { apple_cout(c); }
-static void outs(const char *s) { apple_print(s); }
+static void dos_done(int result);
+static int dos_err;                       // a disk error (its DOS number), or 0
+#define E_DOS "DOS"
+
+// What programs print: disk commands (Ctrl+D) and text files go to dos.c.
+static void out(int c) {
+    if (dos_print(c)) {
+        int r = dos_result();
+        if (r != DOS_NONE) dos_done(r);
+        return;
+    }
+    apple_cout(c);
+}
+static void outs(const char *s) {
+    while (*s) out(*s++);
+}
 static void out_num(int n) {
     char b[8];
     itoa(n, b);
@@ -841,6 +855,20 @@ static void poll(void);
 HIGH_MEM char ib_input[260];
 HIGH_MEM unsigned char ib_input_tokens[MAX_TOKENS + 2];
 
+// A line for INPUT: typed, or from the text file being read (READ).
+static int input_line(void) {
+    if (dos_reading()) {
+        int n = dos_read_line(ib_input, 256);
+        if (n < 0) {
+            dos_err = DOS_END_OF_DATA;
+            error(E_DOS);
+            return 0;
+        }
+        return n;
+    }
+    return apple_getln(0, ib_input, 256);
+}
+
 static void input(void) {
     const unsigned char *prompt = 0;
     int plen = 0;
@@ -884,7 +912,7 @@ again:
             ip++;
             int from = 1;
             if (*ip == '(') from = bracketed();
-            int n = apple_getln(0, ib_input, 256);
+            int n = input_line();
             if (err) return;
             set_string(name, nlen, from, (unsigned char *)ib_input, n);
             if (err) return;
@@ -893,9 +921,12 @@ again:
             if (is_elem) sub = bracketed();
             if (err) return;
             if (!saved || !*saved) {
-                if (!first || !plen) out('?');
-                if (!first) out('?');
-                apple_getln(0, ib_input, 256);
+                if (!dos_reading()) {
+                    if (!first || !plen) out('?');
+                    if (!first) out('?');
+                }
+                input_line();
+                if (err) return;
                 int n = crunch(ib_input, ib_input_tokens, MAX_TOKENS, 0);
                 if (n <= 0) n = crunch(ib_input, ib_input_tokens, MAX_TOKENS, 1);
                 if (n < 0) {
@@ -1332,6 +1363,11 @@ static void stop_at(void) {
 static void report(void) {
     fresh_line();
     apple_bell();
+    if (dos_err) {
+        outs(dos_message(dos_err));
+        out(13);
+        return;
+    }
     outs("*** ");
     outs(err);
     outs(" ERR");
@@ -1375,7 +1411,18 @@ static void execute(void) {
     }
     if (err) report();
     err = 0;
+    dos_err = 0;
+    dos_program_ended();
     cur_line = -1;
+}
+
+static void dos_done(int r) {
+    if (r == DOS_RUN) {
+        run_from(-1);
+    } else if (r != DOS_OK) {
+        dos_err = r;
+        error(E_DOS);
+    }
 }
 
 // Check a crunched line's syntax (and its numbers' sizes).
@@ -1587,11 +1634,12 @@ void intbasic_run(int s) {
             enter_line(numbered);
             continue;
         }
-        apple_getln('>', ib_line, 250);
+        if (dos_exec_line(ib_line, 250) < 0) apple_getln('>', ib_line, 250);
         int d = dos_command(ib_line, 1);
         if (d == DOS_NONE) {
             enter_line(ib_line);
         } else if (d == DOS_RUN) {
+            ended = 0;
             run_from(-1);
             if (!ended && !err) execute();
             err = 0;

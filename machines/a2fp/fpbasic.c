@@ -105,14 +105,10 @@ static void error(int e) {
 }
 
 /* ------------------------------------------------------------------------
- * Output (with disk commands: a line printed starting with Ctrl+D)
+ * Output (with disk commands: Ctrl+D, then the command; see dos.h)
  * --------------------------------------------------------------------- */
 
-static int at_line_start = 1;             // nothing printed since a Return
-static int capturing;                     // after a Ctrl+D: a disk command
-static char command[256];
-static int command_len;
-static void disk_command(void);
+static void dos_done(int result);
 
 static void speed_delay(void) {
     int speed = 256 - apple_peek(241);    // (kept as 256 - SPEED, as the original)
@@ -123,29 +119,13 @@ static void speed_delay(void) {
 
 static void out(int c) {
     c &= 0x7F;
-    if (capturing) {
-        if (c == 13) {
-            capturing = 0;
-            command[command_len] = '\0';
-            at_line_start = 1;
-            disk_command();
-        } else if (command_len < 255) {
-            command[command_len++] = c;
-        }
-        return;
-    }
-    if (c == 4 && at_line_start) {
-        capturing = 1;
-        command_len = 0;
-        return;
-    }
-    if (dos_write_char(c)) {                 // (a text file being written: dos.c)
-        at_line_start = c == 13;
+    if (dos_print(c)) {                   // (a command, or a text file being written)
+        int r = dos_result();
+        if (r != DOS_NONE) dos_done(r);
         return;
     }
     speed_delay();
     apple_cout(c);
-    at_line_start = c == 13;
 }
 
 static void outs(const char *s) {
@@ -241,7 +221,7 @@ static void out_int(int n) {
  * length of what follows (2 bytes) and the crunched text, ending in 0.
  * --------------------------------------------------------------------- */
 
-#define PROG_SIZE 40960
+#define PROG_SIZE 32768
 #define MAX_LINE 255                      // (crunched)
 HIGH_MEM unsigned char fp_prog[PROG_SIZE];
 static int prog_len;
@@ -1402,6 +1382,22 @@ static int read_item(const char **s, int type, struct val *v, int is_data) {
     return 1;
 }
 
+// A line for INPUT, from the keyboard (after the prompt), or the text
+// file being read. 0 if there's an error (END OF DATA).
+static int read_input(const unsigned char *prompt, int plen, int prompt_char) {
+    if (dos_reading()) {
+        if (dos_read_line(fp_input, 240) < 0) {
+            dos_err = DOS_END_OF_DATA;
+            error(E_SYNTAX);
+            return 0;
+        }
+        return 1;
+    }
+    for (int i = 0; i < plen; i++) out(prompt[i]);
+    apple_getln(prompt_char, fp_input, 240);
+    return 1;
+}
+
 static void input(void) {
     if (cur_line < 0) {
         error(E_DIRECT);
@@ -1419,9 +1415,7 @@ static void input(void) {
     const unsigned char *vars = ip;
 again:
     ip = vars;
-    for (int i = 0; i < plen; i++) out(prompt[i]);
-    apple_getln(plen ? 0 : '?', fp_input, 240);
-    at_line_start = 1;
+    if (!read_input(prompt, plen, plen ? 0 : '?')) return;
     if (first_char(fp_input) == 3) {
         error(E_BREAK);
         return;
@@ -1432,8 +1426,8 @@ again:
         if (!place(&p)) return;
         if (!*s) {
             if (s != fp_input) {          // more needed: ??
-                out('?');
-                apple_getln('?', fp_input, 240);
+                if (!dos_reading()) out('?');
+                if (!read_input(0, 0, '?')) return;
                 if (first_char(fp_input) == 3) {
                     error(E_BREAK);
                     return;
@@ -1470,7 +1464,12 @@ static void get(void) {
     }
     struct place p;
     if (!place(&p)) return;
-    int k = apple_wait_key();
+    int k = dos_reading() ? dos_read_char() : apple_wait_key();
+    if (k < 0) {
+        dos_err = DOS_END_OF_DATA;
+        error(E_SYNTAX);
+        return;
+    }
     struct val v;
     if (p.type == STR) {
         unsigned char *s = scratch(1);
@@ -2159,7 +2158,7 @@ static void execute(void) {
         }
     }
     if (err != E_NONE) report();
-    if (capturing) capturing = 0;
+    dos_program_ended();
     err = E_NONE;
     dos_err = 0;
     cur_line = -1;
@@ -2171,9 +2170,7 @@ static void execute(void) {
 
 static void run_loaded(void);
 
-static void disk_command(void) {
-    int e = dos_command(command, cur_line < 0);
-    if (e == DOS_NONE) e = DOS_SYNTAX;
+static void dos_done(int e) {
     if (e == DOS_RUN) {
         run_loaded();
         return;
@@ -2354,13 +2351,13 @@ void fpbasic_run(void) {
     apple_vtab(23);
     for (;;) {
         fresh_line();
-        apple_getln(']', fp_line, 240);
-        at_line_start = 1;
+        if (dos_exec_line(fp_line, 240) < 0) apple_getln(']', fp_line, 240);
         if (first_char(fp_line) == 3) continue;
         int d = dos_command(fp_line, 1);
         if (d == DOS_NONE) {
             enter_line(fp_line);
         } else if (d == DOS_RUN) {
+            ended = 0;
             run_from(-1);
             if (!ended && err == E_NONE) execute();
             err = E_NONE;

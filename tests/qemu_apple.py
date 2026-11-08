@@ -125,6 +125,8 @@ BASICS = [
     ('a2int', '>', 'PRINT 6*7\nGR\nCOLOR=3:PLOT 1,1\n', '42'),
     ('a1basic', '>', 'PRINT 6*7\n', '42'),
     ('a2fp', ']', 'PRINT 1/3\nHGR\nHPLOT 0,0 TO 279,191\n', '.333333333'),
+    ('a2fp', ']', '10 PRINT 42\nSAVE ON DISK\nNEW\nLOAD ON DISK\nRUN\nCATALOG\n', ' A 002 ON DISK'),
+    ('a2int', '>', '10 PRINT 6*7:END\nSAVE PROG\nNEW\nRUN PROG\n', '42'),
 ]
 
 

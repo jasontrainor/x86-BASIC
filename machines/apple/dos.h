@@ -5,10 +5,10 @@
  * Disk commands in the style of the Apple II's DOS 3.3 (dos.c), for both
  * Apple BASICs: typed at the prompt (CATALOG, SAVE NAME ...) or, in a
  * program, printed after a Ctrl+D (PRINT CHR$(4);"CATALOG"). Files are
- * files in the machine's folder on the FAT partition: programs and
- * memory saved here are saved files (core/storage.h), kept as their
- * DOS names say; a listing copied there from a PC (GAME.BAS) can be
- * LOADed or RUN by its DOS 8.3 name.
+ * files in the machine's folder on the FAT partition: programs, text
+ * files and memory saved here are saved files (core/storage.h), kept as
+ * their DOS names say; a file copied there from a PC (GAME.BAS,
+ * SCORES.TXT) can be LOADed, RUN, EXECed or read by its DOS 8.3 name.
  *
  * Only how the commands behave is copied; there's no DOS code here.
  */
@@ -41,8 +41,28 @@ void dos_init(const struct dos_basic *basic, const char *folder);
 int dos_command(const char *line, int direct);
 const char *dos_message(int error);
 
-// A character a program prints, while a text file is open for writing
-// (OPEN, WRITE): it goes to the file, and this returns 1.
-int dos_write_char(int c);
+// A character a program prints. A Ctrl+D starts a command, which runs
+// at the Return; while a text file is being written (WRITE), what's
+// printed goes to it. Returns 1 if the character was taken (and isn't
+// to be shown). After a command has run, dos_result() is what it
+// returned (once; DOS_NONE otherwise).
+int dos_print(int c);
+int dos_result(void);
+
+// Reading a text file (READ): INPUT and GET read from it instead of the
+// keyboard. dos_read_line() gives the next line (without its Return)
+// and its length, -1 at the end (END OF DATA); dos_read_char() the next
+// character, -1 at the end.
+int dos_reading(void);
+int dos_read_line(char *buf, int cap);
+int dos_read_char(void);
+
+// EXEC: the next line of the file being EXECed, as if typed; its
+// length, or -1 if there isn't one.
+int dos_exec_line(char *buf, int cap);
+
+// NEW, RUN and the like close no files, as on the original; but a
+// program ending stops READ and WRITE (so the prompt shows).
+void dos_program_ended(void);
 
 #endif
