@@ -6,7 +6,7 @@
  * everything else is kept as typed. The program is a packed, sorted list
  * of lines in one buffer:
  *
- *     [line number: 2 bytes, little-endian] [length: 1 byte] [text] [0]
+ *     [line number: 2 bytes] [length: 2 bytes] [text] [0]   (little-endian)
  *
  * where the length counts the text and its terminating 0.
  *
@@ -250,14 +250,18 @@ static void detokenize(const unsigned char *src, char *out, char *kw, int cap) {
  * --------------------------------------------------------------------- */
 
 #define PROG_SIZE 32768
-#define MAX_TEXT 250                      // tokenized length of one line
+// The longest line: what fits in the lower screen, which can grow to
+// the whole screen (with the line number and the cursor).
+#define MAX_TEXT 760
+#define LINE_HEAD 4                       // number and length
 
 HIGH_MEM unsigned char prog[PROG_SIZE];
 int prog_len = 0;
 
 static int line_num(int off) { return prog[off] | (prog[off + 1] << 8); }
-static int line_next(int off) { return off + 3 + prog[off + 2]; }
-static unsigned char *line_text(int off) { return prog + off + 3; }
+static int line_len(int off) { return prog[off + 2] | (prog[off + 3] << 8); }
+static int line_next(int off) { return off + LINE_HEAD + line_len(off); }
+static unsigned char *line_text(int off) { return prog + off + LINE_HEAD; }
 
 // The first token t at or after q in a line, outside strings and REM
 // comments (which can hold any character); 0 if there isn't one.
@@ -291,14 +295,15 @@ static void line_delete(int num) {
 static const char *line_store(int num, const unsigned char *text, int len) {
     int off = line_find(num);
     int old = (off < prog_len && line_num(off) == num) ? line_next(off) - off : 0;
-    if (prog_len - old + 3 + len > PROG_SIZE) return "G No room for line";
+    if (prog_len - old + LINE_HEAD + len > PROG_SIZE) return "G No room for line";
     line_delete(num);
-    memmove(prog + off + 3 + len, prog + off, prog_len - off);
+    memmove(prog + off + LINE_HEAD + len, prog + off, prog_len - off);
     prog[off] = num & 0xFF;
     prog[off + 1] = num >> 8;
-    prog[off + 2] = len;
-    memcpy(prog + off + 3, text, len);
-    prog_len += 3 + len;
+    prog[off + 2] = len & 0xFF;
+    prog[off + 3] = len >> 8;
+    memcpy(prog + off + LINE_HEAD, text, len);
+    prog_len += LINE_HEAD + len;
     return 0;
 }
 
@@ -1620,7 +1625,7 @@ static void data_unmark() {
     }
     data_line = line_find(data_num);
     if (data_line < prog_len && line_num(data_line) == data_num && data_off >= 0 &&
-        data_off < prog[data_line + 2]) {
+        data_off < line_len(data_line)) {
         data_pos = (char *)line_text(data_line) + data_off;
     } else {
         data_pos = 0;
@@ -2167,13 +2172,15 @@ static int valid_program(const unsigned char *data, int len) {
     while (off < len) {
         if (off + 4 > len) return 0;
         int num = data[off] | (data[off + 1] << 8);
-        int n = data[off + 2];
-        if (num <= last || num > 9999 || n < 1 || off + 3 + n > len) return 0;
-        if (data[off + 3 + n - 1] != 0) return 0;
+        if (off + LINE_HEAD + 1 > len) return 0;
+        int n = data[off + 2] | (data[off + 3] << 8);
+        if (num <= last || num > 9999 || n < 1 || n > MAX_TEXT + 1 ||
+            off + LINE_HEAD + n > len) return 0;
+        if (data[off + LINE_HEAD + n - 1] != 0) return 0;
         for (int i = 0; i < n - 1; i++)
-            if (data[off + 3 + i] == 0) return 0;
+            if (data[off + LINE_HEAD + i] == 0) return 0;
         last = num;
-        off += 3 + n;
+        off += LINE_HEAD + n;
     }
     return 1;
 }
@@ -2765,11 +2772,11 @@ HIGH_MEM unsigned char typed_line[MAX_TEXT + 1];   // tokenized; run from here
 
 // Read a line into input_buf with the line editor, starting with
 // whatever is in edit_next (put there by EDIT). Returns -1 for Esc.
-char edit_next[MAX_TEXT + 1];      // (low memory: accessed directly)
+HIGH_MEM char edit_next[MAX_TEXT + 1];
 
 static int edit_input(int use_history) {
     strcpy(input_buf, edit_next);
-    edit_next[0] = '\0';
+    memset(edit_next, 0, 1);          // (not edit_next[0] = 0: see memory.c's ram_p)
     return edit_line(input_buf, sizeof(input_buf), use_history, -1);
 }
 

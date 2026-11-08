@@ -80,6 +80,8 @@ check "long strings"      "A\$=\"${A200}\"${NL}A\$=A\$+A\$+A\$+A\$: PRINT LEN A\
 check "line number range" "0 PRINT 1${NL}99999999999 PRINT 1${NL}" "C Nonsense in BASIC"
 
 FULL=""; for i in $(seq 1 200); do FULL+="$i REM ${A200}${NL}"; done
+A700=${A200}${A200}${A200}${A60}${A60:0:40}
+check "very long line"    "10 LET a\$=\"${A700}\": PRINT LEN a\$${NL}RUN${NL}LIST${NL}" "${NL}700${NL}" "  10>LET a\$=\"${A700}\": PRINT LEN a\$${NL}" "![ERR]"
 check "program full"      "${FULL}PRINT 6*7${NL}" "G No room for line, 0:" "${NL}42${NL}"
 
 # --- Variable names are validated ------------------------------------------
@@ -302,7 +304,7 @@ check "input not history" "10 INPUT A\$${NL}RUN${NL}SECRET${NL}${UP}${NL}" "\"SE
 
 # --- Saving programs -----------------------------------------------------------
 check "save load"         "10 PRINT 6*7${NL}SAVE \"answer\"${NL}NEW${NL}LOAD \"ANSWER\"${NL}LIST${NL}RUN${NL}" "LIST${NL}  10 PRINT 6*7${NL}" "${NL}42${NL}"
-check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             6${NL}TWO             12 LINE 20${NL}13 FREE${NL}"
+check "cat"               "10 PRINT 1${NL}SAVE \"ONE\"${NL}20 PRINT 2${NL}SAVE \"TWO\" LINE 20${NL}CAT${NL}" "ONE             7${NL}TWO             14 LINE 20${NL}13 FREE${NL}"
 check "save replaces"     "10 PRINT 1${NL}SAVE \"P\"${NL}10 PRINT 2${NL}SAVE \"P\"${NL}NEW${NL}LOAD \"P\"${NL}LIST${NL}CAT${NL}" "LIST${NL}  10 PRINT 2${NL}" "14 FREE"
 check "load autorun"      "10 PRINT 6*7${NL}SAVE \"GO\" LINE 10${NL}NEW${NL}LOAD \"GO\"${NL}" "LOAD \"GO\"${NL}42${NL}"
 check "load missing"      "LOAD \"NOPE\"${NL}" "R Program not found, 0:"

@@ -7,7 +7,8 @@
  * needs no filesystem driver, and the BIOS and UEFI kernels share it.
  *
  * Directory sector:
- *   0-15   magic "X86BASIC-SAVES1" (the 1: tokenized program format 1)
+ *   0-15   magic "X86BASIC-SAVES2" (the 2: tokenized program format 2,
+ *          with 2-byte line lengths)
  *   32-..  STORE_SLOTS entries of 32 bytes:
  *            0-15  name, NUL-padded (empty: the slot is free)
  *            16-17 program length in bytes
@@ -21,7 +22,7 @@
 
 #define DIR_LBA       STORE_LBA
 #define SLOT_LBA(i)   (STORE_LBA + 1 + (i) * STORE_SLOT_SECTORS)
-#define MAGIC         "X86BASIC-SAVES1"
+#define MAGIC         "X86BASIC-SAVES2"
 #define ENTRY(i)      (dir + 32 + (i) * 32)
 
 HIGH_MEM static unsigned char dir[512];
