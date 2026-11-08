@@ -860,7 +860,7 @@ static double num_arg() {
     return v.num;
 }
 
-static struct value numeric_function(int t) {
+__attribute__((noinline)) static struct value numeric_function(int t) {
     double x = num_arg();
     if (error_msg) return num_value(0);
     switch (t) {
@@ -921,7 +921,7 @@ static struct value variable_value() {
 }
 
 // Slice a string value (the "(" not yet consumed).
-static struct value slice(struct value s) {
+__attribute__((noinline)) static struct value slice(struct value s) {
     p++;
     int from, to;
     if (!slice_spec(s.len, &from, &to)) return str_value("", 0);
@@ -971,7 +971,7 @@ static struct value copy_to_pool(const char *s, int len) {
     return str_value(d, len);
 }
 
-static struct value string_function(int t) {
+__attribute__((noinline)) static struct value string_function(int t) {
     struct value v;
     char buf[24];
     switch (t) {
@@ -1046,7 +1046,7 @@ static int find_def_fn(const char *name, int is_str) {
     return 0;
 }
 
-static struct value fn_call() {
+__attribute__((noinline)) static struct value fn_call() {
     char name[NAME_LEN];
     int is_str;
     if (!read_name(name, &is_str)) return num_value(0);
@@ -1140,7 +1140,7 @@ static int cell_args(int *row, int *col) {
     return !error_msg;
 }
 
-static struct value spectrum_function(int t) {
+__attribute__((noinline)) static struct value spectrum_function(int t) {
     int row, col;
     switch (t) {
     case T_PEEK:
@@ -1193,7 +1193,31 @@ static struct value spectrum_function(int t) {
 
 static struct value primary();
 
+/*
+ * Brackets and functions nest by recursion, and the BIOS kernel's stack
+ * is small (see linker.ld), so deep nesting is stopped with an error
+ * rather than letting the stack overflow.
+ */
+#if defined(BIOS_KERNEL)
+#define STACK_BUDGET (8 * 1024)       // of the 12KB in linker.ld
+#elif defined(UEFI_KERNEL)
+#define STACK_BUDGET (64 * 1024)      // (UEFI promises at least 128KB)
+#else
+#define STACK_BUDGET (1024 * 1024)    // tests: frames are big with sanitizers
+#endif
+char *stack_base;         // the stack at the start, set by basic_run()
+
+static int stack_full() {
+    char *here = __builtin_frame_address(0);
+    if (stack_base - here > STACK_BUDGET) {
+        error("4 Out of memory");
+        return 1;
+    }
+    return 0;
+}
+
 static struct value factor() {
+    if (stack_full()) return num_value(0);
     struct value v = primary();
     while (!error_msg && v.is_str && accept_char('(')) {
         p--;
@@ -2284,6 +2308,10 @@ static void line_to_text(int off, char *out, char *kw, int cap) {
  */
 int e_ppc;                // the current line
 
+// A line as listed, and which of its characters are keywords (for LIST
+// and EDIT; kept out of the stack, which is small in the BIOS kernel).
+HIGH_MEM char list_buf[MAX_TEXT * 4], list_kw[MAX_TEXT * 4];
+
 static int listed_length(int off, char *buf, char *kw, int cap) {
     char num[8];
     itoa(line_num(off), num);
@@ -2297,9 +2325,9 @@ static int listed_length(int off, char *buf, char *kw, int cap) {
 }
 
 static void list_line(int off) {
-    char buf[MAX_TEXT * 4], kw[MAX_TEXT * 4];
+    char *buf = list_buf, *kw = list_kw;
     struct colours normal, keyword;
-    listed_length(off, buf, kw, sizeof(buf));
+    listed_length(off, buf, kw, sizeof(list_buf));
     get_colours(&normal);
     keyword = normal;
     int paper = (normal.attr >> 3) & 7, ink = normal.attr & 7;
@@ -2315,8 +2343,7 @@ static void list_line(int off) {
 
 // Rows a line takes when listed.
 static int listed_rows(int off) {
-    char buf[MAX_TEXT * 4], kw[MAX_TEXT * 4];
-    int n = listed_length(off, buf, kw, sizeof(buf));
+    int n = listed_length(off, list_buf, list_kw, sizeof(list_buf));
     return n ? (n + SCREEN_COLS - 1) / SCREEN_COLS : 1;
 }
 
@@ -2445,10 +2472,8 @@ static void execute_statement() {
             error("N Statement lost");
             break;
         }
-        char kw[MAX_TEXT * 4];
-        char text[MAX_TEXT * 4];
-        line_to_text(off, text, kw, sizeof(text));
-        strncpy_safe(edit_next, text, sizeof(edit_next));
+        line_to_text(off, list_buf, list_kw, sizeof(list_buf));
+        strncpy_safe(edit_next, list_buf, sizeof(edit_next));
         e_ppc = num;
         no_report = 1;
         running = 0;
@@ -2689,6 +2714,7 @@ static int read_line(int cursor) {
  * and its report shown until a key is pressed.
  */
 void basic_run() {
+    stack_base = __builtin_frame_address(0);
     int want_list = 0;        // show the automatic listing
     int listing_shown = 0;    // it's on the screen
     mem_reset();
