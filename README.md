@@ -29,6 +29,18 @@ project.
   a USB stick, hard disk or floppy, with a menu to choose the machine
   (or an image with just one)
 
+## Download
+
+Ready-made disk images are on the
+[Releases page](https://github.com/jasontrainor/x86-BASIC/releases/latest):
+`x86-basic-VERSION.img` has every machine, with a menu, and
+`x86-basic-VERSION.zip` has that and one image per machine, with
+instructions. Write one to a USB stick (see
+[Booting a real PC from a USB stick](#booting-a-real-pc-from-a-usb-stick)),
+or try it in QEMU:
+
+    qemu-system-x86_64 -drive file=x86-basic-VERSION.img,format=raw,if=floppy -boot a
+
 ## Build and run
 
 You need `nasm`, `gcc`, GNU `ld` and `make` (the GNU toolchain of any
@@ -523,6 +535,19 @@ it, runs it, and saves the screen as `game.png` (`MODE=uefi`, `WAIT=20`
 to change how it boots and how long it runs first); `MACHINE=a2fp`
 (or `a2int`, `a1basic`) runs it on that machine instead.
 
+## Making a release
+
+    make release VERSION=v0.2.0   # dist/x86-basic-v0.2.0.zip
+
+builds the zip that's put on the Releases page: the image with every
+machine, one per machine, `README.txt` (`tools/release-readme.txt`),
+this file and `SHA256SUMS`. Pushing a tag does the whole thing on GitHub
+Actions (`.github/workflows/release.yml`): it builds, runs all the tests,
+and publishes the release with the zip and the image.
+
+    git tag -a v0.2.0 -m "x86-BASIC v0.2.0"
+    git push origin v0.2.0
+
 ## How it works
 
     boot/boot.asm          boot sector: loads the BIOS chooser; also the
@@ -563,6 +588,7 @@ to change how it boots and how long it runs first); `MACHINE=a2fp`
     tools/savefile.py      .SAV files on a PC; converts old saves
     tools/dsk.py           files from DOS 3.3 disk images
     tools/write_usb.py     writes an image to a USB stick, carefully
+    tools/release-readme.txt  README.txt in the release zip
 
 Each machine (`machines/NAME/`) is built, with `core/`, into its own
 pair of kernels: `build/NAME/kernel.bin` for the BIOS and

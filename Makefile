@@ -40,7 +40,7 @@ UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-re
               -fcf-protection=none -fno-ident -fno-tree-loop-distribute-patterns \
               -include core/uefi/hidden.h -O2 -Wall -Icore -DUEFI_KERNEL
 
-.PHONY: all test boot-test run-listing write clean FORCE
+.PHONY: all test boot-test run-listing write release clean FORCE
 
 all: os.img
 
@@ -180,5 +180,25 @@ run-listing: build/boot.bin $(CHOOSER) $(call kernels,$(MACHINE))
 	@test -n "$(LISTING)" || { echo "usage: make run-listing LISTING=game.bas" >&2; exit 2; }
 	tools/run_listing.py $(LISTING) --mode $(MODE) --wait $(WAIT) --machine $(MACHINE)
 
+# make release [VERSION=v1.2.3]: dist/x86-basic-VERSION.zip, for people
+# to download, with the image of every machine (built with the default
+# options, whatever IMAGE_MACHINES says), one image per machine, a short
+# README.txt, the full README.md and SHA256SUMS. VERSION defaults to the
+# latest git tag (as git describe gives it). The GitHub workflow
+# .github/workflows/release.yml runs this when a tag v* is pushed.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+RELEASE = x86-basic-$(VERSION)
+release: build/boot.bin $(CHOOSER) $(call kernels,$(MACHINES)) \
+		$(foreach m,$(MACHINES),build/images/$(m).img) tools/release-readme.txt
+	rm -rf dist/$(RELEASE) dist/$(RELEASE).zip
+	mkdir -p dist/$(RELEASE)
+	python3 tools/mkimage.py dist/$(RELEASE)/x86-basic.img \
+		--machines $(subst $() ,$(comma),$(strip $(MACHINES)))
+	cp $(foreach m,$(MACHINES),build/images/$(m).img) README.md dist/$(RELEASE)/
+	sed 's/@VERSION@/$(VERSION)/' tools/release-readme.txt > dist/$(RELEASE)/README.txt
+	cd dist/$(RELEASE) && sha256sum *.img > SHA256SUMS
+	cd dist && zip -qr $(RELEASE).zip $(RELEASE)
+	@echo "dist/$(RELEASE).zip"
+
 clean:
-	rm -rf build tests/build os.img
+	rm -rf build tests/build os.img dist

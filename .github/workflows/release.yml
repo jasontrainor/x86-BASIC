@@ -1,0 +1,67 @@
+# When a version tag (v0.1.0, say) is pushed: build, run all the tests,
+# and publish a GitHub release with the disk images (make release).
+#
+#   git tag -a v0.1.0 -m "x86-BASIC v0.1.0"
+#   git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm qemu-system-x86 ovmf zip
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build
+        run: make
+
+      - name: Interpreter tests (host, with sanitizers)
+        run: make test
+
+      - name: "Boot tests (QEMU: floppy, hard disk, USB, UEFI)"
+        run: make boot-test
+
+      - name: Package
+        run: |
+          make release VERSION=${{ github.ref_name }}
+          cp dist/x86-basic-${{ github.ref_name }}/x86-basic.img \
+             dist/x86-basic-${{ github.ref_name }}.img
+          cp dist/x86-basic-${{ github.ref_name }}/SHA256SUMS dist/SHA256SUMS
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: x86-BASIC ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            **x86-basic-${{ github.ref_name }}.zip** has a disk image with every
+            machine (and a menu), one image per machine, and instructions
+            (README.txt). **x86-basic-${{ github.ref_name }}.img** is just the
+            image with every machine.
+
+            Write an image to a USB stick with balenaEtcher, Rufus ("DD image"
+            mode) or `dd`, and boot the PC from it (BIOS or UEFI; turn Secure
+            Boot off). See [Booting a real PC from a USB stick](https://github.com/${{ github.repository }}#booting-a-real-pc-from-a-usb-stick).
+          files: |
+            dist/x86-basic-${{ github.ref_name }}.zip
+            dist/x86-basic-${{ github.ref_name }}.img
+            dist/SHA256SUMS

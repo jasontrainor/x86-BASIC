@@ -12,3 +12,6 @@ __pycache__/
 # Build directory
 build/
 tests/listings/*.png
+
+# Release downloads (make release)
+dist/
