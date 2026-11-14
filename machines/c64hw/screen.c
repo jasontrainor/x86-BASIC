@@ -260,6 +260,7 @@ int c64_screen_code(int c) {
 
 int c64_petscii(int sc) {
     sc &= 0x7F;
+    if (sc == 94) return 255;             // (pi, which is 255 in a line, as there)
     if (sc < 32) return sc + 64;
     if (sc < 64) return sc;
     if (sc < 96) return sc + 128;

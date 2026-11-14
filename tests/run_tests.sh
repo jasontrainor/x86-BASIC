@@ -742,9 +742,35 @@ ccheck() {
 }
 SP40='                                        '
 ccheck "c64 start"        "" "${NL}    **** X86 BASIC V2 ****   " "${NL} 64K RAM SYSTEM  38911 BASIC BYTES FREE ${NL}${SP40}${NL}READY.   " "border E background 6 upper" "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE${NL}EEEE"
-ccheck "c64 typing"       "hello there${NL}HELLO${NL}" "${NL}READY.${SP40:6}${NL}HELLO THERE${SP40:11}${NL}~~~~~ " "out:HELLO THERE${NL}hello${NL}"
-ccheck "c64 long line"    "$(printf 'x%.0s' $(seq 1 50))${NL}ok${NL}" "${NL}XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX${NL}XXXXXXXXXX${SP40:10}${NL}OK "
-ccheck "c64 scrolls"      "$(for i in $(seq 1 30); do printf 'line%d\n' $i; done)${NL}" "${NL}LINE30${SP40:6}${NL}${SP40}${NL}${NL}" "!LINE6 " "LINE7 "
+ccheck "c64 typing"       "10 rem hello there${NL}20 rem HELLO${NL}" "${NL}10 REM HELLO THERE${SP40:18}${NL}20 REM ~~~~~ " "out:10 REM HELLO THERE${NL}20 REM hello${NL}"
+ccheck "c64 long line"    "10 rem $(printf 'x%.0s' $(seq 1 43))${NL}20 rem ok${NL}" "${NL}10 REM XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX${NL}XXXXXXXXXX${SP40:10}${NL}20 REM OK "
+ccheck "c64 scrolls"      "$(for i in $(seq 1 30); do printf '%d rem line%d\n' $i $i; done)${NL}" "${NL}30 REM LINE30${SP40:13}${NL}${SP40}${NL}${NL}" "!6 REM LINE6 " "7 REM LINE7 "
+# The dialect: numbers, errors, the clock, GET, INPUT, keywords
+ccheck "c64 numbers"      "print 1/3;2/3,1e9,-5;.001${NL}print str\$(5)+\"x\";len(str\$(-5))${NL}print 123456789,1234567891${NL}" "${NL} .333333333  .666666667        1E+09    ${NL}-5  1E-03 " "${NL} 5X 2 " "${NL} 123456789           1.23456789E+09 "
+ccheck "c64 fre"          "print fre(0)${NL}" "${NL}-26627 ${SP40:7}${NL}"
+ccheck "c64 true is -1"   "print 1=1;1=2;\"a\"<\"b\";5 and 3;2 or 4;not 0;not -1${NL}print 1 and 70000${NL}" "${NL}-1  0 -1  1  6 -1  0 " "${NL}?ILLEGAL QUANTITY  ERROR${SP40:24}${NL}READY."
+ccheck "c64 errors"       "print 1+${NL}10 print 1${NL}20 print 1/0${NL}30 goto 99${NL}run${NL}20${NL}run${NL}" "PRINT 1+${SP40:8}${NL}${SP40}${NL}?SYNTAX  ERROR${SP40:14}${NL}READY." "${NL} 1${SP40:2}${NL}${SP40}${NL}?DIVISION BY ZERO  ERROR IN 20${SP40:30}${NL}READY." "${NL}?UNDEF'D STATEMENT  ERROR IN 30"
+ccheck "c64 ready"        "print 5${NL}10 rem${NL}list${NL}" "${NL}PRINT 5${SP40:7}${NL} 5${SP40:2}${NL}${SP40}${NL}READY.${SP40:6}${NL}10 REM${SP40:6}${NL}LIST${SP40:4}${NL}${SP40}${NL}10 REM${SP40:6}${NL}READY."
+ccheck "c64 keeps spaces" "10 for i = 1 to 3 : print   i ;: next${NL}20 pO 53280,1${NL}30 ?\"x\"${NL}list${NL}run${NL}" "${NL}10 FOR I = 1 TO 3 : PRINT   I ;: NEXT   ${NL}20 POKE 53280,1${SP40:15}${NL}30 PRINT\"X\"" "${NL} 1  2  3 X${SP40:10}${NL}" "border 1"
+ccheck "c64 keywords in names" "total=5${NL}sc=4:scalp=7:print sc${NL}" "TOTAL=5${SP40:7}${NL}${SP40}${NL}?SYNTAX  ERROR" "${NL} 7 "
+ccheck "c64 integers"     "a%=-32768:print a%${NL}a%=-32769${NL}a%=7.9:print a%*2${NL}" "${NL}-32768 " "?ILLEGAL QUANTITY  ERROR" "${NL} 14 "
+ccheck "c64 ti st"        "ti\$=\"123456\":print ti\$${NL}print ti>200000,st${NL}ti=5${NL}" "${NL}1234" "${NL}-1         0 " "TI=5${SP40:4}${NL}${SP40}${NL}?SYNTAX  ERROR"
+ccheck "c64 get"          "10 get a\$:print len(a\$)${NL}run${NL}" "${NL} 0 ${SP40:3}${NL}"
+ccheck "c64 get waits"    "10 get a\$:if a\$=\"\" then 10${NL}20 print asc(a\$):get n:print n${NL}run${NL}x" "${NL} 88 ${SP40:4}${NL} 0 "
+ccheck "c64 input"        "10 input \"name\";n\$:input a,b:print \"hi \";n\$;a+b${NL}20 input c:print c${NL}run${NL}bob${NL}x${NL}3${NL}4${NL}${NL}" "${NL}NAME? BOB${SP40:9}${NL}? X${SP40:3}${NL}?REDO FROM START${SP40:16}${NL}? 3${SP40:3}${NL}?? 4${SP40:4}${NL}HI BOB 7 ${SP40:9}${NL}? ${SP40:2}${NL} 0 "
+ccheck "c64 input direct" "input a${NL}" "?ILLEGAL DIRECT  ERROR"
+ccheck "c64 rnd"          "a=rnd(-5):b=rnd(1):c=rnd(-5):d=rnd(1):print b=d;b<1;b>=0;rnd(0)<1${NL}" "${NL}-1 -1 -1 -1 "
+ccheck "c64 pi"           "print ~*2${NL}" "${NL} 6.28318531 "
+# PETSCII: the screen editor's control characters, from PRINT
+ccheck "c64 clear"        "print \"x\";chr\$(147);\"top\"${NL}" "TOP${SP40:3}${NL}${SP40}${NL}READY." "!X"
+ccheck "c64 reverse"      "print chr\$(18);\"rev\";chr\$(146);\"off\";chr\$(18);\"on\":print \"after\"${NL}" "${NL}[REV]OFF[ON]${SP40:8}${NL}AFTER "
+ccheck "c64 colours"      "print chr\$(28);\"red\";chr\$(5);\"white\";chr\$(154)${NL}" "${NL}22211111EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE${NL}"
+ccheck "c64 cursor codes" "h\$=chr\$(19):d\$=chr\$(17):r\$=chr\$(29):l\$=chr\$(157)${NL}print h\$;d\$;d\$;r\$;r\$;\"here\";l\$;l\$;\"x\"${NL}" "${NL}  HEXE${SP40:6}${NL} 64K"
+ccheck "c64 quote mode"   "10 print \"${HOME}\"${NL}list${NL}" "${NL}10 PRINT \"[S]\"${SP40:12}${NL}READY."
+ccheck "c64 poke screen"  "poke 1024,1:poke 1025,2:poke 55296,2:poke 53281,0${NL}" "AB  " "border E background 0" "2EEEEE"
+ccheck "c64 peek"         "print peek(53281) and 15;peek(53280) and 15;peek(646)${NL}print peek(43)+256*peek(44);peek(55)+256*peek(56)${NL}" "${NL} 6  14  14 " "${NL} 2049  40960 "
+ccheck "c64 lower case"   "print chr\$(14);\"x\"${NL}" "border E background 6 lower" "${NL}x${SP40:1}${NL}"
+ccheck "c64 tab spc"      "print \"a\";tab(5);\"b\";spc(3);\"c\";pos(0)${NL}" "${NL}A    B   C 10 "
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"

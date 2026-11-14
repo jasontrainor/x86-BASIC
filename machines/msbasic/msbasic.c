@@ -161,7 +161,13 @@ static int match_keyword(const char *s, const char **end) {
         while (*w) {
             if (w != D.keywords[i].name && !D.keep_spaces)
                 while (*p == ' ') p++;
-            if (upper(*p) != *w) break;
+            if (upper(*p) != *w) {
+                if (D.abbrev && w != D.keywords[i].name && (*p & 0xFF) == (*w | 0x80)) {
+                    p++;                  // (pO: POKE)
+                    w = "";
+                }
+                break;
+            }
             p++, w++;
         }
         if (*w) continue;
@@ -581,16 +587,23 @@ int ms_place(struct ms_place *p) {
     p->type = type;
     p->var = 0;
     p->elem = 0;
+    p->special = 0;
     if (cur() == '(') {
         p->elem = element(name, type);
         return p->elem != 0;
     }
+    p->special = ms_special(name, type);
+    if (p->special) return 1;
     p->var = find_var(name, type);
     return p->var != 0;
 }
 
 void ms_get_place(const struct ms_place *p, struct ms_val *v) {
     v->str = p->type == MS_STR;
+    if (p->special) {
+        ms_special_get(p->special, v);
+        return;
+    }
     if (p->type == MS_STR) {
         struct strref r;
         if (p->var) r = p->var->s;
@@ -611,6 +624,10 @@ void ms_get_place(const struct ms_place *p, struct ms_val *v) {
 void ms_set_place(const struct ms_place *p, const struct ms_val *v) {
     if ((p->type == MS_STR) != v->str) {
         error(E_TYPE);
+        return;
+    }
+    if (p->special) {
+        ms_special_set(p->special, v);
         return;
     }
     if (p->type == MS_STR) {
@@ -1056,8 +1073,18 @@ static void rel_level(struct ms_val *v) {
             cmp = v->n < b.n ? -1 : v->n > b.n;
         }
         int r = (cmp < 0 && (bits & 1)) || (cmp == 0 && (bits & 2)) || (cmp > 0 && (bits & 4));
-        make_num(v, r);
+        make_num(v, r && D.bitwise ? -1 : r);
     }
+}
+
+// A number as a 16-bit integer, for AND, OR and NOT (bitwise).
+static int int16(double x) {
+    x = num_floor(x);
+    if (x < -32768 || x > 32767) {
+        error(E_QUANTITY);
+        return 0;
+    }
+    return (int)x;
 }
 
 static void not_level(struct ms_val *v) {
@@ -1065,7 +1092,7 @@ static void not_level(struct ms_val *v) {
         ip++;
         not_level(v);
         if (v->str) error(E_TYPE);
-        make_num(v, v->n == 0);
+        make_num(v, D.bitwise ? ~int16(v->n) : v->n == 0);
         return;
     }
     rel_level(v);
@@ -1078,7 +1105,7 @@ static void and_level(struct ms_val *v) {
         struct ms_val b;
         not_level(&b);
         if (v->str || b.str) error(E_TYPE);
-        make_num(v, v->n != 0 && b.n != 0);
+        make_num(v, D.bitwise ? (short)(int16(v->n) & int16(b.n)) : v->n != 0 && b.n != 0);
     }
 }
 
@@ -1095,7 +1122,7 @@ void ms_expr(struct ms_val *v) {
         struct ms_val b;
         and_level(&b);
         if (v->str || b.str) error(E_TYPE);
-        make_num(v, v->n != 0 || b.n != 0);
+        make_num(v, D.bitwise ? (short)(int16(v->n) | int16(b.n)) : v->n != 0 || b.n != 0);
     }
     depth--;
 }
@@ -1273,6 +1300,10 @@ static void input_from(const unsigned char *prompt, int plen) {
 again:
     ip = vars;
     if (!read_input(prompt, plen, 0)) return;
+    if (D.empty_input_ends && !first_char(ms_inbuf)) {
+        ms_skip_statement();
+        return;
+    }
     const char *s = ms_inbuf;
     for (;;) {
         struct ms_place p;

@@ -66,15 +66,14 @@ static const struct ms_keyword keywords[] = {
 };
 
 const struct ms_dialect ms_dialect = {
-    keywords, sizeof(keywords) / sizeof(keywords[0]),
-    0,                                    // keep_spaces
-    1,                                    // list_spaces
-    0,                                    // sign_space
-    1,                                    // get_waits
-    -32767,                               // int_min
-    T_AT,
-    1,                                    // onerr
-    "?REENTER",
+    .keywords = keywords,
+    .n_keywords = sizeof(keywords) / sizeof(keywords[0]),
+    .list_spaces = 1,
+    .get_waits = 1,
+    .int_min = -32767,
+    .at_token = T_AT,
+    .onerr = 1,
+    .redo = "?REENTER",
 };
 
 #define ip ms_ip
@@ -441,6 +440,13 @@ void ms_report(int line) {
 }
 
 void ms_program_ended(void) { dos_program_ended(); }
+
+int ms_special(const char name[2], int type) {   // (none)
+    (void)name, (void)type;
+    return 0;
+}
+void ms_special_get(int id, struct ms_val *v) { (void)id, (void)v; }
+void ms_special_set(int id, const struct ms_val *v) { (void)id, (void)v; }
 
 /* ------------------------------------------------------------------------
  * Disk commands from programs (PRINT CHR$(4);"..."), and the disk

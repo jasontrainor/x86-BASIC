@@ -21,6 +21,7 @@ LOADS = {
     'spectrum': ['LOAD "fuzz.bas"\n', 'MERGE "fuzz.bas"\n', 'LOAD ""\n', 'LOAD "" CODE\n',
                  'LOAD "" SCREEN$\n', 'LOAD "" DATA a()\n', 'LOAD "" DATA a$()\n',
                  'VERIFY "fuzz.bas"\n', 'CAT\n', 'RUN\n', 'LIST\n', 'EDIT\n'],
+    'c64': ['LOAD"FUZZ.BAS",8\n', 'LOAD"FUZZ.SAV",8\n', 'LOAD"$",8\n', 'RUN\n', 'LIST\n'],
     'apple': ['RUN FUZZ.BAS\n', 'LOAD FUZZ.BAS\n', 'EXEC FUZZ.BAS\n', 'BLOAD FUZZ.BAS\n',
               'CATALOG\n', 'RUN\n', 'LIST\n', '\x04OPEN FUZZ.BAS\n', 'PRINT CHR$(4);"',
               'READ FUZZ.BAS\n', 'CLOSE\n', 'POSITION', ',R', ',B', ',L', ',A'],
@@ -37,6 +38,8 @@ def keywords(machine):
         return strings('machines/spectrum/basic.c', 'token_names[] = {', '};')
     if machine == 'a2fp':
         return strings('machines/a2fp/fpbasic.c', 'keywords[] = {', '};')
+    if machine == 'c64':          # (typed in lower case: upper case is shifted)
+        return [k.lower() for k in strings('machines/c64/basic.c', 'keywords[] = {', '};')]
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import dsk
     return sorted({w for w in dsk.INT_TOKENS if w})
@@ -45,6 +48,8 @@ def keywords(machine):
 def listings(machine):
     if machine == 'spectrum':
         paths = glob.glob(os.path.join(ROOT, 'tests/listings/demo.bas'))
+    elif machine == 'c64':
+        paths = glob.glob(os.path.join(ROOT, 'tests/listings/c64_*.bas'))
     elif machine == 'a2fp':
         paths = [os.path.join(ROOT, 'tests/listings/dsk_test.bas')] + \
             glob.glob(os.path.join(ROOT, 'docs/screenshots/HIRES.BAS'))
@@ -57,7 +62,7 @@ def listings(machine):
 
 def main():
     machine, corpus, dict_file = sys.argv[1:4]
-    kind = 'spectrum' if machine == 'spectrum' else 'apple'
+    kind = machine if machine in ('spectrum', 'c64') else 'apple'
     seeds = []
     for text in listings(machine):
         text = text.replace(b'\r', b'')

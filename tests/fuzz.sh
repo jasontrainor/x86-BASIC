@@ -3,7 +3,7 @@
 # random lines typed in, and random files for them to LOAD, MERGE, RUN
 # and EXEC, looking for crashes, memory errors and undefined behaviour.
 #
-#   tests/fuzz.sh [MACHINE ...]     spectrum a2fp a2int a1basic (all by default)
+#   tests/fuzz.sh [MACHINE ...]     spectrum a2fp a2int a1basic c64 (all by default)
 #   FUZZ_TIME=60                    seconds for each machine
 #   FUZZ_JOBS=1                     fuzzers run at once for each
 #
@@ -17,7 +17,7 @@ set -u
 cd "$(dirname "$0")/.."
 command -v clang > /dev/null || { echo "fuzz: needs clang (with libFuzzer)" >&2; exit 1; }
 machines=("$@")
-[ ${#machines[@]} -gt 0 ] || machines=(spectrum a2fp a2int a1basic)
+[ ${#machines[@]} -gt 0 ] || machines=(spectrum a2fp a2int a1basic c64)
 time=${FUZZ_TIME:-60}
 jobs=${FUZZ_JOBS:-1}
 out=tests/build/fuzz

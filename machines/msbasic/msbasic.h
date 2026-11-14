@@ -67,6 +67,11 @@ struct ms_dialect {
     int int_min;             // the smallest integer A% holds (-32767, -32768)
     int at_token;            // (the token AT: A TO is A TO, not AT O), or 0
     char onerr;              // has ONERR GOTO (RUN clears its flag at 216)
+    char abbrev;             // a keyword's letters then the next one shifted (bit 7
+                             // set: pO) are the keyword
+    char empty_input_ends;   // an empty line for INPUT leaves the rest unchanged
+    char bitwise;            // true is -1, and AND, OR and NOT work on the bits of
+                             // 16-bit integers (else true is 1 and they're logical)
     const char *redo;        // what bad INPUT says: "?REENTER"
 };
 extern const struct ms_dialect ms_dialect;
@@ -104,7 +109,8 @@ struct ms_val {
 struct ms_place {
     int type;
     struct ms_var *var;                   // a simple variable, or
-    unsigned char *elem;                  // an array element
+    unsigned char *elem;                  // an array element, or
+    int special;                          // one the dialect keeps (ms_special)
 };
 
 extern const unsigned char *ms_ip;        // where the statement is being read
@@ -190,6 +196,11 @@ double ms_fre(void);
 // The error (ms_err, or BREAK) at line (or -1), printed.
 void ms_report(int line);
 void ms_program_ended(void);              // after a program or command stops
+// A variable the dialect keeps itself (TI, say): an id for it, or 0; and
+// reading and assigning it.
+int ms_special(const char name[2], int type);
+void ms_special_get(int id, struct ms_val *v);
+void ms_special_set(int id, const struct ms_val *v);
 void ms_list_line(const char *text);      // a line LIST shows
 void ms_wait_idle(void);                  // WAIT is waiting
 // A character of a line being crunched, as the program keeps it

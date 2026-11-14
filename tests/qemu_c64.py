@@ -47,6 +47,8 @@ def wait_text(mon, tmp, want, seconds=30):
 # What's typed, and what should then be on the screen.
 SESSIONS = [
     ('', 'READY.'),
+    ('print 6*7;1/3\n', ' 42  .333333333'),
+    ('10 for i=1 to 3:print i;:next\nrun\n', ' 1  2  3'),
 ]
 
 
