@@ -784,9 +784,12 @@ static void st_beep() {
 }
 
 /*
- * PLAY, from the Spectrum 128: music strings. The PC speaker has one
- * voice, so only the first string (channel A) is played; any others
- * (up to 8) are worked out but not heard. In a string:
+ * PLAY, from the Spectrum 128: music strings, one for each channel. The
+ * PC speaker has one voice, so where the first three (channels A, B and
+ * C) have notes at the same time it plays them in turn, a 20ms slice
+ * each, as Spectrum games did for chords (an arpeggio); the others (up
+ * to 8, which went to MIDI) aren't heard. PLAY ends when all three have.
+ * In a string:
  *
  *   a-g        a note in the current octave; A-G an octave higher
  *   # $        before a note: sharp, flat
@@ -797,12 +800,13 @@ static void st_beep() {
  *              9 semibreve; 10-12 triplets of semiquavers, quavers and
  *              crotchets
  *   On         octave n, 0-8 (5 at the start: middle C's)
- *   Tn         tempo, 60-240 crotchets a minute (120 at the start)
+ *   Tn         tempo, 60-240 crotchets a minute (120 at the start; the
+ *              first string's sets it for all of them)
  *   ( )        repeat what's between once; a ) on its own repeats from
  *              the start
  *   !...!      a comment
  *   _          a tie (the notes run together anyway)
- *   H          stop
+ *   H          stop (all of them)
  *   V W U X Y Z M N, with a number: volume, envelopes and MIDI, which
  *              the speaker can't do: ignored
  */
@@ -819,81 +823,182 @@ static int play_number(const char *t, int len, int *i) {
     return n;
 }
 
-static void play_string(const char *t, int len) {
+#define PLAY_VOICES 3                     // channels A, B and C
+#define PLAY_SLICE_MS 20                  // each voice's turn in a chord
+
+// A string being played, and where it's got to.
+struct voice {
+    const char *t;
+    int len, i;
+    int octave, length, accidental;
+    int stack[8], repeated[8], depth, whole_repeated;
+    int freq, ms;                         // the note sounding (0: a rest) and how long it has
+    int note;                             // which note it is (each has a number of its own)
+    int done;
+};
+
+static int play_tempo;                    // (shared: crotchets a minute)
+static int play_notes;                    // notes so far (to number them)
+
+// What's to be played next, kept back while the note goes on, so that a
+// note sounding on through others' starts and ends is one tone (but the
+// same note again is a note of its own).
+static int pending_freq, pending_ms, pending_note;
+
+static void play_flush(void) {
+    if (pending_ms) tone(pending_freq, pending_ms);
+    pending_ms = 0;
+}
+
+static void play_tone(int freq, int ms, int note) {
+    if (pending_ms && note != pending_note) play_flush();
+    pending_freq = freq;
+    pending_note = note;
+    pending_ms += ms;
+}
+
+// The next note (or rest) of voice v into v->freq and v->ms; 0 at the end
+// of the string, -1 at an H.
+static int next_note(struct voice *v) {
     // Lengths in 24ths of a crotchet.
     static const unsigned char units[12] = { 6, 9, 12, 18, 24, 36, 48, 72, 96, 4, 8, 16 };
     static const signed char semitone[7] = { 9, 11, 0, 2, 4, 5, 7 };   // a-g from c
-    int octave = 5, length = 5, tempo = 120, accidental = 0;
-    int stack[8], repeated[8], depth = 0, whole_repeated = 0;
-    int i = 0;
-    while (i < len && !error_msg) {
-        if (key_waiting() && check_break()) {
-            break_requested = 1;
-            return;
-        }
-        char c = t[i++];
-        int ms = units[length - 1] * 2500 / tempo;
+    const char *t = v->t;
+    while (v->i < v->len && !error_msg) {
+        char c = t[v->i++];
+        int ms = units[v->length - 1] * 2500 / play_tempo;
         if (isdigit(c)) {
-            i--;
-            int n = play_number(t, len, &i);
+            v->i--;
+            int n = play_number(t, v->len, &v->i);
             if (n < 1 || n > 12) error("n Out of range");
-            else length = n;
+            else v->length = n;
         } else if (c == 'O' || c == 'o') {
-            int n = play_number(t, len, &i);
+            int n = play_number(t, v->len, &v->i);
             if (n > 8) error("n Out of range");
-            else octave = n;
+            else v->octave = n;
         } else if (c == 'T' || c == 't') {
-            int n = play_number(t, len, &i);
+            int n = play_number(t, v->len, &v->i);
             if (n < 60 || n > 240) error("n Out of range");
-            else tempo = n;
+            else play_tempo = n;
         } else if (c == '#' || c == '$') {
-            accidental = c == '#' ? 1 : -1;
-            if (i >= len || toupper(t[i]) < 'A' || toupper(t[i]) > 'G')
+            v->accidental = c == '#' ? 1 : -1;
+            if (v->i >= v->len || toupper(t[v->i]) < 'A' || toupper(t[v->i]) > 'G')
                 error("k Invalid note name");
         } else if (toupper(c) >= 'A' && toupper(c) <= 'G') {
             int up = c >= 'A' && c <= 'G';
-            double n = semitone[toupper(c) - 'A'] + accidental + 12 * (octave - 5 + up);
-            accidental = 0;
+            double n = semitone[toupper(c) - 'A'] + v->accidental + 12 * (v->octave - 5 + up);
+            v->accidental = 0;
             double freq = 261.6255653 * num_exp(n / 12 * 0.69314718055994530942);
-            tone((int)(freq + 0.5), ms);
+            v->freq = (int)(freq + 0.5);
+            v->ms = ms;
+            v->note = ++play_notes;
+            return 1;
         } else if (c == '&') {
-            tone(0, ms);
+            v->freq = 0;
+            v->ms = ms;
+            v->note = 0;                  // (rests run together)
+            return 1;
         } else if (c == '!') {
-            while (i < len && t[i] != '!') i++;
-            i++;
+            while (v->i < v->len && t[v->i] != '!') v->i++;
+            v->i++;
         } else if (c == '(') {
-            if (depth == 8) { error("n Out of range"); break; }
-            stack[depth] = i;
-            repeated[depth++] = 0;
+            if (v->depth == 8) { error("n Out of range"); break; }
+            v->stack[v->depth] = v->i;
+            v->repeated[v->depth++] = 0;
         } else if (c == ')') {
-            if (depth && !repeated[depth - 1]) {
-                repeated[depth - 1] = 1;
-                i = stack[depth - 1];
-            } else if (depth) {
-                depth--;
-            } else if (!whole_repeated) {
-                whole_repeated = 1;
-                i = 0;
+            if (v->depth && !v->repeated[v->depth - 1]) {
+                v->repeated[v->depth - 1] = 1;
+                v->i = v->stack[v->depth - 1];
+            } else if (v->depth) {
+                v->depth--;
+            } else if (!v->whole_repeated) {
+                v->whole_repeated = 1;
+                v->i = 0;
             }
         } else if (c == 'H' || c == 'h') {
-            return;
+            return -1;
         } else if (strchr_in("VvWwXxYyZzMmNn", c)) {
-            play_number(t, len, &i);
+            play_number(t, v->len, &v->i);
         } else if (c != 'U' && c != 'u' && c != '_' && c != ' ') {
             error("k Invalid note name");
+        }
+    }
+    return 0;
+}
+
+static void play_voices(const struct value *strings, int n);
+
+static void play_strings(const struct value *strings, int n) {
+    pending_ms = 0;
+    play_voices(strings, n);
+    play_flush();
+}
+
+static void play_voices(const struct value *strings, int n) {
+    struct voice voices[PLAY_VOICES];
+    if (n > PLAY_VOICES) n = PLAY_VOICES;
+    play_tempo = 120;
+    for (int k = 0; k < n; k++) {
+        struct voice *v = &voices[k];
+        memset(v, 0, sizeof *v);
+        v->t = strings[k].str;
+        v->len = strings[k].len;
+        v->octave = 5;
+        v->length = 5;
+    }
+    for (int k = 0; k < n; k++) {
+        int r = next_note(&voices[k]);
+        if (r < 0) return;
+        voices[k].done = !r;
+    }
+    int turn = 0;
+    while (!error_msg) {
+        // Until the next note ends: the notes sounding, each in turn
+        int step = 0, sounding[PLAY_VOICES], count = 0;
+        for (int k = 0; k < n; k++) {
+            if (voices[k].done) continue;
+            if (!step || voices[k].ms < step) step = voices[k].ms;
+            if (voices[k].freq) sounding[count++] = k;
+        }
+        if (!step) {
+            // (all done; or notes of no length)
+            int any = 0;
+            for (int k = 0; k < n; k++) any |= !voices[k].done;
+            if (!any) return;
+        }
+        for (int played = 0; played < step;) {
+            if (key_waiting() && check_break()) {
+                break_requested = 1;
+                return;
+            }
+            int ms = count > 1 && step - played > PLAY_SLICE_MS ? PLAY_SLICE_MS : step - played;
+            const struct voice *v = count ? &voices[sounding[turn++ % count]] : 0;
+            play_tone(v ? v->freq : 0, ms, v ? v->note : 0);
+            played += ms;
+        }
+        for (int k = 0; k < n; k++) {
+            struct voice *v = &voices[k];
+            if (v->done) continue;
+            v->ms -= step;
+            if (v->ms <= 0) {
+                int r = next_note(v);
+                if (r < 0) return;
+                v->done = !r;
+            }
         }
     }
 }
 
 static void st_play() {
-    struct value first = str_value("", 0);
+    struct value strings[8];
     int n = 0;
     do {
         struct value v = expr();
         if (error_msg) return;
         if (!v.is_str) { error("C Nonsense in BASIC"); return; }
-        if (n++ == 0) first = v;
+        if (n < 8) strings[n] = v;
+        n++;
     } while (accept_char(','));
     if (n > 8) error("n Out of range");
-    if (!error_msg && !checking) play_string(first.str, first.len);
+    if (!error_msg && !checking) play_strings(strings, n);
 }
