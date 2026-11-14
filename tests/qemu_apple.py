@@ -94,9 +94,10 @@ def run(mode):
     return good
 
 
-def run_basic(mode, machine, prompt, typed, want):
+def run_basic(mode, machine, prompt, typed, want, hold=()):
     """Boot an image with just this BASIC machine, type a line, and look
-    for what it should print."""
+    for what it should print (with the keys in hold held down, as QEMU
+    qcodes)."""
     if mode.startswith('uefi') and not q.ovmf():
         return True
     with tempfile.TemporaryDirectory() as tmp:
@@ -111,8 +112,16 @@ def run_basic(mode, machine, prompt, typed, want):
             ok = wait_text(mon, tmp, prompt, seconds=60) is not None
             if ok:
                 q.type_keys(mon, typed)
+                if hold:
+                    # (after the typed keys, which may press and let go of
+                    # Shift themselves, are through)
+                    time.sleep(2)
+                    q.hold_keys(mon, hold, True)
                 ok = wait_text(mon, tmp, want) is not None
-            print(f'[{mode}] {"PASS" if ok else "FAIL"} {machine}')
+                if hold:
+                    q.hold_keys(mon, hold, False)
+            print(f'[{mode}] {"PASS" if ok else "FAIL"} {machine}'
+                  + (f' holding {"+".join(hold)}' if hold else ''))
             if not ok:
                 print(screen(mon, tmp).text())
             return ok
@@ -127,6 +136,8 @@ BASICS = [
     ('a2fp', ']', 'PRINT 1/3\nHGR\nHPLOT 0,0 TO 279,191\n', '.333333333'),
     ('a2fp', ']', '10 PRINT 42\nSAVE ON DISK\nNEW\nLOAD ON DISK\nRUN\nCATALOG\n', ' A 002 ON DISK'),
     ('a2int', '>', '10 PRINT 6*7:END\nSAVE PROG\nNEW\nRUN PROG\n', '42'),
+    # Shift is button 2, BIOS and UEFI
+    ('a2fp', ']', '10 VTAB 1:PRINT PEEK(-16285);"   ":GOTO 10\nRUN\n', '128', ['shift']),
 ]
 
 

@@ -52,7 +52,8 @@ int plat_read_key(void);
 
 // The modifier keys held down, for machines that use them as buttons
 // (the Apple II's): bit 0 left Alt, bit 1 right Alt (AltGr), bit 2
-// Shift. (The BIOS knows; UEFI firmware doesn't say, so there it's 0.)
+// Shift. (The BIOS knows; on UEFI it's what the extended console input
+// says, or 0 if the firmware hasn't one.)
 int plat_buttons(void);
 
 /*

@@ -409,8 +409,8 @@ for FP BASIC. Its files go in its own folder on the stick (`A1BASIC/`,
 - **Paddles and buttons:** a PC has no paddles, so the arrow keys move
   paddle 0 (left, right) and paddle 1 (up, down), 16 steps at a time,
   for `PDL`. The buttons (`PEEK(-16287)` to `-16285`) are the left Alt,
-  right Alt (AltGr) and Shift keys, on BIOS PCs only: UEFI firmware
-  doesn't say when they're held.
+  right Alt (AltGr) and Shift keys (on UEFI PCs, as far as the
+  firmware says: most say, a few only while another key is pressed).
 - **Any key down:** on the later model, bit 7 of `PEEK(-16368)` is set
   while a key is held (BIOS PCs; on UEFI, while one is waiting).
 - **F10 twice** goes back to the chooser, as in every machine.

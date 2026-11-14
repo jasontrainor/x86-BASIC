@@ -44,6 +44,9 @@ static EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
 static unsigned int screen_w, screen_h, scale_x, scale_y, win_x, win_y, win_w, win_h;
 static EFI_GRAPHICS_OUTPUT_BLT_PIXEL palette[16];
 
+static void keys_init(void);
+
+
 #define MAX_SCALE 8
 #define BLOCK_PIXELS (128 * 1024)
 static EFI_GRAPHICS_OUTPUT_BLT_PIXEL block_px[BLOCK_PIXELS];
@@ -54,6 +57,7 @@ void plat_init(void) {
         halt("x86 BASIC: no graphics output available\n");
     screen_w = gop->Mode->Info->HorizontalResolution;
     screen_h = gop->Mode->Info->VerticalResolution;
+    keys_init();
 }
 
 void plat_video(const struct video *v) {
@@ -117,29 +121,75 @@ void plat_border(int c) {
 
 static int f10_pressed(void);
 
-int plat_read_key(void) {
+/*
+ * Keys come from the extended console input where the firmware has it,
+ * which also says which of Shift, Ctrl and Alt are held: with each key,
+ * and (asked to expose them) as keys of their own when they're pressed,
+ * and on most firmware even when there's no key. That's what
+ * plat_buttons() reports; it has to read a key to find out, so a key
+ * read then waits in `pending` for plat_read_key().
+ */
+static EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *con_ex;
+static UINT32 shift_state;                // EFI_*_PRESSED, as last reported
+static int pending[8], pending_len;
+
+static void keys_init(void) {
+    EFI_GUID guid = EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL_GUID;
+    if (bs->HandleProtocol(st->ConsoleInHandle, &guid, (void **)&con_ex) != EFI_SUCCESS)
+        con_ex = 0;
+    if (con_ex) {
+        UINT8 toggles = EFI_TOGGLE_STATE_VALID | EFI_KEY_STATE_EXPOSED;
+        con_ex->SetState(con_ex, &toggles);   // (if it can't, the keys still come)
+    }
+}
+
+// One key from the firmware, as plat_read_key returns them: -1 if there's
+// none, 0 for a key to ignore (F1, Shift on its own).
+static int firmware_key(void) {
     EFI_INPUT_KEY key;
+    if (con_ex) {
+        EFI_KEY_DATA data;
+        memset(&data, 0, sizeof data);
+        EFI_STATUS status = con_ex->ReadKeyStrokeEx(con_ex, &data);
+        if (data.KeyState.KeyShiftState & EFI_SHIFT_STATE_VALID)
+            shift_state = data.KeyState.KeyShiftState;
+        if (status != EFI_SUCCESS) return -1;
+        key = data.Key;
+    } else if (st->ConIn->ReadKeyStroke(st->ConIn, &key) != EFI_SUCCESS) {
+        return -1;
+    }
+    if (key.ScanCode == SCAN_F10) {
+        if (f10_pressed()) plat_restart_menu();
+        return 0;
+    }
+    switch (key.ScanCode) {
+    case SCAN_UP:     return KEY_UP;
+    case SCAN_DOWN:   return KEY_DOWN;
+    case SCAN_LEFT:   return KEY_LEFT;
+    case SCAN_RIGHT:  return KEY_RIGHT;
+    case SCAN_HOME:   return KEY_HOME;
+    case SCAN_END:    return KEY_END;
+    case SCAN_DELETE: return KEY_DELETE;
+    case SCAN_ESC:    return 27;
+    }
+    CHAR16 c = key.UnicodeChar;
+    if (c == '\r' || c == '\n') return 13;
+    // (Ctrl+letter: 1-26, as the BIOS gives them.)
+    if ((c >= 1 && c <= 26) || (c >= 32 && c < 127)) return c;
+    // Anything else (function keys, accented letters): ignore it.
+    return 0;
+}
+
+int plat_read_key(void) {
+    if (pending_len) {
+        int k = pending[0];
+        pending_len--;
+        memmove(pending, pending + 1, pending_len * sizeof *pending);
+        return k;
+    }
     for (;;) {
-        if (st->ConIn->ReadKeyStroke(st->ConIn, &key) != EFI_SUCCESS) return -1;
-        if (key.ScanCode == SCAN_F10) {
-            if (f10_pressed()) plat_restart_menu();
-            continue;
-        }
-        switch (key.ScanCode) {
-        case SCAN_UP:     return KEY_UP;
-        case SCAN_DOWN:   return KEY_DOWN;
-        case SCAN_LEFT:   return KEY_LEFT;
-        case SCAN_RIGHT:  return KEY_RIGHT;
-        case SCAN_HOME:   return KEY_HOME;
-        case SCAN_END:    return KEY_END;
-        case SCAN_DELETE: return KEY_DELETE;
-        case SCAN_ESC:    return 27;
-        }
-        CHAR16 c = key.UnicodeChar;
-        if (c == '\r' || c == '\n') return 13;
-        // (Ctrl+letter: 1-26, as the BIOS gives them.)
-        if ((c >= 1 && c <= 26) || (c >= 32 && c < 127)) return c;
-        // Anything else (function keys, accented letters): ignore it.
+        int k = firmware_key();
+        if (k) return k;
     }
 }
 
@@ -295,8 +345,16 @@ static int f10_pressed(void) {
     return 0;
 }
 
+// Bit 0 left Alt, bit 1 right Alt, bit 2 Shift, from the extended
+// console input (0 if the firmware hasn't one).
 int plat_buttons(void) {
-    return 0;
+    if (con_ex && pending_len < (int)(sizeof pending / sizeof *pending)) {
+        int k = firmware_key();           // (brings shift_state up to date)
+        if (k > 0) pending[pending_len++] = k;
+    }
+    return (shift_state & EFI_LEFT_ALT_PRESSED ? 1 : 0) |
+           (shift_state & EFI_RIGHT_ALT_PRESSED ? 2 : 0) |
+           (shift_state & (EFI_LEFT_SHIFT_PRESSED | EFI_RIGHT_SHIFT_PRESSED) ? 4 : 0);
 }
 
 // UEFI firmware only reports keys being pressed, not let go.

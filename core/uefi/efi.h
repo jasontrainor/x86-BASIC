@@ -56,6 +56,38 @@ typedef struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL {
     void *WaitForKey;
 } EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
 
+/* The extended console input: the same keys, with the Shift, Ctrl and
+   Alt keys' state. */
+#define EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL_GUID \
+    {0xdd9e7534, 0x7762, 0x4698, {0x8c, 0x14, 0xf5, 0x85, 0x17, 0xa6, 0x25, 0xaa}}
+
+typedef struct {
+    UINT32 KeyShiftState;
+    UINT8 KeyToggleState;
+} EFI_KEY_STATE;
+
+typedef struct {
+    EFI_INPUT_KEY Key;
+    EFI_KEY_STATE KeyState;
+} EFI_KEY_DATA;
+
+#define EFI_SHIFT_STATE_VALID 0x80000000
+#define EFI_RIGHT_SHIFT_PRESSED 0x01
+#define EFI_LEFT_SHIFT_PRESSED  0x02
+#define EFI_RIGHT_ALT_PRESSED   0x10
+#define EFI_LEFT_ALT_PRESSED    0x20
+#define EFI_TOGGLE_STATE_VALID  0x80
+#define EFI_KEY_STATE_EXPOSED   0x40
+
+typedef struct EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL {
+    void *Reset;
+    EFI_STATUS (EFIAPI *ReadKeyStrokeEx)(struct EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *,
+                                         EFI_KEY_DATA *);
+    void *WaitForKeyEx;
+    EFI_STATUS (EFIAPI *SetState)(struct EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *, UINT8 *);
+    void *RegisterKeyNotify, *UnregisterKeyNotify;
+} EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL;
+
 typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     void *Reset;
     EFI_STATUS (EFIAPI *OutputString)(struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *, CHAR16 *);
