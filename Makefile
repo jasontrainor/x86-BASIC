@@ -50,7 +50,8 @@ all: os.img
 define machine
 $(1)_DIRS := machines/$(1) $$(addprefix machines/,$$(shell cat machines/$(1)/uses 2>/dev/null))
 $(1)_SRC := $$(basename $$(notdir $$(wildcard $$(addsuffix /*.c,$$($(1)_DIRS)))))
-$(1)_HEADERS := $$(wildcard $$(addsuffix /*.h,$$($(1)_DIRS)))
+# (and the parts a file includes, in a folder of their own: spectrum/basic/)
+$(1)_HEADERS := $$(wildcard $$(addsuffix /*.h,$$($(1)_DIRS)) $$(addsuffix /*/*.c,$$($(1)_DIRS)))
 $(1)_INC := $$(addprefix -I,$$($(1)_DIRS))
 $(1)_BIOS_C := $$(patsubst %,build/$(1)/bios/%.o,bios $$(CORE) $$($(1)_SRC))
 $(1)_BIOS := build/$(1)/bios/kernel_entry.o build/$(1)/bios/bios_string.o $$($(1)_BIOS_C)

@@ -41,7 +41,8 @@ def host_binary(machine):
     for d in dirs:
         src += sorted(os.path.relpath(p, ROOT) for p in glob.glob(os.path.join(ROOT, d, '*.c')))
     deps = src + [os.path.relpath(p, ROOT) for d in ['core'] + dirs
-                  for p in glob.glob(os.path.join(ROOT, d, '*.h'))]
+                  for p in glob.glob(os.path.join(ROOT, d, '*.h')) +
+                  glob.glob(os.path.join(ROOT, d, '*', '*.c'))]   # (parts a file includes)
     out = os.path.join(ROOT, 'tests', 'build', 'check', machine)
     if not os.path.exists(out) or any(os.path.getmtime(os.path.join(ROOT, p)) >
                                       os.path.getmtime(out) for p in deps):
