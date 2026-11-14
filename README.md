@@ -475,8 +475,11 @@ The hardware programs see, in `machines/apple/`:
   `-1998`/`-1994` (clear low resolution), `-1216`, `-1233`, `-756`
   (wait for a key), and in FP BASIC `62450`/`62454` (clear or fill high
   resolution). A CALL to anything else, such as machine code a program
-  POKEd in, does nothing, and the program carries on: games that make
-  their sound that way run silently.
+  POKEd in, does nothing, and the program carries on, with one
+  exception: the little tone routine so many listings POKE in for their
+  sound (`POKE 768,pitch: POKE 769,length: CALL 770`, its 21 bytes
+  wherever they're put) is recognised, and plays its tone. Games with
+  sound routines of their own run silently.
 
 ### Integer BASIC
 

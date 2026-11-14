@@ -567,6 +567,7 @@ host_machine a1basic
 BIN=tests/build/a2int_host
 ABIN=tests/build/a2int_host
 CC=$'\x03'
+check "int tone routine"  "10 POKE 770,173:POKE 771,48:POKE 772,192:POKE 773,136:POKE 774,208:POKE 775,5:POKE 776,206:POKE 777,1:POKE 778,3:POKE 779,240:POKE 780,9${NL}20 POKE 781,202:POKE 782,208:POKE 783,245:POKE 784,174:POKE 785,0:POKE 786,3:POKE 787,76:POKE 788,2:POKE 789,3:POKE 790,96${NL}30 POKE 768,200:POKE 769,10:CALL 770:END${NL}RUN${NL}" "[TONE 253 25]"
 check "int print"         "PRINT 2+3*4;\" \";-7/2;\" \";7 MOD 3;\" \";2^10${NL}" "${NL}14 -3 1 1024${NL}"
 check "int program"       "10 FOR I=1 TO 3${NL}20 PRINT I;\" \";I*I${NL}30 NEXT I${NL}40 END${NL}RUN${NL}" "RUN${NL}1 1${NL}2 4${NL}3 9${NL}>"
 check "int list"          "20 PRINT \"B\":END${NL}10 for i=1to 10 step 2:print i;:next i${NL}LIST${NL}" "LIST${NL}   10 FOR I=1 TO 10 STEP 2: PRINT I;: NEXT I${NL}   20 PRINT \"B\": END${NL}>"
@@ -626,6 +627,8 @@ B1='[TONE 1000 100]'
 check "fp numbers"        "PRINT 1/3;\" \";2/3;\" \";1E9;\" \";.001;\" \";.01;\" \";123456789;\" \";-.5;\" \";10/3${NL}" "${NL}.333333333 .666666667 1E+09 1E-03 .01 123456789 -.5 3.33333333${NL}"
 check "fp more numbers"   "PRINT 2^10;\" \";-2^2;\" \";2^-1;\" \";1.5E-5;\" \";1234567891;\" \";1E38*10${NL}" "${NL}1024 -4 .5 1.5E-05 1.23456789E+09 " "?OVERFLOW ERROR${NL}"
 HOST_KEYBOARD=FR check "fr keyboard altgr" "PRINT 3X${AG}0Y3${NL}" "${NL}X@Y${NL}"
+TONE_DATA="173,48,192,136,208,5,206,1,3,240,9,202,208,245,174,0,3,76,2,3,96"
+check "fp tone routine"   "10 FOR I=0 TO 20:READ B:POKE 770+I,B:NEXT${NL}20 POKE 768,100:POKE 769,50:CALL 770:PRINT PEEK(769)${NL}30 POKE 768,0:POKE 769,1:CALL 770:POKE 771,0:CALL 770${NL}40 DATA ${TONE_DATA}${NL}RUN${NL}" "[TONE 505 127]0${NL}" "[TONE 198 2]" "!TONE 198 2][TONE"
 check "fp fre"            "PRINT FRE(0)${NL}10 PRINT 1${NL}HIMEM: 16384${NL}PRINT FRE(0)${NL}A=1:B\$=\"HELLO\":DIM C(9),D%(4),E\$(2)${NL}PRINT FRE(0)${NL}" "${NL}-29187${NL}" "${NL}14326${NL}" "${NL}14217${NL}"
 check "fp functions"      "PRINT SQR(2);\" \";INT(-3.7);\" \";ABS(-2);\" \";SGN(-5);\" \";ATN(1)*4;\" \";LOG(EXP(1));\" \";SIN(0)${NL}" "${NL}1.41421356 -4 2 -1 3.14159265 1 0${NL}"
 check "fp strings"        "A\$=\"HELLO\":PRINT LEFT\$(A\$,2);MID\$(A\$,2,3);RIGHT\$(A\$,2);LEN(A\$);ASC(A\$);CHR\$(65);STR\$(12.5);VAL(\"3.5E2X\")${NL}PRINT A\$+\" \"+A\$, A\$<\"HELP\", A\$=\"HELLO\"${NL}" "${NL}HEELLLO572A12.5350${NL}" "${NL}HELLO HELLO     1               1${NL}"

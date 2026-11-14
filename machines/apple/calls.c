@@ -4,12 +4,62 @@
  * Each is done here as the routine behaves; there's no 6502 and no ROM,
  * so a CALL anywhere else (machine code a program POKEd in, say) can't
  * be run, and the BASIC says so.
+ *
+ * One piece of machine code is known here, though, since so many
+ * listings POKE it in for their sound: the little tone routine (see
+ * tone_routine) is recognised by its bytes, wherever it was put, and its
+ * tone played.
  */
 #include "apple.h"
 #include "platform.h"
 
+/*
+ * The tone routine listings POKE in (usually at 770, with the pitch at
+ * 768 and the length at 769: POKE 768,P: POKE 769,D: CALL 770):
+ *
+ *   loop  LDA $C030      click the speaker
+ *   wait  DEY
+ *         BNE count
+ *         DEC length     every 256 times round: the end yet?
+ *         BEQ done
+ *   count DEX
+ *         BNE wait
+ *         LDX pitch      P times round between clicks
+ *         JMP loop
+ *   done  RTS
+ *
+ * Its timing, at the 6502's 1,020,484 cycles a second: 10 cycles a time
+ * round, and 10 more a click, so the clicks are 10P+10 cycles apart (two
+ * of them a cycle of the tone), and it goes round 256 times for each of
+ * the D the length counts down. (0 counts as 256 for both.) Returns 1 if
+ * the code at addr is the routine, having played its tone.
+ */
+static int tone_routine(int addr) {
+    static const unsigned char code[21] = {
+        0xAD, 0x30, 0xC0, 0x88, 0xD0, 0x05, 0xCE, 0, 0, 0xF0, 0x09,
+        0xCA, 0xD0, 0xF5, 0xAE, 0, 0, 0x4C, 0, 0, 0x60,
+    };
+    for (int i = 0; i < 21; i++) {
+        if (i == 7 || i == 8 || i == 15 || i == 16 || i == 18 || i == 19) continue;
+        if (apple_peek(addr + i) != code[i]) return 0;
+    }
+    int jump = apple_peek(addr + 18) | apple_peek(addr + 19) << 8;
+    if (jump != addr) return 0;           // (JMP loop: back to its start)
+    int length = apple_peek(addr + 7) | apple_peek(addr + 8) << 8;
+    int pitch = apple_peek(addr + 15) | apple_peek(addr + 16) << 8;
+    long p = apple_peek(pitch), d = apple_peek(length);
+    if (!p) p = 256;
+    if (!d) d = 256;
+    long freq = 1020484L / (2 * (10 * p + 10));
+    long cycles = d * (256 * 10 + 7) + d * 256 * 10 / p;
+    plat_tone((int)freq, (int)(cycles * 1000 / 1020484L));
+    apple_poke(length, 0);                // (counted down to 0, as it leaves it)
+    return 1;
+}
+
 int apple_call(int addr) {
     if (apple_model == APPLE_I) return 0;
+    if (tone_routine(addr & 0xFFFF)) return 1;
     switch (addr & 0xFFFF) {
     case 0xFC58: apple_home(); return 1;                  // -936  HOME
     case 0xFC42: apple_clreop(); return 1;                // -958  clear to end of window
