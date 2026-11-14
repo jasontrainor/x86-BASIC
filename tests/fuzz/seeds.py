@@ -36,7 +36,7 @@ def keywords(machine):
     if machine == 'spectrum':
         return strings('machines/spectrum/basic.c', 'token_names[] = {', '};')
     if machine == 'a2fp':
-        return strings('machines/a2fp/fpbasic.c', '"END", "FOR"', '};')
+        return strings('machines/a2fp/fpbasic.c', 'keywords[] = {', '};')
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import dsk
     return sorted({w for w in dsk.INT_TOKENS if w})

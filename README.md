@@ -716,7 +716,10 @@ and publishes the release with the zip and the image.
       calls.c              the firmware routines programs CALL
       dos.c                the DOS 3.3-style disk commands
     machines/intbasic/     Integer BASIC (used by a1basic and a2int)
-    machines/a2fp/         FP BASIC
+    machines/msbasic/      the language core FP BASIC shares with other
+                           6502 BASICs of its family (the dialect gives its
+                           keywords, statements and hooks)
+    machines/a2fp/         FP BASIC: the dialect, on machines/apple/
     machines/a2video/      a test machine for the Apple screen
     core/                  shared by every machine:
       kernel_entry.asm     16-bit start-up: moves the code to its segment
