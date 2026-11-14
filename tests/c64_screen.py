@@ -9,6 +9,7 @@ The 320x200 picture is where the kernels put it: on the BIOS, VGA mode
 scaled by the largest whole number that fits a 384x272 frame, centred.
 
     tests/c64_screen.py SCREEN.ppm        prints the text
+    tests/c64_screen.py SCREEN.ppm --colour X,Y ...   the colours of dots
 """
 import os
 import sys
@@ -118,4 +119,9 @@ def _palette():
 PALETTE = _palette()
 
 if __name__ == '__main__':
-    print(Screen(sys.argv[1]).text())
+    if len(sys.argv) > 3 and sys.argv[2] == '--colour':
+        # (the palette index at each x,y given)
+        scr = Screen(sys.argv[1])
+        print(' '.join(str(scr.colour(*map(int, xy.split(',')))) for xy in sys.argv[3:]))
+    else:
+        print(Screen(sys.argv[1]).text())

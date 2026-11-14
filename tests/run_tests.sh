@@ -785,6 +785,37 @@ HOST_BUTTONS=2 ccheck "c64 ctrl colours" "10 rem ${ALT}3x${ALT}9y${NL}" "${NL}EE
 ccheck "c64 c= letters"   "10 rem ${ALT}q${ALT}a${NL}list${NL}" "out:10 REM {171}{176}"
 ccheck "c64 restore"      "poke 53280,0:poke 1024,1:poke 53272,23${NL}10 goto 10${NL}run${NL}${PGUP}print 7${NL}" "${NL}READY.${SP40:6}${NL}PRINT 7${SP40:7}${NL} 7 " "border E background 6 upper" "!BREAK"
 ccheck "c64 key buffer"   "10 print chr\$(147);chr\$(17);chr\$(17);\"print 6*7\";chr\$(19);${NL}20 poke 198,1:poke 631,13:end${NL}run${NL}" "${NL}READY.${SP40:6}${NL}PRINT 6*7${SP40:9}${NL} 42 "
+# ccolour NAME INPUT X,Y=COLOUR...: the colour (0-15) of dots of the picture.
+ccolour() {
+    local name=$1 in=$2; shift 2
+    rm -f tests/build/c64.ppm
+    SCREEN_OUT=tests/build/c64.ppm timeout 10 "$BIN" "$in" > /dev/null 2>&1
+    local xy=() want=() w
+    for w in "$@"; do xy+=("${w%=*}"); want+=("${w#*=}"); done
+    local got
+    got=$(python3 tests/c64_screen.py tests/build/c64.ppm --colour "${xy[@]}")
+    if [[ $got == "${want[*]}" ]]; then pass=$((pass+1)); echo "PASS $name"
+    else fail=$((fail+1)); echo "FAIL $name: ${xy[*]} = $got, not ${want[*]}"; fi
+}
+# The VIC: its modes, characters in RAM, banks, scrolling, the border's edges
+CLS="print chr\$(147);${NL}"
+ccolour "c64 text colours" "${CLS}poke 1024,160:poke 55296,2:poke 53281,0:poke 53280,5${NL}" 0,0=2 7,7=2 8,0=0 0,100=0
+ccolour "c64 bitmap"       "${CLS}poke 53265,59:poke 53272,24:poke 8192,240:poke 8193,0:poke 1024,38${NL}" 0,0=2 4,0=6 0,1=6 8,0=0
+ccolour "c64 mc bitmap"    "${CLS}poke 53265,59:poke 53272,24:poke 53270,216:poke 8192,27${NL}poke 1024,38:poke 55296,7:poke 53281,0${NL}" 0,0=0 2,0=2 4,0=6 6,0=7
+ccolour "c64 mc text"      "${CLS}poke 53272,(peek(53272)and240)or12:poke 12288,27:poke 1024,0${NL}poke 55296,10:poke 53270,216:poke 53282,5:poke 53283,7:poke 53281,0${NL}" 0,0=0 2,0=5 4,0=7 6,0=2
+ccolour "c64 ecm"          "${CLS}poke 53265,91:poke 53282,2:poke 53283,4:poke 1024,64+32:poke 1025,128+32${NL}" 0,0=2 8,0=4 16,0=6
+ccolour "c64 x scroll"     "${CLS}poke 1024,160:poke 55296,1:poke 53270,203${NL}" 0,0=6 2,0=6 3,0=1 10,0=1 11,0=6
+ccolour "c64 y scroll"     "${CLS}poke 1024,160:poke 55296,1:poke 53265,29${NL}" 0,0=6 0,1=6 0,2=1 0,9=1 0,10=6
+ccolour "c64 24 rows"      "${CLS}poke 1024,160:poke 55296,1:poke 53265,19:poke 53280,0${NL}" 0,0=0 0,3=0 0,4=1 100,199=0 100,195=6
+ccolour "c64 38 columns"   "${CLS}poke 1024,160:poke 55296,1:poke 53270,192:poke 53280,0${NL}" 0,0=0 6,0=0 7,0=1 311,100=0 310,100=6
+ccolour "c64 blank"        "${CLS}poke 1024,160:poke 55296,1:poke 53265,11:poke 53280,2${NL}" 0,0=2 160,100=2
+ccolour "c64 bank"         "${CLS}poke 56576,(peek(56576)and252)or2:poke 53272,16+4${NL}poke 17408,160:poke 55296,1:poke 21760,255${NL}" 0,0=1 7,0=1 0,1=6 8,0=6
+# The usual loop copying the character ROM into RAM (with this project's
+# characters), then a character changed there
+COPY="10 poke 56334,peek(56334)and254:poke 1,peek(1)and251${NL}20 for i=0 to 511:poke 12288+i,peek(53248+i):next${NL}30 poke 1,peek(1)or4:poke 56334,peek(56334)or1${NL}40 poke 53272,(peek(53272)and240)or12${NL}"
+ccheck  "c64 char rom copy" "${COPY}run${NL}" "${NL}RUN${SP40:3}${NL}${SP40}${NL}READY."
+ccolour "c64 char in ram"   "${COPY}50 print chr\$(147);\"a\":poke 12296,255${NL}run${NL}" 0,0=14 7,0=14 1,2=14 2,2=6
+ccheck  "c64 raster"        "print peek(53266)<>peek(53266)${NL}wait 53266,128:wait 53265,128:print \"waited\"${NL}" "${NL}-1 " "${NL}WAITED "
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"
