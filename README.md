@@ -6,6 +6,25 @@ from then: a ZX Spectrum-style machine, or one of three for Apple I and
 Apple II listings, picked from a menu. There's no operating system
 underneath: just a boot loader, a small kernel and the interpreter.
 
+<table>
+  <tr>
+    <td><img src="docs/screenshots/menu.png" alt="The chooser's menu, listing the four machines" width="400"></td>
+    <td><img src="docs/screenshots/spectrum.png" alt="Spectrum BASIC: colour bars, circles and lines inside a blue border" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center">The menu when the PC starts</td>
+    <td align="center">Spectrum BASIC</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/a2fp.png" alt="FP BASIC: coloured high-resolution curves with two lines of text below" width="400"></td>
+    <td><img src="docs/screenshots/a2int.png" alt="Integer BASIC: a low-resolution pattern of sixteen colours" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center">FP BASIC, high resolution (for Applesoft listings)</td>
+    <td align="center">Integer BASIC, low resolution (1977)</td>
+  </tr>
+</table>
+
 The aim is that a listing — from a magazine, a book or a manual — can
 be typed in and gives the same result as on the real computer. They
 aren't emulators: they don't run Z80 or 6502 machine code, tapes or
@@ -28,6 +47,50 @@ project.
 - One disk image that boots on both old (BIOS) and new (UEFI) PCs, from
   a USB stick, hard disk or floppy, with a menu to choose the machine
   (or an image with just one)
+
+## Quick start
+
+1. Download `x86-basic-VERSION.img` from the
+   [Releases page](https://github.com/jasontrainor/x86-BASIC/releases/latest)
+   (or build it: see [Build and run](#build-and-run)).
+2. Try it in QEMU, or write it to a USB stick and boot a PC from it
+   (see [Booting a real PC from a USB stick](#booting-a-real-pc-from-a-usb-stick)).
+3. Pick a machine from the menu (or wait 5 seconds for the Spectrum),
+   and type a program in:
+
+       10 FOR n=0 TO 6
+       20 PRINT INK n;"Hello, world"
+       30 NEXT n
+       RUN
+
+   On the Apple-style machines (where Integer BASIC wants an `END`):
+
+       10 FOR N = 1 TO 7: PRINT "HELLO, WORLD": NEXT N
+       20 END
+       RUN
+
+4. `SAVE "hello"` keeps it on the stick and `LOAD "hello"` brings it
+   back (`SAVE HELLO` and `LOAD HELLO` on the Apple-style machines).
+   **F10 twice** goes back to the menu.
+
+## Contents
+
+- [Download](#download)
+- [Build and run](#build-and-run)
+- [Machines and the chooser](#machines-and-the-chooser)
+- [Using it](#using-it) (Spectrum BASIC): [editing](#editing),
+  [typing Spectrum characters](#typing-spectrum-characters),
+  [the language](#the-language), [reports](#reports),
+  [memory, PEEK and POKE](#memory-peek-and-poke), [speed](#speed),
+  [differences from a Spectrum](#differences-from-a-spectrum)
+- [Saving programs](#saving-programs): [listings as text files](#listings-as-text-files),
+  [the printer](#the-printer)
+- [The Apple-style machines](#the-apple-style-machines):
+  [Integer BASIC](#integer-basic), [FP BASIC](#fp-basic),
+  [disk commands](#disk-commands)
+- [Booting a real PC from a USB stick](#booting-a-real-pc-from-a-usb-stick)
+- [Tests](#tests), [Making a release](#making-a-release),
+  [How it works](#how-it-works)
 
 ## Download
 
@@ -69,7 +132,8 @@ each in `machines/NAME/`:
 
 When the PC starts, a small chooser comes first and starts a machine:
 straight away if the image has only one, or from a menu if it has
-several.
+several (pictured [at the top](#x86-basic)): the arrow keys and Enter,
+or a number, pick one.
 
     make                              # os.img, with every machine
     make image-spectrum               # build/images/spectrum.img: one machine
@@ -113,6 +177,11 @@ numbers are in range and so on is only known when it runs.
 
 Keywords are typed in full, in any case: `print`, `GO TO`, `goto`. Press
 **Esc** (or **Ctrl+C**) for BREAK; `CONTINUE` carries on.
+
+<p align="center">
+  <img src="docs/screenshots/spectrum-list.png" alt="A program listed with its keywords in blue, and a new line being typed in the lower screen" width="560"><br>
+  <em>A program listed, with its keywords in colour, and a new line being typed at the bottom</em>
+</p>
 
 ### Editing
 
@@ -310,6 +379,19 @@ machines are for; the machines themselves have neutral names.
 Each starts at its prompt, with no banner: `>` for Integer BASIC, `]`
 for FP BASIC. Its files go in its own folder on the stick (`A1BASIC/`,
 `A2INT/`, `A2FP/`).
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/a1basic.png" alt="Integer BASIC on the 1976 terminal: a table of squares with rows of stars" width="260"></td>
+    <td><img src="docs/screenshots/a2int.png" alt="Integer BASIC on the 1977 machine: low-resolution colours" width="260"></td>
+    <td><img src="docs/screenshots/a2fp.png" alt="FP BASIC: high-resolution curves in six colours" width="260"></td>
+  </tr>
+  <tr>
+    <td align="center"><code>a1basic</code>: Integer BASIC (1976)</td>
+    <td align="center"><code>a2int</code>: Integer BASIC II (1977)</td>
+    <td align="center"><code>a2fp</code>: FP BASIC (1978–83)</td>
+  </tr>
+</table>
 
 ### Keys
 
@@ -534,6 +616,8 @@ prints what's on the screen, for trying things out.
 it, runs it, and saves the screen as `game.png` (`MODE=uefi`, `WAIT=20`
 to change how it boots and how long it runs first); `MACHINE=a2fp`
 (or `a2int`, `a1basic`) runs it on that machine instead.
+`make screenshots` remakes the pictures in this file
+(`tools/screenshots.py`), from the listings in `docs/screenshots/`.
 
 ## Making a release
 
@@ -588,6 +672,7 @@ and publishes the release with the zip and the image.
     tools/savefile.py      .SAV files on a PC; converts old saves
     tools/dsk.py           files from DOS 3.3 disk images
     tools/write_usb.py     writes an image to a USB stick, carefully
+    tools/screenshots.py   the screenshots in this file (docs/screenshots/)
     tools/release-readme.txt  README.txt in the release zip
 
 Each machine (`machines/NAME/`) is built, with `core/`, into its own
