@@ -657,8 +657,12 @@ python3 tools/dsk.py make "$TD/disk.dsk" "A:STAR TREK=tests/listings/dsk_test.ba
 python3 tools/dsk.py extract "$TD/disk.dsk" "$TD/dsk" > /dev/null
 python3 tests/make_disk.py "$TD/dsk.img" /A2FP/STAR_TRE.SAV="$TD/dsk/STAR_TRE.SAV" /A2FP/SCORES.SAV="$TD/dsk/SCORES.SAV" /A2FP/CODE.SAV="$TD/dsk/CODE.SAV"
 DISK_IMAGE="$TD/dsk.img" check "dos from a dsk" "CATALOG${NL}RUN STAR TREK${NL}BLOAD CODE${NL}PRINT PEEK(768)${NL}" " A 002 STAR TREK${NL} T 002 SCORES${NL} B 002 CODE${NL}" "${NL}FROM A DISK${NL}123${NL}HELLO2${NL}LINE TWO${NL}" "PRINT PEEK(768)${NL}76${NL}"
+python3 tools/dsk.py make "$TD/int.dsk" "I:INT PROG=tests/listings/dsk_int.bas" > /dev/null
+python3 tools/dsk.py extract "$TD/int.dsk" "$TD/dskint" > /dev/null
+python3 tests/make_disk.py "$TD/dskint.img" /A2INT/INT_PROG.SAV="$TD/dskint/INT_PROG.SAV"
 BIN=tests/build/a2int_host
 check "dos from int"      "10 D\$=\"${D4}\"${NL}20 PRINT D\$;\"OPEN NUMS\":PRINT D\$;\"WRITE NUMS\":PRINT 12:PRINT 34:PRINT D\$;\"CLOSE NUMS\"${NL}30 PRINT D\$;\"OPEN NUMS\":PRINT D\$;\"READ NUMS\":INPUT A,B:PRINT D\$:PRINT A+B${NL}40 PRINT D\$;\"LOAD NOPE\"${NL}50 END${NL}RUN${NL}" "${NL}46${NL}[TONE 1000 100]FILE NOT FOUND${NL}>"
+DISK_IMAGE="$TD/dskint.img" check "dos int from a dsk" "CATALOG${NL}RUN INT PROG${NL}LIST 40${NL}" " I 002 INT PROG${NL}" "${NL}INTEGER FROM A DISK${NL}100200300${NL}767${NL}" "40 X1=32767: IF X1>=100 THEN PRINT : PRINT X1 MOD 1000${NL}"
 BIN=tests/build/basic_host
 
 echo "$pass passed, $fail failed"

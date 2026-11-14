@@ -532,8 +532,8 @@ Programs, text files and binary files on DOS 3.3 disk images (140KB
     tools/dsk.py list games.dsk
     tools/dsk.py extract games.dsk out/     # then copy out/*.SAV to A2FP/
 
-FP BASIC programs become listings; Integer BASIC programs on disk images
-aren't converted yet.
+Programs become listings: FP BASIC ones (`A` in the catalog) for `A2FP/`,
+Integer BASIC ones (`I`) for `A2INT/` (or `A1BASIC/`).
 
 ### Not the same as the originals
 

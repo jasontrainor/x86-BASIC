@@ -3,24 +3,33 @@
 the Apple-style machines.
 
     tools/dsk.py list DISK.dsk           what's on it
-    tools/dsk.py extract DISK.dsk DIR    its FP BASIC programs, text files
-                                         and binary files, as saved files
-                                         (NAME.SAV) in DIR
+    tools/dsk.py extract DISK.dsk DIR    its programs (both BASICs'), text
+                                         files and binary files, as saved
+                                         files (NAME.SAV) in DIR
     tools/dsk.py make DISK.dsk TYPE:NAME=FILE ...
                                          make an image (for tests): A an FP
-                                         BASIC listing (tokenized here), T a
-                                         text file, B binary (B@ADDR:NAME=FILE)
+                                         BASIC listing, I an Integer BASIC
+                                         one (tokenized here), T a text
+                                         file, B binary (B@ADDR:NAME=FILE)
 
 Extracted files keep their DOS names (up to 15 characters here), so after
 copying DIR's files to the stick's A2FP folder, RUN STAR TREK finds the
-program and BLOAD and OPEN find the others. FP BASIC programs are turned
-back into listings. Integer BASIC programs (type I) aren't converted: they
-are listed and skipped.
+program and BLOAD and OPEN find the others. Programs are turned back into
+listings: FP BASIC ones (type A) for the A2FP folder, Integer BASIC ones
+(type I) for A2INT (or A1BASIC).
 
 The disk layout is the one DOS 3.3 documents: the VTOC at track 17,
 sector 0, then the catalog sectors, each file's track/sector lists and
 its sectors. The token values are FP BASIC's (machines/a2fp/fpbasic.c
 lists the keywords in the same order), with its operators among them.
+
+Integer BASIC saves a line as its length, its number and its tokens, then
+1. A token below 80h is a keyword or punctuation; INT_TOKENS gives each
+one's text (several have the same text: which one is used depends on
+where it is, as with the commas of PRINT, of POKE and of arrays).
+Characters (names, the insides of strings and REMs) have bit 7 set; a
+digit with bit 7 set where a name can't be is a number, its value in the
+two bytes that follow.
 """
 import os
 import struct
@@ -46,6 +55,20 @@ TOKENS = [
     'ASC', 'CHR$', 'LEFT$', 'RIGHT$', 'MID$',
 ]
 T_REM, T_DATA = 0x80 + TOKENS.index('REM'), 0x80 + TOKENS.index('DATA')
+
+INT_TOKENS = [
+    'HIMEM:', None, '_', ':', 'LOAD', 'SAVE', 'CON', 'RUN', 'RUN', 'DEL', ',', 'NEW', 'CLR',
+    'AUTO', ',', 'MAN', 'HIMEM:', 'LOMEM:', '+', '-', '*', '/', '=', '#', '>=', '>', '<=',
+    '<>', '<', 'AND', 'OR', 'MOD', '^', '+', '(', ',', 'THEN', 'THEN', ',', ',', '"', '"',
+    '(', '!', '!', '(', 'PEEK', 'RND', 'SGN', 'ABS', 'PDL', 'RNDX', '(', '+', '-', 'NOT',
+    '(', '=', '#', 'LEN(', 'ASC(', 'SCRN(', ',', '(', '$', '$', '(', ',', ',', ';', ';', ';',
+    ',', ',', ',', 'TEXT', 'GR', 'CALL', 'DIM', 'DIM', 'TAB', 'END', 'INPUT', 'INPUT', 'INPUT',
+    'FOR', '=', 'TO', 'STEP', 'NEXT', ',', 'RETURN', 'GOSUB', 'REM', 'LET', 'GOTO', 'IF',
+    'PRINT', 'PRINT', 'PRINT', 'POKE', ',', 'COLOR=', 'PLOT', ',', 'HLIN', ',', 'AT', 'VLIN',
+    ',', 'AT', 'VTAB', '=', '=', ')', ')', 'LIST', ',', 'LIST', 'POP', 'NODSP', 'NODSP',
+    'NOTRACE', 'DSP', 'DSP', 'TRACE', 'PR#', 'IN#',
+]
+INT_EOL, INT_QUOTE, INT_UNQUOTE, INT_REM = 0x01, 0x28, 0x29, 0x5D
 
 
 def sector(img, t, s):
@@ -117,6 +140,53 @@ def detokenize(prog):
     return '\n'.join(lines) + '\n'
 
 
+def detokenize_int(prog):
+    """An Integer BASIC program (as saved: its length, then its lines) as a
+    listing."""
+    length = struct.unpack_from('<H', prog)[0]
+    body = prog[2:2 + length]
+    lines, pos = [], 0
+    while pos + 3 < len(body):
+        size, num = body[pos], struct.unpack_from('<H', body, pos + 1)[0]
+        if size < 4:
+            break
+        line, pos = body[pos + 3:pos + size], pos + size
+        text, i, in_name = '%d ' % num, 0, False
+        while i < len(line) and line[i] != INT_EOL:
+            c = line[i]
+            i += 1
+            if c >= 0x80:
+                ch = chr(c & 0x7F)
+                if not in_name and ch.isdigit():      # a number
+                    if i + 2 > len(line):
+                        break
+                    text += str(struct.unpack_from('<H', line, i)[0])
+                    i += 2
+                    continue
+                in_name = ch.isalnum()
+                text += ch
+                continue
+            in_name = False
+            if c == INT_QUOTE:                        # a string, to its end
+                text += '"'
+                while i < len(line) and line[i] >= 0x80:
+                    text += chr(line[i] & 0x7F)
+                    i += 1
+                if i < len(line) and line[i] == INT_UNQUOTE:
+                    i += 1
+                text += '"'
+            elif c == INT_REM:                        # a REM, to the end
+                text += ' REM '
+                while i < len(line) and line[i] != INT_EOL:
+                    text += chr(line[i] & 0x7F)
+                    i += 1
+            else:
+                word = INT_TOKENS[c] or ''
+                text += ' %s ' % word if word[0:1].isalpha() else word
+        lines.append(' '.join(text.split(' ')).replace('  ', ' ').rstrip())
+    return '\n'.join(lines) + '\n'
+
+
 def text_file(data):
     out = bytearray()
     for c in data:
@@ -138,6 +208,9 @@ def extract(path, out_dir):
     for name, kind, locked, data in catalog(img):
         if kind == 'A':
             blob = savefile.pack(short(name), detokenize(data).encode('latin-1'), ord('A'),
+                                 FILE_PROGRAM)
+        elif kind == 'I':
+            blob = savefile.pack(short(name), detokenize_int(data).encode('latin-1'), ord('I'),
                                  FILE_PROGRAM)
         elif kind == 'T':
             blob = savefile.pack(short(name), text_file(data), 0, FILE_TEXT)
@@ -225,6 +298,66 @@ def tokenize(listing):
     return struct.pack('<H', len(body)) + bytes(body)
 
 
+def tokenize_int(listing):
+    """A listing as Integer BASIC saves it. Where several tokens have the
+    same text, this takes the first: enough for detokenize_int (and the
+    tests), though not always the one Integer BASIC would choose."""
+    words = sorted({w for w in INT_TOKENS if w}, key=len, reverse=True)
+    body = bytearray()
+    for line in listing.splitlines():
+        line = line.strip()
+        if not line or not line[0].isdigit():
+            continue
+        i = 0
+        while i < len(line) and line[i].isdigit():
+            i += 1
+        num, s, j, toks, in_name = int(line[:i]), line[i:], 0, bytearray(), False
+        while j < len(s):
+            c = s[j]
+            if c == ' ':
+                j, in_name = j + 1, False
+                continue
+            if c == '"':
+                k = s.find('"', j + 1)
+                k = len(s) if k < 0 else k
+                toks += bytes([INT_QUOTE]) + bytes(ord(x) | 0x80 for x in s[j + 1:k])
+                toks.append(INT_UNQUOTE)
+                j, in_name = k + 1, False
+                continue
+            if c.isdigit() and not in_name:
+                k = j
+                while k < len(s) and s[k].isdigit():
+                    k += 1
+                toks += bytes([0xB0 + int(c)]) + struct.pack('<H', int(s[j:k]))
+                j = k
+                continue
+            if not in_name:
+                for w in words:
+                    if s[j:j + len(w)].upper() == w:
+                        break
+                else:
+                    w = None
+                if w == 'REM':
+                    toks.append(INT_REM)
+                    toks += bytes(ord(x) | 0x80 for x in s[j + 3:])
+                    j = len(s)
+                    continue
+                if w:
+                    toks.append(INT_TOKENS.index(w))
+                    j += len(w)
+                    continue
+            if c.isalnum():
+                toks.append(ord(c.upper()) | 0x80)
+                in_name = True
+            else:
+                toks.append(INT_TOKENS.index(c))
+                in_name = False
+            j += 1
+        toks.append(INT_EOL)
+        body += bytes([3 + len(toks)]) + struct.pack('<H', num) + toks
+    return struct.pack('<H', len(body)) + bytes(body)
+
+
 def make(path, specs):
     img = bytearray(TRACKS * SECTORS * SECTOR)
     free = [(t, s) for t in range(1, TRACKS) if t != 17 for s in range(SECTORS)]
@@ -240,6 +373,8 @@ def make(path, specs):
         kind = kind_part[0]
         if kind == 'A':
             data, ftype = tokenize(data.decode('latin-1')), 0x02
+        elif kind == 'I':
+            data, ftype = tokenize_int(data.decode('latin-1')), 0x01
         elif kind == 'T':
             data, ftype = bytes((13 if c == 10 else c) | 0x80 for c in data) + b'\0', 0x00
         else:
