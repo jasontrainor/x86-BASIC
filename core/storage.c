@@ -3,13 +3,19 @@
  * partition (see core/fat.h), so they can be copied to and from other
  * computers, backed up, and moved between sticks.
  *
- * A saved file is the 48-byte header below, then the data:
+ * A saved file is a header, then the data. A name of up to 15 characters
+ * has the 48-byte header that all files had before longer names:
  *   0-7    "X86BSAV1"
- *   8-23   the name it was saved with (up to 15 characters, NUL-padded)
+ *   8-23   the name it was saved with (NUL-padded)
  *   24-27  the length of the data
  *   28-29  param (see storage.h)
  *   30     the kind of file (FILE_PROGRAM ...)
  *   32-35  a checksum of the data (FNV-1a)
+ * A longer one (up to 30, as DOS 3.3 allows) has a 64-byte header, the
+ * same but for a longer name:
+ *   0-7    "X86BSAV2"
+ *   8-39   the name (NUL-padded)
+ *   40-43  the length, 44-45 param, 46 the kind, 48-51 the checksum
  *
  * Its name on the disk comes from the saved name: its first 8 letters and
  * digits (others become _), in capitals, and .SAV: "my game" is
@@ -21,10 +27,41 @@
 #include "fat.h"
 #include "string.h"
 
-#define HEADER    48
-#define MAGIC     "X86BSAV1"
+#define HEADER    64                       // (room for either)
+#define SHORT_NAME 15                      // the longest name with the old header
 #define CANDIDATES 36                       // NAME.SAV, NAME~1.SAV ... NAME~Z.SAV
 
+// A header's fields, for either kind.
+struct head {
+    int size;                              // 48 or 64
+    const unsigned char *name;             // (not NUL-terminated if it fills its field)
+    int name_field;                        // 16 or 32
+    unsigned int len, sum;
+    int param, type;
+};
+
+static unsigned int get16(const unsigned char *p);
+static unsigned int get32(const unsigned char *p);
+
+// Read a header (n bytes of the file's start): 0 if it isn't one.
+static int read_head(const unsigned char *h, int n, struct head *out) {
+    if (n >= 48 && memcmp(h, "X86BSAV1", 8) == 0) {
+        out->size = 48;
+        out->name_field = 16;
+    } else if (n >= 64 && memcmp(h, "X86BSAV2", 8) == 0) {
+        out->size = 64;
+        out->name_field = 32;
+    } else {
+        return 0;
+    }
+    const unsigned char *f = h + 8 + out->name_field;
+    out->name = h + 8;
+    out->len = get32(f);
+    out->param = get16(f + 4);
+    out->type = f[6];
+    out->sum = get32(f + 8);
+    return 1;
+}
 static unsigned int get16(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static void put16(unsigned char *p, unsigned int v) { p[0] = v; p[1] = v >> 8; }
 static unsigned int get32(const unsigned char *p) { return get16(p) | (get16(p + 2) << 16); }
@@ -42,12 +79,12 @@ static const char *check_name(const char *name) {
     return 0;
 }
 
-static int same_name(const unsigned char *saved, const char *name) {
-    for (int i = 0; i < STORE_NAME_LEN; i++) {
-        if (toupper(saved[i]) != toupper(name[i])) return 0;
+static int same_name(const struct head *h, const char *name) {
+    for (int i = 0; i < h->name_field; i++) {
+        if (toupper(h->name[i]) != toupper(name[i])) return 0;
         if (!name[i]) return 1;
     }
-    return 1;
+    return !name[h->name_field];
 }
 
 static int ends_with_sav(const char *s) {
@@ -84,6 +121,7 @@ static struct {
     int found;
     char file[13];                         // where it is
     unsigned char head[HEADER];
+    struct head h;                         // (its fields)
 } look;
 
 static void look_at(const char *file, int len) {
@@ -99,10 +137,9 @@ static void look_at(const char *file, int len) {
         look.exists |= 1UL << k;
     }
     int n;
-    if (fat_read_start(file, look.head, HEADER, &n) || n < HEADER ||
-        memcmp(look.head, MAGIC, 8) != 0)
+    if (fat_read_start(file, look.head, HEADER, &n) || !read_head(look.head, n, &look.h))
         return;
-    if (look.name[0] ? same_name(look.head + 8, look.name) : look.head[30] == look.type) {
+    if (look.name[0] ? same_name(&look.h, look.name) : look.h.type == look.type) {
         look.found = 1;
         strcpy(look.file, file);
     }
@@ -133,14 +170,16 @@ const char *storage_save(const char *name, const unsigned char *data, int len, i
         disk_name(name, k, look.file);
     }
     unsigned char *h = look.head;
+    int n = strlen(name), name_field = n > SHORT_NAME ? 32 : 16;
     memset(h, 0, HEADER);
-    memcpy(h, MAGIC, 8);
-    memcpy(h + 8, name, strlen(name));
-    put32(h + 24, len);
-    put16(h + 28, param);
-    h[30] = type;
-    put32(h + 32, checksum(data, len));
-    return fat_write_header(look.file, h, HEADER, data, len);
+    memcpy(h, n > SHORT_NAME ? "X86BSAV2" : "X86BSAV1", 8);
+    memcpy(h + 8, name, n);
+    unsigned char *f = h + 8 + name_field;
+    put32(f, len);
+    put16(f + 4, param);
+    f[6] = type;
+    put32(f + 8, checksum(data, len));
+    return fat_write_header(look.file, h, name_field == 32 ? 64 : 48, data, len);
 }
 
 const char *storage_load(const char *name, int type, unsigned char *data, int cap, int *len,
@@ -149,16 +188,16 @@ const char *storage_load(const char *name, int type, unsigned char *data, int ca
     if (!err) err = find(name, type);
     if (err) return err;
     if (!look.found) return "R Program not found";
-    if (look.head[30] != type) return "R Wrong kind of file";
-    unsigned int n = get32(look.head + 24);
+    if (look.h.type != type) return "R Wrong kind of file";
+    unsigned int n = look.h.len;
     if (n > (unsigned int)cap) return "4 Out of memory";
     int got;
-    err = fat_read_from(look.file, HEADER, data, cap, &got);
+    err = fat_read_from(look.file, look.h.size, data, cap, &got);
     if (err) return err;
-    if ((unsigned int)got != n || checksum(data, n) != get32(look.head + 32))
+    if ((unsigned int)got != n || checksum(data, n) != look.h.sum)
         return "R Bad program file";
     *len = n;
-    *param = get16(look.head + 28);
+    *param = look.h.param;
     return 0;
 }
 
@@ -173,15 +212,16 @@ const char *storage_erase(const char *name) {
 static void (*list_each)(const char *name, int len, int param, int type);
 
 static void list_one(const char *file, int len) {
-    unsigned char h[HEADER];
+    unsigned char raw[HEADER];
+    struct head h;
     int n;
-    if (!ends_with_sav(file) || fat_read_start(file, h, HEADER, &n) || n < HEADER ||
-        memcmp(h, MAGIC, 8) != 0)
+    if (!ends_with_sav(file) || fat_read_start(file, raw, HEADER, &n) || !read_head(raw, n, &h))
         return;
     char name[STORE_NAME_LEN + 1];
-    memcpy(name, h + 8, STORE_NAME_LEN);
-    name[STORE_NAME_LEN] = '\0';
-    list_each(name, get32(h + 24), get16(h + 28), h[30]);
+    int k;
+    for (k = 0; k < h.name_field && k < STORE_NAME_LEN && h.name[k]; k++) name[k] = h.name[k];
+    name[k] = '\0';
+    list_each(name, h.len, h.param, h.type);
 }
 
 const char *storage_list(void (*each)(const char *name, int len, int param, int type),

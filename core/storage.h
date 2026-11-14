@@ -6,7 +6,9 @@
  * folder on the FAT partition (core/storage.c), with a header saying
  * what it is.
  */
-#define STORE_NAME_LEN 15
+// Names are up to 30 characters (DOS 3.3's longest; the Spectrum keeps to
+// 15, SPECTRUM_NAME_LEN).
+#define STORE_NAME_LEN 30
 
 // A saved file is a program (param: the line to RUN after loading, or
 // 0), bytes (param: the address they were saved from), an array (SAVE

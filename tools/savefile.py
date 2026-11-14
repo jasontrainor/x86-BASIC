@@ -16,6 +16,8 @@ import sys
 
 HEADER = 48
 MAGIC = b'X86BSAV1'
+# A name longer than 15 characters (up to 30) has a header of 64 bytes.
+LONG_HEADER, LONG_MAGIC, SHORT_NAME, LONGEST_NAME = 64, b'X86BSAV2', 15, 30
 KINDS = ['program', 'bytes', 'numbers', 'chars', 'text']
 
 # The old layout: a directory at sector 256, its data after it.
@@ -39,20 +41,26 @@ def disk_name(name, k):
 
 def pack(name, data, param, kind):
     raw = name.encode('latin-1')
-    assert 1 <= len(raw) <= 15, 'names are 1-15 characters'
-    head = MAGIC + raw.ljust(16, b'\0') + struct.pack('<IHB', len(data), param, kind)
-    head += b'\0' + struct.pack('<I', checksum(data))
-    return head.ljust(HEADER, b'\0') + data
+    assert 1 <= len(raw) <= LONGEST_NAME, 'names are 1-30 characters'
+    long = len(raw) > SHORT_NAME
+    field = 32 if long else 16
+    head = (LONG_MAGIC if long else MAGIC) + raw.ljust(field, b'\0')
+    head += struct.pack('<IHB', len(data), param, kind) + b'\0' + struct.pack('<I', checksum(data))
+    return head.ljust(LONG_HEADER if long else HEADER, b'\0') + data
 
 
 def unpack(blob):
     """(name, data, param, kind), or None if it isn't a saved file."""
-    if len(blob) < HEADER or blob[:8] != MAGIC:
+    if len(blob) >= HEADER and blob[:8] == MAGIC:
+        field, size = 16, HEADER
+    elif len(blob) >= LONG_HEADER and blob[:8] == LONG_MAGIC:
+        field, size = 32, LONG_HEADER
+    else:
         return None
-    name = blob[8:24].split(b'\0')[0].decode('latin-1')
-    length, param, kind = struct.unpack_from('<IHB', blob, 24)
-    data = blob[HEADER:HEADER + length]
-    if len(data) != length or checksum(data) != struct.unpack_from('<I', blob, 32)[0]:
+    name = blob[8:8 + field].split(b'\0')[0].decode('latin-1')
+    length, param, kind = struct.unpack_from('<IHB', blob, 8 + field)
+    data = blob[size:size + length]
+    if len(data) != length or checksum(data) != struct.unpack_from('<I', blob, 16 + field)[0]:
         return None
     return name, data, param, kind
 

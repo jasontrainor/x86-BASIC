@@ -262,6 +262,7 @@ static void detokenize(const unsigned char *src, char *out, char *kw, int cap) {
  * The program
  * --------------------------------------------------------------------- */
 
+#define SPECTRUM_NAME_LEN 15             // (storage allows longer, for DOS 3.3)
 #define PROG_SIZE 32768
 // The longest line: what fits in the lower screen, which can grow to
 // the whole screen (with the line number and the cursor).
@@ -2568,7 +2569,7 @@ static int file_name(char *name) {
         name[0] = '\0';
         return 1;
     }
-    if (v.len > STORE_NAME_LEN) {
+    if (v.len > SPECTRUM_NAME_LEN) {
         error("F Invalid file name");
         return 0;
     }

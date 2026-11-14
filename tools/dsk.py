@@ -12,7 +12,7 @@ the Apple-style machines.
                                          one (tokenized here), T a text
                                          file, B binary (B@ADDR:NAME=FILE)
 
-Extracted files keep their DOS names (up to 15 characters here), so after
+Extracted files keep their DOS names (up to 30 characters), so after
 copying DIR's files to the stick's A2FP folder, RUN STAR TREK finds the
 program and BLOAD and OPEN find the others. Programs are turned back into
 listings: FP BASIC ones (type A) for the A2FP folder, Integer BASIC ones
@@ -198,7 +198,7 @@ def text_file(data):
 
 
 def short(name):
-    return name[:15]
+    return name[:savefile.LONGEST_NAME]
 
 
 def extract(path, out_dir):
@@ -227,8 +227,6 @@ def extract(path, out_dir):
         used.add(disk)
         with open(os.path.join(out_dir, disk), 'wb') as f:
             f.write(blob)
-        if len(name) > 15:
-            print('%s: named %s here (15 characters at most)' % (name, short(name)))
         print('%-12s %s %s' % (disk, kind, short(name)))
 
 

@@ -521,8 +521,8 @@ by a program after a Ctrl+D (`PRINT CHR$(4);"CATALOG"`):
   machine here.
 
 Errors are DOS's (`FILE NOT FOUND`, `END OF DATA` ...), and FP BASIC's
-ONERR catches them with DOS's numbers. Names can be up to 15 characters
-(DOS allowed 30). Files are saved files in the machine's folder, so
+ONERR catches them with DOS's numbers. Names can be up to 30 characters,
+as on DOS. Files are saved files in the machine's folder, so
 they can be copied between sticks; a listing or text file copied there
 from a PC can be RUN, EXECed or OPENed by its 8.3 name (`RUN GAME.BAS`).
 
