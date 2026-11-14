@@ -683,5 +683,20 @@ check "dos from int"      "10 D\$=\"${D4}\"${NL}20 PRINT D\$;\"OPEN NUMS\":PRINT
 DISK_IMAGE="$TD/dskint.img" check "dos int from a dsk" "CATALOG${NL}RUN INT PROG${NL}LIST 40${NL}" " I 002 INT PROG${NL}" "${NL}INTEGER FROM A DISK${NL}100200300${NL}767${NL}" "40 X1=32767: IF X1>=100 THEN PRINT : PRINT X1 MOD 1000${NL}"
 BIN=tests/build/basic_host
 
+# --- tools/check.py: listings checked line by line, and run -----------------
+# tool NAME "COMMAND" EXPECTED...: like check, for a command's output
+tool() {
+    local name=$1 cmd=$2 out ok=1; shift 2
+    out=$(eval "$cmd" 2>&1; echo "<EXIT $?>")
+    for want in "$@"; do [[ $out == *"$want"* ]] || ok=0; done
+    if ((ok)); then pass=$((pass+1)); echo "PASS $name"
+    else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$out" | head -20; fi
+}
+printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"
+printf '10 PRINT "HI"\n20 PRINT 1+\n30 GOTO 10\n' > "$TD/badint.bas"
+tool "check spectrum" "python3 tools/check.py $TD/bad.bas" "bad.bas:3: 20 PRINT 1+?" "3 lines, 1 refused (spectrum)" "<EXIT 1>"
+tool "check int"      "python3 tools/check.py --machine a2int $TD/badint.bas" "badint.bas:2: 20 PRINT 1+  (SYNTAX ERR)" "<EXIT 1>"
+tool "check run"      "python3 tools/check.py --run 5 tests/listings/demo.bas" "all taken (spectrum)" "HIGH SCORES" "9 STOP statement" "<EXIT 0>"
+
 echo "$pass passed, $fail failed"
 ((fail == 0))

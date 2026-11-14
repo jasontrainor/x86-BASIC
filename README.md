@@ -363,6 +363,14 @@ writes the program out as text, to take back to a PC, and `VERIFY`,
 `ERASE` and `CAT` work too. Names are DOS 8.3 names, in the `SPECTRUM`
 folder (which is made when it's first saved to).
 
+`tools/check.py game.bas` checks a listing on a PC before it goes on the
+stick: it types each line into the BASIC (built for the PC, as for the
+tests) and lists any it refuses, with the `?` where it goes wrong;
+`--run` also runs it and prints what it shows, and `--machine a2int`
+(or `a1basic`, `a2fp`) checks a listing for one of the Apple-style
+machines. FP BASIC only finds a mistake when the line runs, so for it
+`--run` is the check.
+
 The text is as `LIST` shows it, a line per line, with the characters a
 PC can't show written as the escapes above (zmakebas's). Reading one,
 blank lines and lines starting with `#` are skipped, and a `\` at the
