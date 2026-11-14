@@ -40,7 +40,7 @@ UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-re
               -fcf-protection=none -fno-ident -fno-tree-loop-distribute-patterns \
               -include core/uefi/hidden.h -O2 -Wall -Icore -DUEFI_KERNEL
 
-.PHONY: all test boot-test run-listing screenshots write release clean FORCE
+.PHONY: all test fuzz boot-test run-listing screenshots write release clean FORCE
 
 all: os.img
 
@@ -165,6 +165,13 @@ write: $(IMAGE)
 
 test:
 	tests/run_tests.sh
+
+# Fuzz each BASIC (needs clang): make fuzz FUZZ_TIME=600 (seconds each),
+# FUZZ_MACHINES="a2fp"; see tests/fuzz.sh.
+FUZZ_TIME ?= 60
+FUZZ_MACHINES ?=
+fuzz:
+	FUZZ_TIME=$(FUZZ_TIME) tests/fuzz.sh $(FUZZ_MACHINES)
 
 # Boot os.img headless in QEMU as floppy, hard disk and USB stick, and
 # check a short BASIC session on screen; then the chooser's menu, and the

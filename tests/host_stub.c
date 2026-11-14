@@ -8,13 +8,27 @@
  *
  * What is printed is written to stdout as plain text (screen.c calls
  * host_echo), with [TAG] markers for screen and sound commands.
+ *
+ * Built with -DFUZZ (tests/fuzz.sh), it's a libFuzzer target instead:
+ * see the end of this file.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "platform.h"
 #include "keymap.h"
+#include "fat.h"
 #include "machine.h"
+
+#ifdef FUZZ
+#include <setjmp.h>
+static jmp_buf fuzz_done;           /* where a run ends: the input is used up */
+static long fuzz_polls;             /* key polls since the input ran out */
+#define printf(...) ((void)0)
+#define puts(s) ((void)0)
+#define putchar(c) ((void)0)
+#define exit(n) longjmp(fuzz_done, 1)
+#endif
 
 static const char *input;
 int host_scroll_prompt;             /* ask "scroll?" (env SCROLL_PROMPT) */
@@ -24,6 +38,9 @@ void host_echo(char c) {
     if (c == '\r') return;          /* cursor-only; keep output as plain \n */
     if (c == 8) c = '~';            /* make backspaces visible */
     putchar(c);
+#ifdef FUZZ
+    if (output_chars > 20000) exit(0);
+#endif
     if (++output_chars > 100000) {  /* guard against runaway programs */
         puts("\n[OUTPUT LIMIT]");
         exit(0);
@@ -70,6 +87,11 @@ static void save_screen(void) {
 int plat_read_key(void) {
     static int toggle;
     int c;
+#ifdef FUZZ
+    /* A program still running when the input has run out (10 GOTO 10)
+       ends the run after a while. */
+    if (!*input && ++fuzz_polls > 2000) exit(0);
+#endif
     if (!*input || (toggle = !toggle) == 0) return -1;
     switch (*input++) {             /* control characters for the editing keys */
     case 0x02: return KEY_LEFT;     /* (as Ctrl+B, F, P, N, A, E in Emacs) */
@@ -137,9 +159,15 @@ int plat_disk_read(unsigned int lba, void *buf) {
     memcpy(buf, disk[lba], 512);
     return 0;
 }
+#ifdef FUZZ
+static unsigned char *dirty;        /* sectors a run has written */
+#endif
 int plat_disk_write(unsigned int lba, const void *buf) {
     if (lba >= disk_sectors - 1) return -1;
     memcpy(disk[lba], buf, 512);
+#ifdef FUZZ
+    dirty[lba] = 1;
+#endif
     return 0;
 }
 
@@ -153,6 +181,7 @@ static void save_disk(void) {
     }
 }
 
+#ifndef FUZZ
 int main(int argc, char **argv) {
     input = argc > 1 ? argv[1] : "";
     const char *image = getenv("DISK_IMAGE");
@@ -182,3 +211,67 @@ int main(int argc, char **argv) {
     machine_start();
     return 0;
 }
+#endif
+
+#ifdef FUZZ
+/*
+ * The fuzz target: an input is a file, then a 0 byte, then what's typed.
+ * The file is put on a blank disk as FUZZ.BAS and FUZZ.SAV in the
+ * machine's folder (FUZZ_FOLDER), for LOAD, MERGE, RUN, EXEC and the
+ * like to read, and the machine starts afresh each time; the run ends
+ * when it waits for a key and there are none left, or one has been
+ * waited for too long. The disk starts as FUZZ_DISK, made by
+ * tests/make_disk.py (a FAT partition and nothing else).
+ */
+static unsigned char (*blank)[512];
+static char typed[65536];
+
+int LLVMFuzzerInitialize(int *argc, char ***argv) {
+    (void)argc, (void)argv;
+    const char *image = getenv("FUZZ_DISK");
+    FILE *f = image ? fopen(image, "rb") : 0;
+    if (!f) {
+        fprintf(stderr, "FUZZ_DISK: a disk image made by tests/make_disk.py\n");
+        abort();
+    }
+    blank = calloc(disk_sectors, 512);
+    disk = calloc(disk_sectors, 512);
+    dirty = calloc(disk_sectors, 1);
+    if (fread(blank, 512, disk_sectors, f) != disk_sectors) abort();
+    fclose(f);
+    for (unsigned int i = 0; i < disk_sectors; i++) dirty[i] = 1;
+    return 0;
+}
+
+int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
+    const unsigned char *zero = 0;  /* (core/string.h, not the C library's, is in use) */
+    for (size_t i = 0; i < size && !zero; i++)
+        if (!data[i]) zero = data + i;
+    size_t file_len = zero ? (size_t)(zero - data) : 0;
+    size_t typed_len = zero ? size - file_len - 1 : size;
+    if (typed_len >= sizeof typed) typed_len = sizeof typed - 1;
+    memcpy(typed, zero ? zero + 1 : data, typed_len);
+    typed[typed_len] = '\0';
+    for (size_t i = 0; i < typed_len; i++)
+        if (!typed[i]) typed[i] = ' ';
+    /* The disk as it started: only the sectors the last run wrote (this
+       memcpy is core/string.c's, a byte at a time, as are the
+       sanitizers'). */
+    for (unsigned int i = 0; i < disk_sectors; i++)
+        if (dirty[i]) {
+            memcpy(disk[i], blank[i], 512);
+            dirty[i] = 0;
+        }
+    if (file_len) {
+        fat_folder(getenv("FUZZ_FOLDER") ? getenv("FUZZ_FOLDER") : "SPECTRUM");
+        fat_write("FUZZ.BAS", data, (int)file_len);
+        fat_write("FUZZ.SAV", data, (int)file_len);
+    }
+    input = typed;
+    output_chars = 0;
+    fuzz_polls = 0;
+    keymap_set("US");
+    if (!setjmp(fuzz_done)) machine_start();
+    return 0;
+}
+#endif

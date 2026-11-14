@@ -632,6 +632,12 @@ the image's disk.
 colours of the picture it draws. The same tests run on
 GitHub Actions for every push (`.github/workflows/ci.yml`).
 
+`make fuzz` (which needs clang) fuzzes each BASIC with libFuzzer, ASan
+and UBSan for a minute (`FUZZ_TIME=600` for longer): random lines typed
+in, and random files for them to `LOAD`, `MERGE`, `RUN` and `EXEC`,
+starting from this project's listings. Anything it finds is kept in
+`tests/build/fuzz/MACHINE/` (see `tests/fuzz.sh` for running one again).
+
 `tests/qemu_try.py 'PRINT 1+1\n'` boots the image, types something and
 prints what's on the screen, for trying things out.
 `make run-listing LISTING=game.bas` boots the image with that listing on
