@@ -348,6 +348,20 @@ digits, with `.SAV` (`SAVE "my game"` makes `MY_GAME.SAV`; names that
 would clash get `~1`, `~2` ...). `tools/savefile.py info FILE.SAV` says
 what one holds. Rebuilding `os.img` with `make` starts with no saves.
 
+Programs on Spectrum tape files (`.tap` and `.tzx`, as archives of
+type-in listings have them) can be copied out for the stick, without
+retyping them:
+
+    tools/tap.py list game.tap
+    tools/tap.py extract game.tap out/      # then copy out/* to SPECTRUM/
+
+Each BASIC program becomes a listing (`GAME.BAS`: `LOAD "game.bas"`, and
+the line it started at is in a comment at the top), with the Spectrum's
+characters written as the escapes above, and bytes (`CODE`, `SCREEN$`)
+become saved files, loaded by the name they had on the tape
+(`LOAD "udg" CODE`). Machine code in them can't run, and arrays aren't
+converted.
+
 Files saved before saves moved into the FAT partition can be copied out
 of an old image with `tools/savefile.py convert old.img DIR`, then
 copied into `SPECTRUM/` on the stick (or onto a new image with

@@ -38,6 +38,14 @@ check() {
     if ((ok)); then pass=$((pass+1)); echo "PASS $name"
     else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$out" | head -20; fi
 }
+# tool NAME "COMMAND" EXPECTED...: like check, for a command's output
+tool() {
+    local name=$1 cmd=$2 out ok=1; shift 2
+    out=$(eval "$cmd" 2>&1; echo "<EXIT $?>")
+    for want in "$@"; do [[ $out == *"$want"* ]] || ok=0; done
+    if ((ok)); then pass=$((pass+1)); echo "PASS $name"
+    else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$out" | head -20; fi
+}
 NL=$'\n'
 ESC=$'\x1b'
 # Editing keys, as the test platform reads them (see tests/host_stub.c)
@@ -419,6 +427,13 @@ check "text bad line"     "LOAD \"bad.bas\"${NL}${NL}${ESC}LIST${NL}" "C Nonsens
 check "text merge"        "10 PRINT \"one\"${NL}30 PRINT \"three\"${NL}MERGE \"merge.txt\"${NL}RUN${NL}" "${NL}one${NL}merged${NL}three${NL}four${NL}" "![ERR]"
 check "text cat"          "CAT${NL}" "HELLO.BAS       84 TEXT${NL}BAD.BAS         42 TEXT${NL}MERGE.TXT       34 TEXT${NL}" "!BOOTX64"
 check "text names"        "SAVE \"toolongname.bas\"${NL}SAVE \"a.bas\" CODE 0,1${NL}LOAD \"nothere.bas\"${NL}" "F Invalid file name, 0:1" "F Invalid file name, 0:1" "R Program not found, 0:1"
+
+# --- Spectrum tapes (tools/tap.py): listings and bytes from .tap and .tzx ------
+python3 tests/make_tap.py "$TD/t.tap"; python3 tests/make_tap.py "$TD/t.tzx"
+tool "tap list" "python3 tools/tap.py list $TD/t.tap" "Program: demo" "LINE 10" "Bytes:   udg        CODE 65368,8"
+tool "tap extract" "python3 tools/tap.py extract $TD/t.tzx $TD/tape && cat $TD/tape/DEMO.BAS" "# autostart: LINE 10" '  10 PRINT "hi\a`"; AT 0,1;"\::\{16}\{2}x": GO TO 10' "  20 REM keep \* PRINT" "<EXIT 0>"
+python3 tests/make_disk.py "$TD/tape.img" DEMO.BAS="$TD/tape/DEMO.BAS" UDG.SAV="$TD/tape/UDG.SAV"
+DISK_IMAGE="$TD/tape.img" check "tap loads" "LOAD \"demo.bas\"${NL}LIST 20${NL}LOAD \"udg\" CODE${NL}PRINT PEEK 65368;PEEK 65369${NL}" "REM keep" "${NL}6066${NL}" "![ERR]"
 # Round trip: SAVE as text, the file as expected, LOAD it back the same.
 printf '%s\n' '10 PRINT "\a\::\'"'"'.\*\\\{200}x""y": REM \b and \{7}' '20 LET a$=CHR$ 65+"`": GO TO 10' > "$TD/rt.expected"
 DISK_OUT="$TD/rt.img" check "text save"  "$(cat "$TD/rt.expected")${NL}SAVE \"rt.bas\"${NL}VERIFY \"rt.bas\"${NL}20 PRINT${NL}VERIFY \"rt.bas\"${NL}" "VERIFY \"rt.bas\"${NL}0 OK, 0:1" "R Tape loading error, 0:1"
@@ -684,14 +699,6 @@ DISK_IMAGE="$TD/dskint.img" check "dos int from a dsk" "CATALOG${NL}RUN INT PROG
 BIN=tests/build/basic_host
 
 # --- tools/check.py: listings checked line by line, and run -----------------
-# tool NAME "COMMAND" EXPECTED...: like check, for a command's output
-tool() {
-    local name=$1 cmd=$2 out ok=1; shift 2
-    out=$(eval "$cmd" 2>&1; echo "<EXIT $?>")
-    for want in "$@"; do [[ $out == *"$want"* ]] || ok=0; done
-    if ((ok)); then pass=$((pass+1)); echo "PASS $name"
-    else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$out" | head -20; fi
-}
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"
 printf '10 PRINT "HI"\n20 PRINT 1+\n30 GOTO 10\n' > "$TD/badint.bas"
 tool "check spectrum" "python3 tools/check.py $TD/bad.bas" "bad.bas:3: 20 PRINT 1+?" "3 lines, 1 refused (spectrum)" "<EXIT 1>"
