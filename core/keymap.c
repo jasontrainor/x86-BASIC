@@ -117,16 +117,14 @@ int keymap_key(int us, int scan, int altgr) {
     return us ? us : shifted ? us_shift[scan] : us_plain[scan];
 }
 
-// KEYBOARD=UK in BOOT.CFG, at the top of the FAT partition.
-void keymap_init(void) {
+int boot_cfg(const char *key, char *value, int cap) {
     static unsigned char text[4096];
-    int len;
+    int len, found = 0;
     fat_folder("");
-    if (fat_read("BOOT.CFG", text, sizeof text - 1, &len)) return;
+    if (fat_read("BOOT.CFG", text, sizeof text - 1, &len)) return 0;
     text[len] = '\0';
     for (char *p = (char *)text; *p;) {
         while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-        const char *key = "KEYBOARD";
         int i = 0;
         while (key[i] && toupper(p[i]) == key[i]) i++;
         if (!key[i]) {
@@ -135,13 +133,19 @@ void keymap_init(void) {
             if (*v == '=') {
                 v++;
                 while (*v == ' ' || *v == '\t') v++;
-                char name[8];
                 int n = 0;
-                while (n < 7 && isalpha(v[n])) name[n] = v[n], n++;
-                name[n] = '\0';
-                keymap_set(name);
+                while (n < cap - 1 && isalnum(v[n])) value[n] = toupper(v[n]), n++;
+                value[n] = '\0';
+                found = 1;
             }
         }
         while (*p && *p != '\n') p++;
     }
+    return found;
+}
+
+// KEYBOARD=UK in BOOT.CFG, at the top of the FAT partition.
+void keymap_init(void) {
+    char name[8];
+    if (boot_cfg("KEYBOARD", name, sizeof name)) keymap_set(name);
 }

@@ -13,6 +13,10 @@
  * sign, which the Spectrum has.
  */
 void keymap_init(void);                   // from BOOT.CFG (at start-up)
+
+// A setting in BOOT.CFG (KEY=value, key in capitals): its value, in
+// capitals, letters and digits only; 1, or 0 if it isn't there.
+int boot_cfg(const char *key, char *value, int cap);
 int keymap_set(const char *name);         // "UK": 1, or 0 if there's no such layout
 
 /*

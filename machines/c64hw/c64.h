@@ -15,6 +15,8 @@
  *   vic.c      the picture, drawn from memory as the VIC-II draws it:
  *              text, its colours, the border, and the registers
  *   sid.c      the sound chip: its voices and envelopes, on the PC speaker
+ *   cia.c      the CIAs: the keyboard matrix, joysticks, timers, clocks
+ *   calls.c    the firmware routines programs SYS, done here
  *   screen.c   the screen editor: printing (PETSCII, with its control
  *              characters), the cursor, logical lines, scrolling, and
  *              reading a line off the screen when Return is pressed
@@ -100,6 +102,26 @@ void sid_init(void);
 int sid_read(int reg);
 void sid_write(int reg, int value);
 void sid_tick(void);                      // time passing: envelopes, the speaker
+
+/* ------------------------------------------------------------------------
+ * The CIAs (cia.c): $DC00 and $DD00, repeated every 16 bytes; the
+ * keyboard's matrix, the joysticks, timers and time-of-day clocks
+ * --------------------------------------------------------------------- */
+
+void cia_init(void);
+void cia_config(void);                    // the joystick's port, from BOOT.CFG
+int cia_read(int cia, int reg);           // cia: 0 ($DC00) or 1 ($DD00)
+void cia_write(int cia, int reg, int value);
+int cia_port_a2(void);                    // CIA 2's port A (the VIC's bank)
+void cia_tick(void);                      // the keys down, into 197 and 653
+void cia_typed(int petscii);              // a key typed (for UEFI: see cia.c)
+
+/* ------------------------------------------------------------------------
+ * SYS (calls.c): the firmware routines programs call, done here. Returns
+ * 0 if addr isn't one of them (machine code: not run), 2 for the reset.
+ * --------------------------------------------------------------------- */
+
+int c64_sys(unsigned int addr);
 
 /* ------------------------------------------------------------------------
  * The screen editor (screen.c)

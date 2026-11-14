@@ -106,6 +106,7 @@ void c64_tick(void) {
     if ((b & 5) == 5 && !shift_cbm && c64_ram(C64_MODE) != 128)   // Shift+C=
         c64_poke(0xD018, c64_peek(0xD018) ^ 2);
     shift_cbm = (b & 5) == 5;
+    cia_tick();
     for (;;) {
 #ifdef HOST_TEST
         // (The tests type ahead: keys wait while the buffer is full,
@@ -123,7 +124,10 @@ void c64_tick(void) {
             continue;
         }
         int c = petscii_key(k);
-        if (c >= 0) put_key(c);
+        if (c >= 0) {
+            put_key(c);
+            cia_typed(c);
+        }
     }
     vic_update(0);
 }

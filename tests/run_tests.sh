@@ -836,6 +836,23 @@ check "c64 sid decay"     "${SID}30 poke 54278,0:poke 54276,17:for i=1 to 100:ne
 check "c64 sid loudest"   "${SID}30 poke 54280,58:poke 54279,138:poke 54284,0:poke 54285,128${NL}40 poke 54276,17:poke 54283,17:for i=1 to 20:next${NL}50 poke 54276,16:for i=1 to 20:next:poke 54283,16${NL}run${NL}" "[SPK 440 @" "[SPK 880 @"
 check "c64 sid noise"     "10 poke 54296,15:poke 54278,240:poke 54273,40:poke 54276,129${NL}20 for i=1 to 200:next:poke 54296,0${NL}run${NL}" "[SPK 0 @"
 ccheck "c64 sid voice 3"  "poke 54287,255:poke 54290,128:x=peek(54299):y=peek(54299):z=peek(54299)${NL}print x<>y or y<>z;peek(54300);peek(54297)${NL}" "${NL}-1  0  255 "
+# The keyboard and joysticks as programs read them (HOST_HELD: the keys
+# down), the CIAs' timers and clocks, and the firmware routines SYS calls
+HOST_HELD=39 ccheck "c64 key down"    "print peek(197);peek(56321)${NL}" "${NL} 60  239 "
+HOST_HELD=2A ccheck "c64 no key down" "print peek(197)${NL}" "${NL} 64 "
+HOST_HELD=1E ccheck "c64 matrix"      "poke 56320,253:print peek(56321):poke 56320,127${NL}" "${NL} 251 "
+HOST_BUTTONS=1 HOST_HELD=1D ccheck "c64 shift keys" "print peek(653)${NL}" "${NL} 6 "
+HOST_HELD=C8,9D ccheck "c64 joystick" "print peek(56320);peek(56321)${NL}" "${NL} 110  255 "
+printf 'KEYBOARD=US\r\nJOYSTICK=1\r\n' > "$TD/joy.cfg"
+python3 tests/make_disk.py "$TD/joy.img" /BOOT.CFG="$TD/joy.cfg"
+DISK_IMAGE="$TD/joy.img" HOST_HELD=CD ccheck "c64 joystick 1" "print peek(56320);peek(56321)${NL}" "${NL} 127  247 "
+ccheck "c64 cia timer"    "print peek(56324)<>peek(56324)${NL}poke 56331,1:poke 56330,2:poke 56329,3:poke 56328,0${NL}print peek(56331);peek(56330);peek(56329)>=3${NL}" "${NL}-1 " "${NL} 1  2 -1 "
+ccheck "c64 sys plot"     "print chr\$(147);:poke 781,10:poke 782,5:poke 783,0:sys 65520:print \"here\"${NL}poke 783,1:sys 65520:print peek(781);peek(782)${NL}" "${NL}     HERE${SP40:9}${NL}" "${NL} 15  0 "
+ccheck "c64 sys 58640"    "print chr\$(147);:poke 214,5:poke 211,10:sys 58640:print \"x\";${NL}" "${NL}          X${SP40:11}${NL}READY."
+ccheck "c64 poke 214"     "print chr\$(147);:poke 214,9:print:print tab(3)\"y\"${NL}" "${NL}   Y${SP40:4}${NL}${SP40}${NL}READY."
+ccheck "c64 sys chrout"   "poke 780,147:sys 65490:poke 780,65:sys 65490${NL}" "A${SP40:1}${NL}READY."
+ccheck "c64 sys reset"    "10 print 1${NL}poke 53280,0:sys 64738${NL}list${NL}" "border E" "${NL}READY.${SP40:6}${NL}LIST${SP40:4}${NL}${SP40}${NL}READY." "!10 PRINT"
+ccheck "c64 machine code" "sys 49152:print \"on\"${NL}" "${NL}ON "
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"

@@ -288,6 +288,8 @@ int ms_function(int t, struct ms_val *v) {
  * Statements
  * --------------------------------------------------------------------- */
 
+static int reset;                         // SYS 64738: start again
+
 int ms_statement(int t) {
     switch (t) {
     case T_GET64:
@@ -297,9 +299,15 @@ int ms_statement(int t) {
         }
         ms_get_vars();
         return 1;
-    case T_SYS:
-        ms_address();                     // (machine code: not run)
-        return 1;
+    case T_SYS: {
+        unsigned int a = ms_address();
+        if (ms_err != E_NONE) return 1;
+        if (c64_sys(a) == 2) {            // the reset
+            reset = 1;
+            ms_ended = 1;
+        }
+        return 1;                         // (machine code: not run)
+    }
     }
     return 0;
 }
@@ -349,6 +357,7 @@ void c64basic_run(void) {
 #ifdef HOST_TEST
     screen_host_hook();
 #endif
+start:
     c64_print("\r    **** X86 BASIC V2 ****\r\r 64K RAM SYSTEM  38911 BASIC BYTES FREE\r");
     for (;;) {
         c64_print("\rREADY.\r");
@@ -360,6 +369,13 @@ void c64basic_run(void) {
             int c = first_char(c64_line);
             if (!c) continue;
             ms_enter_line(c64_line);
+            if (reset) {
+                reset = 0;
+                ms_prog_len = 0;
+                ms_clear_vars();
+                c64_init();
+                goto start;
+            }
             if (restored) {               // (RESTORE stopped LIST, say)
                 restored = 0;
                 c64_warm_start();

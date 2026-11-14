@@ -26,7 +26,6 @@ HIGH_MEM static unsigned char colour_mem[1024];
 __attribute__((noinline, noclone)) static unsigned char *ram(void) { return ram_mem; }
 __attribute__((noinline, noclone)) static unsigned char *colours(void) { return colour_mem; }
 
-static unsigned char cia_regs[2][16];
 
 int c64_ram(unsigned int addr) { return ram()[addr & 0xFFFF]; }
 
@@ -67,7 +66,7 @@ static int io_read(unsigned int addr) {
     if (addr < 0xD400) return vic_read(addr & 63);
     if (addr < 0xD800) return sid_read(addr & 31);
     if (addr < 0xDC00) return c64_colour(addr - 0xD800);
-    if (addr < 0xDE00) return cia_regs[addr >> 8 & 1][addr & 15];
+    if (addr < 0xDE00) return cia_read(addr >> 8 & 1, addr & 15);
     return 0;
 }
 
@@ -75,14 +74,12 @@ static void io_write(unsigned int addr, int value) {
     if (addr < 0xD400) vic_write(addr & 63, value);
     else if (addr < 0xD800) sid_write(addr & 31, value);
     else if (addr < 0xDC00) c64_set_colour(addr - 0xD800, value);
-    else if (addr < 0xDE00) {
-        cia_regs[addr >> 8 & 1][addr & 15] = value;
-        if ((addr & 0xFF0F) == 0xDD00) vic_bank_changed();
-    }
+    else if (addr < 0xDE00) cia_write(addr >> 8 & 1, addr & 15, value);
 }
 
 int c64_peek(unsigned int addr) {
     addr &= 0xFFFF;
+    if (addr == C64_LSTX || addr == C64_SHFLAG) cia_tick();   // (the keys down now)
     if (addr >= 0xA000)
         switch (mapped(addr)) {
         case 'O': return 0;
@@ -101,7 +98,7 @@ void c64_poke(unsigned int addr, int value) {
 
 // The 16KB bank the VIC sees: CIA 2's port A, bits 0-1, inverted.
 int c64_vic_bank(void) {
-    return (3 - (cia_regs[1][0] & 3)) * 0x4000;
+    return (3 - (cia_port_a2() & 3)) * 0x4000;
 }
 
 void c64_warm_start(void) {
@@ -112,7 +109,7 @@ void c64_warm_start(void) {
     m[C64_COLOR] = 14;
     m[C64_RVS] = 0;
     sid_init();
-    cia_regs[1][0] = 0x97;
+    cia_init();
     vic_init();
     screen_init();
 }
@@ -120,8 +117,9 @@ void c64_warm_start(void) {
 void c64_init(void) {
     memset(ram(), 0, 65536);
     memset(colours(), 14, 1024);
-    memset(cia_regs, 0, sizeof cia_regs);
     sid_init();
+    cia_init();
+    cia_config();
     unsigned char *m = ram();
     m[C64_PORT_DDR] = 0x2F;
     m[C64_PORT] = 0x37;
@@ -137,8 +135,6 @@ void c64_init(void) {
     m[0x0329] = 0xF6;
     m[0x0318] = 0x47;                     // the RESTORE key's ($FE47)
     m[0x0319] = 0xFE;
-    cia_regs[1][0] = 0x97;                // CIA 2: bank 0
-    cia_regs[1][2] = 0x3F;
     vic_init();
     screen_init();
     keys_init();
