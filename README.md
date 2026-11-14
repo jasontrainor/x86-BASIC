@@ -500,6 +500,9 @@ later model: lower case, and 80 columns after `PR#3`.
   and RESUME (`PEEK(222)` is the error's number, `PEEK(218)+256*PEEK(219)`
   its line, `POKE 216,0` turns it off), STOP/CONT, TRACE, WAIT, SPEED=,
   HOME, HTAB, VTAB, INVERSE, FLASH, NORMAL, TAB(, SPC(, POS, FRE.
+  `FRE(0)` is the room the original would have left, below HIMEM, for
+  the program and variables there are (and, as there, a negative number
+  when that's over 32767: add 65536).
 - Graphics: GR, COLOR=, PLOT, HLIN, VLIN, SCRN( and HGR, HGR2, HCOLOR=,
   HPLOT ... TO, and shapes from a shape table (DRAW, XDRAW, ROT=,
   SCALE=). The eight HCOLORs behave as on the original: green plotted

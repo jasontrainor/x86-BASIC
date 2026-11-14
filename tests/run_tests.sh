@@ -599,6 +599,7 @@ ABIN=tests/build/a2fp_host
 B1='[TONE 1000 100]'
 check "fp numbers"        "PRINT 1/3;\" \";2/3;\" \";1E9;\" \";.001;\" \";.01;\" \";123456789;\" \";-.5;\" \";10/3${NL}" "${NL}.333333333 .666666667 1E+09 1E-03 .01 123456789 -.5 3.33333333${NL}"
 check "fp more numbers"   "PRINT 2^10;\" \";-2^2;\" \";2^-1;\" \";1.5E-5;\" \";1234567891;\" \";1E38*10${NL}" "${NL}1024 -4 .5 1.5E-05 1.23456789E+09 " "?OVERFLOW ERROR${NL}"
+check "fp fre"            "PRINT FRE(0)${NL}10 PRINT 1${NL}HIMEM: 16384${NL}PRINT FRE(0)${NL}A=1:B\$=\"HELLO\":DIM C(9),D%(4),E\$(2)${NL}PRINT FRE(0)${NL}" "${NL}-29187${NL}" "${NL}14326${NL}" "${NL}14217${NL}"
 check "fp functions"      "PRINT SQR(2);\" \";INT(-3.7);\" \";ABS(-2);\" \";SGN(-5);\" \";ATN(1)*4;\" \";LOG(EXP(1));\" \";SIN(0)${NL}" "${NL}1.41421356 -4 2 -1 3.14159265 1 0${NL}"
 check "fp strings"        "A\$=\"HELLO\":PRINT LEFT\$(A\$,2);MID\$(A\$,2,3);RIGHT\$(A\$,2);LEN(A\$);ASC(A\$);CHR\$(65);STR\$(12.5);VAL(\"3.5E2X\")${NL}PRINT A\$+\" \"+A\$, A\$<\"HELP\", A\$=\"HELLO\"${NL}" "${NL}HEELLLO572A12.5350${NL}" "${NL}HELLO HELLO     1               1${NL}"
 check "fp string errors"  "A\$=\"X\":FOR I=1 TO 9:A\$=A\$+A\$:NEXT${NL}PRINT ASC(\"\")${NL}A=\"X\"${NL}PRINT MID\$(\"ABC\",0)${NL}" "?STRING TOO LONG ERROR${NL}" "PRINT ASC(\"\")${NL}${B1}?ILLEGAL QUANTITY ERROR" "A=\"X\"${NL}${B1}?TYPE MISMATCH ERROR" "MID\$(\"ABC\",0)${NL}${B1}?ILLEGAL QUANTITY ERROR"

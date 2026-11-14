@@ -838,6 +838,27 @@ static void call_fn(struct val *v) {
     if (p) p->n = saved;
 }
 
+/*
+ * FRE: the room the original would have left, worked out as its memory
+ * would be laid out (this one's isn't), so that programs that check it
+ * see what they would there: the program from $801 (each line as it's
+ * kept here, as there: 4 bytes and the crunched text, then 2 bytes at
+ * the end), 7 bytes a simple variable or DEF FN, arrays (5 bytes, 2 a
+ * subscript, and 5 an element, 2 for integers, 3 for strings), and the
+ * strings' text, up to HIMEM. As there, more than 32767 comes out less
+ * 65536 (programs add it back).
+ */
+static double free_memory(void) {
+    static const int size[] = { 5, 2, 3 };    // REAL, INT, STR
+    compact_strings();                    // (FRE collects the garbage there too)
+    long used = 0x801 + prog_len + 2 + 7L * (n_vars + n_fns) + str_used;
+    for (int i = 0; i < n_arrays; i++)
+        used += 5 + 2 * fp_arrays[i].ndims + fp_arrays[i].count * size[(int)fp_arrays[i].type];
+    long room = (apple_peek(115) | apple_peek(116) << 8) - used;
+    if (room < 0) room = 0;
+    return room > 32767 ? room - 65536 : room;
+}
+
 static void function(int t, struct val *v) {
     double x, y;
     struct val a;
@@ -848,8 +869,7 @@ static void function(int t, struct val *v) {
     case T_ABS: make_num(v, num_abs(num_arg())); return;
     case T_FRE:
         bracketed(&a);
-        compact_strings();
-        make_num(v, (double)(STR_POOL - str_used) + (ARRAY_POOL - array_used) / 4);
+        make_num(v, free_memory());
         return;
     case T_SCRN:                          // (SCRN( has its bracket)
         x = num_expr();
