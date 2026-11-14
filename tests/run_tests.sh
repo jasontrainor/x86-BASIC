@@ -670,6 +670,10 @@ check "dos language"      "10 PRINT 1${NL}SAVE FPPROG${NL}INT${NL}FP${NL}" "INT$
 python3 tools/dsk.py make "$TD/disk.dsk" "A:STAR TREK=tests/listings/dsk_test.bas" "T:SCORES=tests/listings/dsk_test.txt" "B@0x300:CODE=tests/listings/dsk_test.txt" > /dev/null
 python3 tools/dsk.py extract "$TD/disk.dsk" "$TD/dsk" > /dev/null
 python3 tests/make_disk.py "$TD/dsk.img" /A2FP/STAR_TRE.SAV="$TD/dsk/STAR_TRE.SAV" /A2FP/SCORES.SAV="$TD/dsk/SCORES.SAV" /A2FP/CODE.SAV="$TD/dsk/CODE.SAV"
+# A listing with bytes over 127 (found by make fuzz): kept in 7 bits
+printf '10 PRINT "A\xf0B" \xf0\xfe 1\n20 REM \xff\n' > "$TD/high.bas"
+python3 tests/make_disk.py "$TD/high.img" /A2FP/HIGH.BAS="$TD/high.bas"
+DISK_IMAGE="$TD/high.img" check "fp bytes over 127" "LOAD HIGH.BAS${NL}LIST${NL}" "10  PRINT \"ApB\"p~1${NL}20  REM "
 DISK_IMAGE="$TD/dsk.img" check "dos from a dsk" "CATALOG${NL}RUN STAR TREK${NL}BLOAD CODE${NL}PRINT PEEK(768)${NL}" " A 002 STAR TREK${NL} T 002 SCORES${NL} B 002 CODE${NL}" "${NL}FROM A DISK${NL}123${NL}HELLO2${NL}LINE TWO${NL}" "PRINT PEEK(768)${NL}76${NL}"
 python3 tools/dsk.py make "$TD/int.dsk" "I:INT PROG=tests/listings/dsk_int.bas" > /dev/null
 python3 tools/dsk.py extract "$TD/int.dsk" "$TD/dskint" > /dev/null
