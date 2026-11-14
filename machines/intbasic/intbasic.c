@@ -210,11 +210,20 @@ static int match_keyword(const char *s, int kinds, const char **end) {
     return best;
 }
 
+// A character of a line as the original keeps it: in 7 bits, since its
+// keyboard has no more (codes 128 and up are its keywords, here as
+// there), and a 0 (the end of a line) as a space.
+static int seven_bit(char c) {
+    c &= 0x7F;
+    return c ? c : ' ';
+}
+
 // Crunch src into out (at most cap bytes, then a 0); its length, or -1.
 static int crunch(const char *src, unsigned char *out_buf, int cap, int strict) {
     const char *s = src;
     int n = 0, start = 1, value = 0;      // value: the last thing was a value
-#define PUT(c) do { if (n >= cap) return -1; out_buf[n++] = (c); } while (0)
+#define PUT(c) do { if (n >= cap) return -1; out_buf[n++] = seven_bit(c); } while (0)
+#define PUT_TOKEN(t) do { if (n >= cap) return -1; out_buf[n++] = (t); } while (0)
     while (*s) {
         if (*s == ' ') {
             s++;
@@ -250,7 +259,7 @@ static int crunch(const char *src, unsigned char *out_buf, int cap, int strict) 
             }
         }
         if (t) {
-            PUT(t);
+            PUT_TOKEN(t);
             s = e;
             start = t == T_THEN;
             value = 0;
@@ -282,9 +291,10 @@ static int crunch(const char *src, unsigned char *out_buf, int cap, int strict) 
             if (c == ':') start = 1;
         }
     }
-    PUT(0);
+    PUT_TOKEN(0);
     return n - 1;
 #undef PUT
+#undef PUT_TOKEN
 }
 
 /* ------------------------------------------------------------------------

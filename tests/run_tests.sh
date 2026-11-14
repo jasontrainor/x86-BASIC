@@ -569,6 +569,11 @@ host_machine a1basic
 BIN=tests/build/a2int_host
 ABIN=tests/build/a2int_host
 CC=$'\x03'
+# A listing with bytes over 127 (found by make fuzz): kept in 7 bits
+mkdir -p tests/build/text
+printf '10 PRINT "A\xf0B";\xc9\n20 X=1: IF X THEN \xff\xff\n30 END\n' > tests/build/text/high_int.bas
+python3 tests/make_disk.py tests/build/text/high_int.img /A2INT/HIGH.BAS=tests/build/text/high_int.bas
+DISK_IMAGE=tests/build/text/high_int.img check "int bytes over 127" "LOAD HIGH.BAS${NL}LIST${NL}" ">LIST${NL}" "![ERR]"
 check "int tone routine"  "10 POKE 770,173:POKE 771,48:POKE 772,192:POKE 773,136:POKE 774,208:POKE 775,5:POKE 776,206:POKE 777,1:POKE 778,3:POKE 779,240:POKE 780,9${NL}20 POKE 781,202:POKE 782,208:POKE 783,245:POKE 784,174:POKE 785,0:POKE 786,3:POKE 787,76:POKE 788,2:POKE 789,3:POKE 790,96${NL}30 POKE 768,200:POKE 769,10:CALL 770:END${NL}RUN${NL}" "[TONE 253 25]"
 check "int print"         "PRINT 2+3*4;\" \";-7/2;\" \";7 MOD 3;\" \";2^10${NL}" "${NL}14 -3 1 1024${NL}"
 check "int program"       "10 FOR I=1 TO 3${NL}20 PRINT I;\" \";I*I${NL}30 NEXT I${NL}40 END${NL}RUN${NL}" "RUN${NL}1 1${NL}2 4${NL}3 9${NL}>"
