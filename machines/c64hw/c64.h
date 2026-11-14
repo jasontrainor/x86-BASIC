@@ -14,6 +14,7 @@
  *              ROMs read as 0.
  *   vic.c      the picture, drawn from memory as the VIC-II draws it:
  *              text, its colours, the border, and the registers
+ *   sid.c      the sound chip: its voices and envelopes, on the PC speaker
  *   screen.c   the screen editor: printing (PETSCII, with its control
  *              characters), the cursor, logical lines, scrolling, and
  *              reading a line off the screen when Return is pressed
@@ -89,6 +90,16 @@ void vic_bank_changed(void);              // the 16KB bank (CIA 2) changed
 void vic_update(int now);
 // The cursor: shown at screen offset off (0-999) or not (-1).
 void vic_cursor(int off);
+
+/* ------------------------------------------------------------------------
+ * The SID (sid.c): registers at $D400-$D41C, repeated to $D7FF; played
+ * on the PC speaker
+ * --------------------------------------------------------------------- */
+
+void sid_init(void);
+int sid_read(int reg);
+void sid_write(int reg, int value);
+void sid_tick(void);                      // time passing: envelopes, the speaker
 
 /* ------------------------------------------------------------------------
  * The screen editor (screen.c)

@@ -101,6 +101,11 @@ unsigned long plat_timer_ms(void);
 // freq 0 means silence (just wait).
 void plat_tone(int freq, int ms);
 
+// Sound freq Hz on the speaker until told otherwise (0: silence), and
+// return at once: for machines whose sound plays while their programs
+// run (the BASIC V2 machine's).
+void plat_speaker(int freq);
+
 // Move the speaker's cone the other way: one click. Machines whose
 // programs make sound by clicking the speaker (the Apple II's) call this
 // each time; how fast they do sets the pitch.

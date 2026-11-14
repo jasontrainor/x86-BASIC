@@ -828,6 +828,14 @@ PRI="${CLS}poke 1024+81,160:poke 55296+81,1${NL}poke 53248,34:poke 53249,70:poke
 ccolour "c64 sprite front" "${SPR}${PRI}" 10,20=2 16,20=2
 ccolour "c64 sprite behind" "${SPR}${PRI}poke 53275,1${NL}" 10,20=1 15,20=1 16,20=2
 ccheck  "c64 collisions"   "${SPR}poke 53248,34:poke 53249,70:poke 53250,40:poke 53251,70:poke 53269,3${NL}a=peek(53278):poke 53250,100:b=peek(53278):print a;b${NL}poke 1024+81,160:print peek(53279) and 1${NL}" "${NL} 3  0 " "${NL} 1 "
+# The SID, on the speaker ([SPK Hz @ms] each time it changes)
+SID="10 poke 54296,15:poke 54277,0:poke 54278,240${NL}20 poke 54273,29:poke 54272,69${NL}"
+check "c64 sid note"      "${SID}30 poke 54276,17:for i=1 to 20:next:poke 54276,16${NL}40 for i=1 to 50:next${NL}run${NL}" "[SPK 440 @" "[SPK 0 @"
+check "c64 sid volume"    "${SID}30 poke 54296,0:poke 54276,17:for i=1 to 20:next${NL}run${NL}" "!SPK 440"
+check "c64 sid decay"     "${SID}30 poke 54278,0:poke 54276,17:for i=1 to 100:next:print \"on\"${NL}run${NL}" "[SPK 440 @" "[SPK 0 @" "!ON${NL}[SPK 0"
+check "c64 sid loudest"   "${SID}30 poke 54280,58:poke 54279,138:poke 54284,0:poke 54285,128${NL}40 poke 54276,17:poke 54283,17:for i=1 to 20:next${NL}50 poke 54276,16:for i=1 to 20:next:poke 54283,16${NL}run${NL}" "[SPK 440 @" "[SPK 880 @"
+check "c64 sid noise"     "10 poke 54296,15:poke 54278,240:poke 54273,40:poke 54276,129${NL}20 for i=1 to 200:next:poke 54296,0${NL}run${NL}" "[SPK 0 @"
+ccheck "c64 sid voice 3"  "poke 54287,255:poke 54290,128:x=peek(54299):y=peek(54299):z=peek(54299)${NL}print x<>y or y<>z;peek(54300);peek(54297)${NL}" "${NL}-1  0  255 "
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"

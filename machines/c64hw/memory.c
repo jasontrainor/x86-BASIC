@@ -26,7 +26,6 @@ HIGH_MEM static unsigned char colour_mem[1024];
 __attribute__((noinline, noclone)) static unsigned char *ram(void) { return ram_mem; }
 __attribute__((noinline, noclone)) static unsigned char *colours(void) { return colour_mem; }
 
-static unsigned char sid_regs[32];        // (sid.c will keep these)
 static unsigned char cia_regs[2][16];
 
 int c64_ram(unsigned int addr) { return ram()[addr & 0xFFFF]; }
@@ -66,7 +65,7 @@ static int mapped(unsigned int addr) {
 
 static int io_read(unsigned int addr) {
     if (addr < 0xD400) return vic_read(addr & 63);
-    if (addr < 0xD800) return sid_regs[addr & 31];
+    if (addr < 0xD800) return sid_read(addr & 31);
     if (addr < 0xDC00) return c64_colour(addr - 0xD800);
     if (addr < 0xDE00) return cia_regs[addr >> 8 & 1][addr & 15];
     return 0;
@@ -74,7 +73,7 @@ static int io_read(unsigned int addr) {
 
 static void io_write(unsigned int addr, int value) {
     if (addr < 0xD400) vic_write(addr & 63, value);
-    else if (addr < 0xD800) sid_regs[addr & 31] = value;
+    else if (addr < 0xD800) sid_write(addr & 31, value);
     else if (addr < 0xDC00) c64_set_colour(addr - 0xD800, value);
     else if (addr < 0xDE00) {
         cia_regs[addr >> 8 & 1][addr & 15] = value;
@@ -112,7 +111,7 @@ void c64_warm_start(void) {
     m[C64_HIBASE] = 0x04;
     m[C64_COLOR] = 14;
     m[C64_RVS] = 0;
-    memset(sid_regs, 0, sizeof sid_regs);
+    sid_init();
     cia_regs[1][0] = 0x97;
     vic_init();
     screen_init();
@@ -121,8 +120,8 @@ void c64_warm_start(void) {
 void c64_init(void) {
     memset(ram(), 0, 65536);
     memset(colours(), 14, 1024);
-    memset(sid_regs, 0, sizeof sid_regs);
     memset(cia_regs, 0, sizeof cia_regs);
+    sid_init();
     unsigned char *m = ram();
     m[C64_PORT_DDR] = 0x2F;
     m[C64_PORT] = 0x37;

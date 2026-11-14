@@ -463,6 +463,18 @@ static void wait_ms(int ms) {
     while (plat_timer_ms() - start < (unsigned long)ms && polls < 100000000UL) polls++;
 }
 
+void plat_speaker(int freq) {
+    if (freq >= 20 && freq <= 20000) {
+        unsigned int div = 1193182 / freq;
+        outb(0x43, 0xB6);
+        outb(0x42, div & 0xFF);
+        outb(0x42, div >> 8);
+        outb(0x61, inb(0x61) | 0x03);
+    } else {
+        outb(0x61, inb(0x61) & ~0x03);
+    }
+}
+
 void plat_tone(int freq, int ms) {
     if (freq >= 20 && freq <= 20000) {
         // PIT channel 2, square wave, divisor = 1193182 Hz / freq.

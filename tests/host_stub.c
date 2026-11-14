@@ -163,9 +163,18 @@ void plat_idle(void) {
 }
 
 /* Time moves on 20ms every time something looks at the clock. */
-unsigned long plat_timer_ms(void) { static unsigned long t; return t += 20; }
+static unsigned long host_ms;
+unsigned long plat_timer_ms(void) { return host_ms += 20; }
 
 void plat_tone(int f, int ms) { printf("[TONE %d %d]", f, ms); }
+/* The speaker on (and its frequency) or off: [SPK f], each time it
+   changes, and the time ([@ms], as the clock says) when it does. */
+void plat_speaker(int f) {
+    static int last;
+    if (f == last) return;
+    last = f;
+    printf("[SPK %d @%lu]", f, host_ms);
+}
 static long host_clicks;
 void plat_click(void) { host_clicks++; }
 static void report_clicks(void) {

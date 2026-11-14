@@ -101,6 +101,7 @@ static void count_time(void) {
 void c64_tick(void) {
     int k;
     count_time();
+    sid_tick();
     int b = plat_buttons();
     if ((b & 5) == 5 && !shift_cbm && c64_ram(C64_MODE) != 128)   // Shift+C=
         c64_poke(0xD018, c64_peek(0xD018) ^ 2);
