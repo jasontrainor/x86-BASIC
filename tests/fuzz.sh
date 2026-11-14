@@ -23,7 +23,9 @@ jobs=${FUZZ_JOBS:-1}
 out=tests/build/fuzz
 mkdir -p "$out"
 python3 tests/make_disk.py "$out/disk.img" || exit 1
-export FUZZ_DISK=$out/disk.img
+export FUZZ_DISK=$PWD/$out/disk.img   # (each fuzzer runs in its own folder)
+# (so that libFuzzer sees undefined behaviour as a crash, and keeps the input)
+export UBSAN_OPTIONS=${UBSAN_OPTIONS:-abort_on_error=1:print_stacktrace=1}
 status=0
 
 for m in "${machines[@]}"; do
@@ -41,11 +43,19 @@ for m in "${machines[@]}"; do
     echo "== $m: fuzzing for ${time}s"
     par=()
     [ "$jobs" -gt 1 ] && par=(-jobs="$jobs" -workers="$jobs")   # (each then logs to fuzz-N.log)
+    # (Its output goes to log.txt; a few lines of it are shown.)
     (cd "$dir" && FUZZ_FOLDER=$folder ./fuzz -max_total_time="$time" "${par[@]}" \
         -dict=dict -max_len=1024 -timeout=10 -rss_limit_mb=4096 -print_final_stats=1 corpus \
-        2>&1 | grep -E "^#[0-9]+.*DONE|ERROR|SUMMARY|stat::number_of_executed_units|Test unit written" | tail -8)
-    if ls "$dir"/crash-* "$dir"/leak-* "$dir"/timeout-* > /dev/null 2>&1; then
-        echo "== $m: FOUND PROBLEMS:"; ls "$dir"/crash-* "$dir"/leak-* "$dir"/timeout-* 2>/dev/null
+        > log.txt 2>&1)
+    ran=$?
+    grep -E "^#[0-9]+.*DONE|ERROR|SUMMARY|runtime error|stat::(number_of_executed_units|average_exec_per_sec)" \
+        "$dir/log.txt" | tail -6
+    found=$(ls "$dir"/crash-* "$dir"/leak-* "$dir"/timeout-* 2> /dev/null)
+    if [ -n "$found" ]; then
+        echo "== $m: FOUND PROBLEMS:"; echo "$found"
+        status=1
+    elif [ $ran -ne 0 ]; then
+        echo "== $m: the fuzzer failed (exit $ran): see $dir/log.txt"; tail -3 "$dir/log.txt"
         status=1
     else
         echo "== $m: nothing found"
