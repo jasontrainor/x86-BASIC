@@ -8,6 +8,7 @@ tests/c64_screen.py.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -82,6 +83,19 @@ def run(mode):
             ok = colours == (6, 14)
             print(f'[{mode}] {"PASS" if ok else "FAIL"} c64 colours {colours}')
             good &= ok
+            # Speed: a FOR loop of 1000 takes about 1.1 seconds (66 jiffies),
+            # as it does on the original; POKE 2,1 runs at full speed.
+            for typed, low, high in (('t=ti:for i=1 to 1000:next:print ti-t\n', 45, 90),
+                                     ('poke 2,1:t=ti:for i=1 to 1000:next:print ti-t\n', 0, 15)):
+                q.type_keys(mon, 'print chr$(147)\n' + typed)
+                m, deadline = None, time.time() + 20
+                while not m and time.time() < deadline:
+                    time.sleep(0.5)
+                    m = re.search(r'TI-T\n *(-?\d+)', screen(mon, tmp).text())
+                ok = m is not None and low <= int(m.group(1)) <= high
+                print(f'[{mode}] {"PASS" if ok else "FAIL"} c64 speed {typed.split(":")[0]}: '
+                      f'{m.group(1) if m else "?"} jiffies')
+                good &= ok
         finally:
             proc.kill()
             proc.wait()

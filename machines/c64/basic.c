@@ -21,6 +21,7 @@
  *     clock.
  *   - FRE(0) counts from the program's start (2049) to the top of BASIC's
  *     memory (40960), and is negative above 32767, as there.
+ *   - It runs at about the original's speed (see pace()).
  */
 #include "c64basic.h"
 #include "c64listing.h"
@@ -67,6 +68,13 @@ const struct ms_dialect ms_dialect = {
     .empty_input_ends = 1,
     .bitwise = 1,
     .redo = "?REDO FROM START",
+    // (benchmark timings of the original: an empty FOR loop's round
+    // 1.1ms, an assignment with an addition about 1.5ms, a SQR 25ms)
+    .cost_statement = 1100,
+    .cost_op = 400,
+    .cost_mul = 900,
+    .cost_fn = 1200,
+    .cost_maths = 9000,
 };
 
 #define ip ms_ip
@@ -128,7 +136,9 @@ static const char *error_text(int e) {
  * --------------------------------------------------------------------- */
 
 void ms_out(int c) {
-    if (!disk_out(c)) c64_chrout(c);
+    if (disk_out(c)) return;
+    c64_chrout(c);
+    ms_cost_us += 350;                    // (the screen editor's time)
 }
 
 static void outs(const char *s) {
@@ -168,7 +178,44 @@ void ms_poke(unsigned int addr, int value) { c64_poke(addr, value); }
 
 static int restored;                      // RUN/STOP+RESTORE stopped the program
 
+/*
+ * Speed. A PC runs BASIC thousands of times faster than the original,
+ * which would make delay loops and games far too fast, so programs are
+ * held back to about its speed: what each statement would take there is
+ * added up (ms_cost_us: from the statement, the arithmetic and functions
+ * in it, and the characters it prints) and the program waits to match.
+ * POKE 2,1 runs at full speed (2 is a byte the firmware leaves unused);
+ * POKE 2,0 goes back.
+ */
+#define FULL_SPEED 2
+static long ahead_us;                     // how far the original's time is ahead of ours
+static unsigned long pace_ms;
+
+static void pace(void) {
+    unsigned long now = plat_timer_ms();
+    ahead_us += (long)ms_cost_us - (long)(now - pace_ms) * 1000;
+    ms_cost_us = 0;
+    pace_ms = now;
+    if (c64_peek(FULL_SPEED) & 1) {
+        ahead_us = 0;
+        return;
+    }
+    // If the PC fell behind (waiting for a key, say), don't make it up
+    // later by running fast; a little slack evens out the timer's steps.
+    if (ahead_us < -60000) ahead_us = -60000;
+    while (ahead_us > 0 && !c64_stop_waiting()) {
+#ifndef HOST_TEST                         // (the tests' clock moves on by itself)
+        plat_idle();
+#endif
+        c64_tick();
+        now = plat_timer_ms();
+        ahead_us -= (long)(now - pace_ms) * 1000;
+        pace_ms = now;
+    }
+}
+
 int ms_break(void) {
+    pace();
     if (c64_restore_pressed()) restored = 1;
     return restored || c64_stop_pressed();
 }

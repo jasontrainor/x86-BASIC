@@ -152,6 +152,8 @@ int c64_wait_key(void) {
     return c;
 }
 
+int c64_stop_waiting(void) { return stop_flag || restore_flag; }
+
 int c64_restore_pressed(void) {
     c64_tick();
     if (!restore_flag) return 0;

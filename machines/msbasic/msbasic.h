@@ -73,6 +73,11 @@ struct ms_dialect {
     char bitwise;            // true is -1, and AND, OR and NOT work on the bits of
                              // 16-bit integers (else true is 1 and they're logical)
     const char *redo;        // what bad INPUT says: "?REENTER"
+    // What things take on the original, in microseconds, added up in
+    // ms_cost_us for a dialect that runs at its speed (0: no account
+    // kept): a statement, an addition or comparison, a multiplication or
+    // division, a function, and the slow maths (SQR, SIN, ^ ...).
+    unsigned short cost_statement, cost_op, cost_mul, cost_fn, cost_maths;
 };
 extern const struct ms_dialect ms_dialect;
 
@@ -89,6 +94,7 @@ enum {
 };
 
 extern int ms_err;                        // the error, once there is one
+extern unsigned long ms_cost_us;          // the original's time used (see costs)
 // While INPUT reads from a file (INPUT#): the error a bad item is (no
 // ?REENTER) and no ?EXTRA IGNORED; 0 otherwise.
 extern int ms_input_quiet;

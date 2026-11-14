@@ -153,6 +153,7 @@ int c64_get_key(void);                    // from the buffer: PETSCII, or -1
 int c64_wait_key(void);                   // ... waiting for one (-2: RESTORE)
 int c64_stop_pressed(void);               // RUN/STOP (Esc) was pressed: taken
 int c64_restore_pressed(void);            // RUN/STOP+RESTORE (Page Up): taken
+int c64_stop_waiting(void);               // either of them pressed (not taken)
 unsigned long c64_jiffies(void);
 
 extern const unsigned char c64_chars[2][128][8];

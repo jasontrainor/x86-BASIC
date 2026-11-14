@@ -14,6 +14,8 @@
 int ms_err = E_NONE;
 int ms_dos_err;
 int ms_input_quiet;
+unsigned long ms_cost_us;
+#define COST(what) (ms_cost_us += D.what)
 
 void ms_error(int e) {
     if (ms_err == E_NONE) ms_err = e;
@@ -753,6 +755,8 @@ static void function(int t, struct ms_val *v) {
     double x;
     struct ms_val a;
     int n, m;
+    COST(cost_fn);
+    if (t == T_SQR || t == T_LOG || t == T_EXP || (t >= T_COS && t <= T_ATN)) COST(cost_maths);
     switch (t) {
     case T_SGN: x = num_arg(); make_num(v, x > 0 ? 1 : x < 0 ? -1 : 0); return;
     case T_INT: make_num(v, ms_fit(num_floor(num_arg()))); return;
@@ -973,6 +977,7 @@ static void pow_level(struct ms_val *v) {
             error(E_TYPE);
             return;
         }
+        COST(cost_maths);
         v->n = power(v->n, b.n);
     }
 }
@@ -1003,6 +1008,7 @@ static void mul_level(struct ms_val *v) {
             error(E_TYPE);
             return;
         }
+        COST(cost_mul);
         if (op == '*') {
             v->n = ms_fit(v->n * b.n);
         } else if (b.n == 0) {
@@ -1020,6 +1026,7 @@ static void add_level(struct ms_val *v) {
         int op = *ip++;
         struct ms_val b;
         mul_level(&b);
+        COST(cost_op);
         if (v->str != b.str || (v->str && op == '-')) {
             error(E_TYPE);
             return;
@@ -1062,6 +1069,7 @@ static void rel_level(struct ms_val *v) {
         int bits = rel_op();
         struct ms_val b;
         add_level(&b);
+        COST(cost_op);
         if (v->str != b.str) {
             error(E_TYPE);
             return;
@@ -1910,6 +1918,7 @@ void ms_execute(void) {
         jumped = 0;
         stmt_start = ip;
         break_ip = 0;
+        COST(cost_statement);
         statement();
         if (err != E_NONE) continue;
         if (ended) break;
