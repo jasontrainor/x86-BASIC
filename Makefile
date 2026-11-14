@@ -40,7 +40,7 @@ UEFI_CFLAGS = -ffreestanding -fpie -fno-stack-protector -fno-stack-check -mno-re
               -fcf-protection=none -fno-ident -fno-tree-loop-distribute-patterns \
               -include core/uefi/hidden.h -O2 -Wall -Icore -DUEFI_KERNEL
 
-.PHONY: all test boot-test run-listing write release clean FORCE
+.PHONY: all test boot-test run-listing screenshots write release clean FORCE
 
 all: os.img
 
@@ -179,6 +179,11 @@ WAIT ?= 10
 run-listing: build/boot.bin $(CHOOSER) $(call kernels,$(MACHINE))
 	@test -n "$(LISTING)" || { echo "usage: make run-listing LISTING=game.bas" >&2; exit 2; }
 	tools/run_listing.py $(LISTING) --mode $(MODE) --wait $(WAIT) --machine $(MACHINE)
+
+# make screenshots: the README's screenshots, in docs/screenshots/ (the
+# chooser's menu, and the listings there run on their machines).
+screenshots: os.img build/boot.bin $(CHOOSER) $(call kernels,$(MACHINES))
+	tools/screenshots.py
 
 # make release [VERSION=v1.2.3]: dist/x86-basic-VERSION.zip, for people
 # to download, with the image of every machine (built with the default
