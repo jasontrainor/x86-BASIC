@@ -406,6 +406,7 @@ check "save in program"   "10 SAVE \"SELF\"${NL}20 PRINT 6*7${NL}RUN${NL}CAT${NL
 # Old saves (from before they moved into the FAT partition) converted to
 # .SAV files with tools/savefile.py, and loaded from a new disk.
 SD=tests/build/saves; mkdir -p "$SD/out"
+rm -f "$SD"/out/*.SAV     # (else each run's files get new names, ~1 ... ~Z, until there are none)
 DISK_OUT="$SD/new.img" check "old saves made" "10 PRINT \"old one\"${NL}SAVE \"first prog\" LINE 10${NL}SAVE \"bytes\" CODE 16384,10${NL}" "![ERR]"
 python3 tests/fatfile.py "$SD/new.img" SPECTRUM/FIRST_PR.SAV > "$SD/a.sav"
 python3 tests/fatfile.py "$SD/new.img" SPECTRUM/BYTES.SAV > "$SD/b.sav"
