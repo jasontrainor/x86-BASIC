@@ -255,7 +255,11 @@ Numbers are printed as the Spectrum prints them (8 significant digits,
 from power-on it gives the same sequence a Spectrum would.
 
 Beyond the Spectrum: `END`, `EDIT`, `CAT`, `ERASE`, `IF ... THEN 100`,
-long string variable names, and strings of up to 65535 characters.
+long string variable names, and strings of up to 65535 characters; and
+`RENUMBER [start[,step]]` (10, 20 ... if not given), as the Spectrum
+128's editor does from its menu: the numbers after `GO TO`, `GO SUB`,
+`RUN`, `LIST`, `RESTORE`, `LINE` and `THEN` change with the lines (but
+not ones worked out, such as `GO TO n*10`).
 
 ### Reports
 

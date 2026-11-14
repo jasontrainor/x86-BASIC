@@ -46,6 +46,7 @@ enum {
     T_PEEK, T_POKE, T_USR, T_BIN, T_VALS, T_ATTR, T_SCREENS, T_IN, T_OUT,
     T_MERGE, T_VERIFY, T_PLAY,
     T_LE, T_GE, T_NE,
+    T_RENUMBER,                           // (later ones after these: saved programs keep theirs)
     T_END_OF_TOKENS
 };
 
@@ -62,6 +63,7 @@ static const char *const token_names[] = {
     "PEEK", "POKE", "USR", "BIN", "VAL$", "ATTR", "SCREEN$", "IN", "OUT",
     "MERGE", "VERIFY", "PLAY",
     "<=", ">=", "<>",
+    "RENUMBER",
 };
 _Static_assert(sizeof(token_names) / sizeof(token_names[0]) == T_END_OF_TOKENS - T_PRINT,
                "token_names doesn't match the token enum");
@@ -75,7 +77,8 @@ static const char *token_name(unsigned char t) {
 // Look up a keyword (upper case, NUL-terminated); 0 if it isn't one.
 // GO TO and GO SUB may also be typed without the space.
 static int find_token(const char *word) {
-    for (int t = T_PRINT; t < T_LE; t++) {
+    for (int t = T_PRINT; t < T_END_OF_TOKENS; t++) {
+        if (t >= T_LE && t <= T_NE) continue;   // (<= >= <>: not words)
         if (strcmp(token_name(t), word) == 0) return t;
     }
     if (strcmp(word, "GOTO") == 0) return T_GOTO;
@@ -640,6 +643,90 @@ static void new_program() {
     running = 0;
 }
 
+/*
+ * RENUMBER [start[,step]]: number the lines start, start+step ... (10, 20
+ * ... if not given), as the Spectrum 128's editor does from its menu, and
+ * the line numbers that GO TO, GO SUB, RUN, LIST, LLIST, RESTORE, LINE and
+ * THEN are followed by with them (a number to a line that isn't there
+ * goes to the line after, as GO TO would; numbers worked out, GO TO n*10,
+ * can't be). A command, not for a program.
+ */
+static int renumbered(int old, int start, int step) {
+    int k = 0, off;
+    for (off = 0; off < prog_len && line_num(off) < old; off = line_next(off)) k++;
+    return off < prog_len ? start + k * step : old;   // (past the end: as it was)
+}
+
+static int is_line_target(int t) {
+    return t == T_GOTO || t == T_GOSUB || t == T_RUN || t == T_LIST || t == T_LLIST ||
+           t == T_RESTORE || t == T_LINE || t == T_THEN;
+}
+
+static void st_renumber() {
+    int start = 10, step = 10;
+    if (!at_statement_end()) {
+        start = expr_int(1, 9999);
+        if (accept_char(',')) step = expr_int(1, 9999);
+    }
+    if (error_msg || checking) return;
+    if (cur_line >= 0) { error("C Nonsense in BASIC"); return; }   // (typed only)
+    int lines = 0;
+    for (int off = 0; off < prog_len; off = line_next(off)) lines++;
+    if (lines && start + (long)(lines - 1) * step > 9999) { error("B Integer out of range"); return; }
+    // The new program, line by line, in load_buf; then over the old one.
+    int n = 0, k = 0;
+    for (int off = 0; off < prog_len; off = line_next(off), k++) {
+        const unsigned char *t = line_text(off), *end = t + line_len(off);
+        int head = n, in_str = 0, target = 0;
+        if (n + LINE_HEAD > PROG_SIZE) { error("4 Out of memory"); return; }
+        n += LINE_HEAD;
+        while (t < end) {
+            unsigned char c = *t;
+            if (!in_str && c == T_REM) {               // (the rest as it is)
+                while (t < end) {
+                    if (n >= PROG_SIZE) { error("4 Out of memory"); return; }
+                    load_buf[n++] = *t++;
+                }
+                break;
+            }
+            if (target && isdigit(c)) {                // a line number to change?
+                const unsigned char *d = t, *q;
+                long old = 0;
+                while (d < end && isdigit(*d)) old = old * 10 + (*d++ - '0');
+                for (q = d; q < end && *q == ' '; q++) {}
+                if (q >= end || *q == ':' || *q == 0) {          // (all of it a number)
+                    char digits[8];
+                    itoa(old > 9999 ? (int)old : renumbered((int)old, start, step), digits);
+                    for (int i = 0; digits[i]; i++) {
+                        if (n >= PROG_SIZE) { error("4 Out of memory"); return; }
+                        load_buf[n++] = digits[i];
+                    }
+                    t = d;
+                    target = 0;
+                    continue;
+                }
+            }
+            if (c == '"') in_str = !in_str;
+            if (!in_str && c != ' ') target = is_line_target(c);
+            if (n >= PROG_SIZE) { error("4 Out of memory"); return; }
+            load_buf[n++] = *t++;
+        }
+        int num = start + k * step, len = n - head - LINE_HEAD;
+        load_buf[head] = num & 0xFF;
+        load_buf[head + 1] = num >> 8;
+        load_buf[head + 2] = len & 0xFF;
+        load_buf[head + 3] = len >> 8;
+    }
+    // (the current line and EDIT's, by the old numbers, before they go)
+    int cur = e_ppc ? renumbered(e_ppc, start, step) : 0;
+    int last = last_line ? renumbered(last_line, start, step) : 0;
+    memcpy(prog, load_buf, n);
+    prog_len = n;
+    e_ppc = cur;
+    last_line = last;
+    cont_ok = 0;                          // (CONTINUE's place has gone)
+}
+
 static void execute_statement() {
     skip_space();
     unsigned char t = *p;
@@ -695,6 +782,7 @@ static void execute_statement() {
     case T_MERGE:  st_load(T_MERGE); break;
     case T_ERASE:  st_erase(); break;
     case T_CAT:    st_cat(); break;
+    case T_RENUMBER: st_renumber(); break;
     case T_EDIT: {
         // Put the line in the editor for the next command line.
         int num = at_statement_end() ? last_line : expr_int(1, 9999);

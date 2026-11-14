@@ -189,7 +189,7 @@ static char *heap_alloc(unsigned int size, int is_array, int owner) {
  * letter are never keywords; here keywords are typed as words.)
  */
 static int is_name_token(unsigned char t) {
-    if (!IS_TOKEN(t) || t >= T_LE) return 0;
+    if (!IS_TOKEN(t) || (t >= T_LE && t <= T_NE)) return 0;
     if ((t >= T_AND && t <= T_POINT) || t == T_FN || t == T_PEEK ||
         (t >= T_USR && t <= T_IN) || t == T_GOTO || t == T_GOSUB || t == T_DEFFN)
         return 0;

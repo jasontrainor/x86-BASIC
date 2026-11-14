@@ -429,6 +429,8 @@ check "text load"         "LOAD \"hello.bas\"${NL}LIST${NL}RUN${NL}" "LIST${NL} 
 check "text bad line"     "LOAD \"bad.bas\"${NL}${NL}${ESC}LIST${NL}" "C Nonsense in BASIC, 0:1" "[ERR]20 PRINT 1+?${NL}" "  20 PRINT 1+${NL}  30 PRINT 3${NL}"
 check "text merge"        "10 PRINT \"one\"${NL}30 PRINT \"three\"${NL}MERGE \"merge.txt\"${NL}RUN${NL}" "${NL}one${NL}merged${NL}three${NL}four${NL}" "![ERR]"
 check "text cat"          "CAT${NL}" "HELLO.BAS       84 TEXT${NL}BAD.BAS         42 TEXT${NL}MERGE.TXT       34 TEXT${NL}" "!BOOTX64"
+check "renumber"          "5 REM GO TO 5${NL}7 IF a THEN 30${NL}10 GO TO 30: GO SUB 25${NL}20 RESTORE 5: PRINT \"GO TO 10\"${NL}30 RUN 99: LIST 7: SAVE \"x\" LINE 10${NL}40 GO TO 10*2${NL}RENUMBER${NL}LIST${NL}RENUMBER 100,5${NL}LIST 110${NL}" "  10 REM GO TO 5${NL}  20 IF a THEN 50${NL}  30 GO TO 50: GO SUB 50${NL}  40 RESTORE 10: PRINT \"GO TO 10\"${NL}  50 RUN 99: LIST 20: SAVE \"x\" LINE 30${NL}  60>GO TO 10*2${NL}" " 110>GO TO 120: GO SUB 120${NL}"
+check "renumber errors"   "10 PRINT 1${NL}20 PRINT 2${NL}RENUMBER 9999${NL}30 RENUMBER${NL}RUN 30${NL}LET renumber=3: PRINT renumber${NL}" "B Integer out of range, 0:1" "C Nonsense in BASIC, 30:1" "${NL}3${NL}"
 check "text names"        "SAVE \"toolongname.bas\"${NL}SAVE \"a.bas\" CODE 0,1${NL}LOAD \"nothere.bas\"${NL}" "F Invalid file name, 0:1" "F Invalid file name, 0:1" "R Program not found, 0:1"
 
 # --- Spectrum tapes (tools/tap.py): listings and bytes from .tap and .tzx ------
