@@ -299,6 +299,12 @@ int plat_buttons(void) {
     return 0;
 }
 
+// UEFI firmware only reports keys being pressed, not let go.
+int plat_key_down(int code) {
+    (void)code;
+    return -1;
+}
+
 void plat_restart_menu(void) {
     bs->Exit(uefi_image, EFI_SUCCESS, 0, 0);
 }

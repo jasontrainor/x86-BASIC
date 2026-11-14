@@ -1272,12 +1272,68 @@ __attribute__((noinline)) static struct value fn_call() {
 // IN port: only the keyboard is there, read as the Spectrum's: the high
 // byte selects half-rows of keys (a 0 bit each), and a key held down
 // reads as a 0 in bits 0-4. Anything else reads 255.
+//
+// Where the platform can say which keys are held (the BIOS), the PC's
+// keys stand where the Spectrum's are: Shift is CAPS SHIFT, Ctrl and
+// AltGr SYMBOL SHIFT, and the arrows and Backspace are CAPS SHIFT with
+// 5-8 and 0, as on the later Spectrums' keyboards. Otherwise (UEFI) the
+// last key typed counts as held for a moment.
+#define CAPS_SHIFT 0x100                  // (beyond the PC's scan codes)
+#define SYMBOL_SHIFT 0x101
+static const unsigned short half_row_keys[8][5] = {  // PC scan codes, and the shifts
+    {CAPS_SHIFT, 0x2C, 0x2D, 0x2E, 0x2F},          // CAPS SHIFT Z X C V
+    {0x1E, 0x1F, 0x20, 0x21, 0x22},       // A S D F G
+    {0x10, 0x11, 0x12, 0x13, 0x14},       // Q W E R T
+    {0x02, 0x03, 0x04, 0x05, 0x06},       // 1 2 3 4 5
+    {0x0B, 0x0A, 0x09, 0x08, 0x07},       // 0 9 8 7 6
+    {0x19, 0x18, 0x17, 0x16, 0x15},       // P O I U Y
+    {SC_ENTER, 0x26, 0x25, 0x24, 0x23},   // ENTER L K J H
+    {SC_SPACE, SYMBOL_SHIFT, 0x32, 0x31, 0x30},      // SPACE SYMBOL SHIFT M N B
+};
+
+static int pc_key_down(int code) {
+    return plat_key_down(code) > 0;
+}
+
+// Is this Spectrum key (an entry of half_row_keys) held?
+static int spectrum_key_down(int code, const int *extra) {
+    switch (code) {
+    case CAPS_SHIFT:
+        return pc_key_down(SC_LSHIFT) | pc_key_down(SC_RSHIFT) | extra[0];
+    case SYMBOL_SHIFT:
+        return pc_key_down(SC_LCTRL) | pc_key_down(SC_RCTRL) | pc_key_down(SC_RALT);
+    case SC_ENTER:
+        return pc_key_down(SC_ENTER) | pc_key_down(SC_KPENTER);
+    case 0x06: return pc_key_down(code) | extra[1];   // 5: left
+    case 0x07: return pc_key_down(code) | extra[2];   // 6: down
+    case 0x08: return pc_key_down(code) | extra[3];   // 7: up
+    case 0x09: return pc_key_down(code) | extra[4];   // 8: right
+    case 0x0B: return pc_key_down(code) | extra[5];   // 0: Backspace (DELETE)
+    }
+    return pc_key_down(code);
+}
+
 static int in_port(int port) {
     static const char *const half_rows[8] = {
         "\001ZXCV", "ASDFG", "QWERT", "12345", "09876", "POIUY", "\rLKJH", " \002MNB",
     };
     if (port & 1) return 255;
-    int k = held_key(), bits = 0x1F;
+    int k = held_key(), bits = 0x1F;      // (and keeps the typed keys in step)
+    if (plat_key_down(0) >= 0) {          // (0 is no key: does the platform know?)
+        int extra[6];
+        extra[1] = pc_key_down(SC_LEFT);
+        extra[2] = pc_key_down(SC_DOWN);
+        extra[3] = pc_key_down(SC_UP);
+        extra[4] = pc_key_down(SC_RIGHT);
+        extra[5] = pc_key_down(SC_BACKSPACE);
+        extra[0] = extra[1] | extra[2] | extra[3] | extra[4] | extra[5];
+        for (int r = 0; r < 8; r++) {
+            if (port & (0x100 << r)) continue;
+            for (int b = 0; b < 5; b++)
+                if (spectrum_key_down(half_row_keys[r][b], extra)) bits &= ~(1 << b);
+        }
+        return 0xE0 | bits;
+    }
     if (k >= 0) {
         char c = k == 13 ? '\r' : toupper(k);
         for (int r = 0; r < 8; r++) {

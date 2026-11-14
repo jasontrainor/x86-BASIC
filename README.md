@@ -279,7 +279,8 @@ as the Spectrum does; `POKE 23692,255` holds that off for 255 lines.
 BASIC keeps its program and variables elsewhere, so PEEKing the program
 area doesn't find them. `USR` with a number can't run machine code (`USR
 0` starts afresh, as it does on a Spectrum). `IN` reads the keyboard
-ports as the Spectrum's do, and `OUT 254,n` sets the border.
+ports as the Spectrum's do (see [differences](#differences-from-a-spectrum)
+for which PC keys are which), and `OUT 254,n` sets the border.
 
 ### Speed
 
@@ -303,9 +304,13 @@ doesn't use) runs at full speed; `POKE 23681,0` goes back.
   names that are functions (`len`, `int`), and `PRINT at` is `PRINT AT`.
 - No machine code: `USR` addresses, `RANDOMIZE USR`, and `LOAD "" CODE`
   followed by a call don't run anything.
-- A PC keyboard only reports a key going down, not that it's still held,
-  so `IN` counts a key as held for a moment after each press (or repeat),
-  and `INKEY$` returns each press (and repeat) once.
+- `IN` sees the keys held down where the PC says which they are (the
+  BIOS version), with the PC's keys where the Spectrum's are: Shift is
+  CAPS SHIFT, Ctrl (or AltGr) SYMBOL SHIFT, and the arrows and
+  Backspace are CAPS SHIFT with 5–8 and 0, as on the later Spectrums.
+  UEFI firmware only reports keys going down, so there `IN` counts the
+  last key typed as held for a moment after each press (or repeat).
+  `INKEY$` returns each press (and repeat) once.
 - No microdrives or other Interface 1 commands; `OPEN #`, `CLOSE #`,
   `FORMAT` and `MOVE` aren't there. The printer is a text file.
 - Speed is matched on average, statement by statement, not exactly.
@@ -406,6 +411,8 @@ for FP BASIC. Its files go in its own folder on the stick (`A1BASIC/`,
   for `PDL`. The buttons (`PEEK(-16287)` to `-16285`) are the left Alt,
   right Alt (AltGr) and Shift keys, on BIOS PCs only: UEFI firmware
   doesn't say when they're held.
+- **Any key down:** on the later model, bit 7 of `PEEK(-16368)` is set
+  while a key is held (BIOS PCs; on UEFI, while one is waiting).
 - **F10 twice** goes back to the chooser, as in every machine.
 
 ### What the three share

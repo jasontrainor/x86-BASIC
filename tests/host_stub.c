@@ -87,6 +87,21 @@ int plat_buttons(void) {
     return b ? atoi(b) : 0;
 }
 
+/* HOST_HELD: the keys held down (plat_key_down()), as hex scan codes:
+   "1E,2A" is A and Shift. Unset, the platform can't tell (-1), as on UEFI. */
+int plat_key_down(int code) {
+    const char *h = getenv("HOST_HELD");
+    if (!h) return -1;
+    while (*h) {
+        char *end;
+        long c = strtol(h, &end, 16);
+        if (end == h) break;
+        if (c == code) return 1;
+        h = *end ? end + 1 : end;
+    }
+    return 0;
+}
+
 void plat_idle(void) {
     if (!*input) {                  /* waiting for a key that will never come */
         fflush(stdout);

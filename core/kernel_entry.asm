@@ -160,6 +160,7 @@ global start_image
 start_image:
     cli
     cld
+    call keys_unhook
     mov esi, [esp + 4]
     mov ecx, [esp + 8]
     mov dl, [boot_drive]
@@ -179,6 +180,7 @@ start_image:
 global restart_boot
 restart_boot:
     cli
+    call keys_unhook
     mov dl, [boot_drive]
     xor ax, ax
     mov ds, ax
@@ -187,7 +189,103 @@ restart_boot:
     mov sp, 0x7C00
     jmp 0x0000:0x7C00
 
+; ---------------------------------------------------------------------------
+; Keys held down. The BIOS's keyboard service only says when a key is
+; pressed, but its keyboard interrupt hands each scan code (set 1) the
+; keyboard sends to INT 15h, function 4Fh, before it acts on it (so that
+; a program can change or drop keys). keys_hook() puts key_intercept in
+; front of INT 15h: it marks the key up or down in key_state, and passes
+; the call on. That works for USB keyboards too, through the BIOS's
+; legacy USB support, which sends their keys the same way. (Reading the
+; keyboard's port 60h here instead would take the byte away from the
+; BIOS on some keyboard controllers, QEMU's among them.)
+;
+; key_state[code] (core/bios.c), for code 0-7Fh and 80h-FFh for keys sent
+; with an E0h prefix (the arrows, right Ctrl and Alt): bit 0 is set while
+; the key is down, bit 1 when it was pressed, until bios.c has seen that
+; (so a key tapped between two looks still counts once). keys_seen is
+; set once a scan code has come through, so bios.c knows that this BIOS
+; does it.
+;
+; The vector points into this kernel's code, so restart_boot and
+; start_image put the BIOS's back before another kernel replaces it.
+; ---------------------------------------------------------------------------
+[extern key_state]
+[extern keys_seen]
+
+global keys_hook
+keys_hook:
+    push eax
+    pushfd
+    cli
+    mov eax, [0x15 * 4]
+    mov [cs:old_int15], eax
+    mov word [0x15 * 4], key_intercept
+    mov word [0x15 * 4 + 2], CODE_SEGMENT
+    popfd
+    pop eax
+    retd
+
+keys_unhook:               ; (interrupts already off)
+    push eax
+    mov eax, [cs:old_int15]
+    test eax, eax
+    jz .done
+    mov [0x15 * 4], eax
+    mov dword [cs:old_int15], 0
+.done:
+    pop eax
+    ret
+
+key_intercept:
+    cmp ah, 0x4F
+    jne .chain
+    push ds
+    push bx
+    push ax
+    xor bx, bx
+    mov ds, bx
+    mov byte [keys_seen], 1
+    cmp byte [key_skip], 0
+    je .not_skipped
+    dec byte [key_skip]    ; (the rest of Pause's six bytes)
+    jmp .done
+.not_skipped:
+    cmp al, 0xE0
+    jne .not_e0
+    mov byte [key_prefix], 0x80
+    jmp .done
+.not_e0:
+    cmp al, 0xE1           ; Pause: E1 1D 45 E1 9D C5, no key to keep
+    jne .not_e1
+    mov byte [key_skip], 5
+    jmp .done
+.not_e1:
+    mov bl, al
+    and bl, 0x7F
+    or bl, [key_prefix]
+    mov byte [key_prefix], 0
+    xor bh, bh
+    test al, 0x80
+    jnz .up
+    mov byte [key_state + bx], 3
+    jmp .done
+.up:
+    and byte [key_state + bx], 2
+.done:
+    pop ax
+    pop bx
+    pop ds
+.chain:
+    jmp far [cs:old_int15] ; (which returns to the BIOS with its flags)
+
+old_int15: dd 0            ; the BIOS's INT 15h (in the code segment, which
+                           ; is all key_intercept can address before DS is set)
+
 section .data
+key_prefix: db 0           ; 80h after an E0h prefix
+key_skip:   db 0
+
 align 8
 gdt:
     dq 0                   ; null descriptor

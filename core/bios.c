@@ -150,7 +150,25 @@ void plat_border(int colour) {
     fill(win_x + win_w, win_y, vga_w - win_x - win_w, win_h, colour);
 }
 
+// Keys held down: see keys_hook in kernel_entry.asm, which keeps these.
+void keys_hook(void);
+volatile unsigned char key_state[256];
+volatile unsigned char keys_seen;
+
+int plat_key_down(int code) {
+    if (!keys_seen) return -1;            // (no key yet, or a BIOS that doesn't say)
+    if (code < 0 || code > 0xFF) return 0;
+    int s = key_state[code];
+    if (s & 2) {
+        __asm__ __volatile__ ("cli");
+        key_state[code] &= 1;
+        __asm__ __volatile__ ("sti");
+    }
+    return s != 0;
+}
+
 void plat_init(void) {
+    keys_hook();
     // Put the timer (PIT channel 0) in mode 2, counting down once per
     // tick, at the same rate as the BIOS set (divisor 65536, 18.2Hz), so
     // that plat_timer_ms() can read how far through a tick it is. (The

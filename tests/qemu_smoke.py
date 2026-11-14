@@ -49,6 +49,16 @@ KEYS = {
 
 # (keystrokes, text that must then be on screen); RESET reboots the PC.
 RESET = None
+
+
+class Hold:
+    """Keys (QEMU qcodes) held down while the screen is checked, then let
+    go: IN must see them. Only the BIOS can say a key is held, so on UEFI
+    the step is skipped."""
+    def __init__(self, *qcodes):
+        self.qcodes = qcodes
+
+
 SESSION = [
     ('10 FOR I=1 TO 3\n20 PRINT "LOOP ";I*11\n30 NEXT I\n40 PRINT "DONE"\nRUN\n',
      ['LOOP 11', 'LOOP 22', 'LOOP 33', 'DONE', '0 OK, 40:1']),
@@ -71,9 +81,16 @@ SESSION = [
     ('NEW\n10 PRINT "LISTED"\n', ['  10>PRINT "LISTED"']),
     ('INPUT "WHO? ";N$\n', ['WHO? ""']),
     ('ME\n', ['0 OK, 0:1']),
-    ('NEW\n10 PRINT "SAVED ";6*7\nSAVE "keep"\nCAT\n', ['keep            ']),
+    ('NEW\n10 PRINT "SAVED ";6*7\nSAVE "keep"\nCAT\n', ['keep          ']),
     (RESET, []),                      # reboot: the program must still be there
     ('LOAD "KEEP"\nRUN\n', ['SAVED 42']),
+    # Keys held down, read with IN (A; CAPS SHIFT; 5, as the left arrow)
+    ('NEW\n10 PRINT AT 0,0;IN 65022;" ";IN 65278;" ";IN 63486;"  ": GO TO 10\nRUN\n',
+     ['255 255 255']),
+    (Hold('a'), ['254 255 255']),
+    (Hold('shift', 'left'), ['255 254 239']),
+    ('', ['255 255 255']),
+    ('\x1b', ['L BREAK into program, 10:']),
     ('NEW\n10 GOTO 10\nRUN\n\x1b', ['L BREAK into program, 10:1']),
 ]
 
@@ -246,6 +263,12 @@ def type_keys(mon, keys):
         time.sleep(0.02)
 
 
+def hold_keys(mon, qcodes, down):
+    mon.qmp('input-send-event', events=[
+        {'type': 'key', 'data': {'down': down, 'key': {'type': 'qcode', 'data': q}}}
+        for q in qcodes])
+
+
 def run(mode, image, show):
     accel = 'kvm' if KVM else 'emulated'
     if mode.startswith('uefi') and not ovmf():
@@ -293,7 +316,12 @@ def run(mode, image, show):
                     while not ready(mon, tmp) and time.time() < deadline:
                         time.sleep(0.2)
                     continue
-                type_keys(mon, keys)
+                if isinstance(keys, Hold):
+                    if mode.startswith('uefi'):
+                        continue
+                    hold_keys(mon, keys.qcodes, True)
+                else:
+                    type_keys(mon, keys)
                 # Key events are queued, so poll until the output shows up.
                 deadline = time.time() + 20
                 while True:
@@ -302,6 +330,8 @@ def run(mode, image, show):
                     if not missing or time.time() > deadline:
                         break
                     time.sleep(0.2)
+                if isinstance(keys, Hold):
+                    hold_keys(mon, keys.qcodes, False)
                 for want in missing:
                     print(f'[{mode}] FAIL: expected {want!r} on screen')
                     ok = False

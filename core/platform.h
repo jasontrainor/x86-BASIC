@@ -55,6 +55,30 @@ int plat_read_key(void);
 // Shift. (The BIOS knows; UEFI firmware doesn't say, so there it's 0.)
 int plat_buttons(void);
 
+/*
+ * Is a key held down? code is the key's PC scan code (set 1: 0x1E is A,
+ * 0x2A left Shift), plus 0x80 for keys sent with an 0xE0 prefix (0xC8 the
+ * up arrow, 0x9D right Ctrl). A key pressed and let go since the last
+ * time this asked about it counts as down once. Returns 1 or 0, or -1 if
+ * the platform can't tell (UEFI firmware only reports key presses).
+ */
+int plat_key_down(int code);
+
+#define SC_LSHIFT 0x2A
+#define SC_RSHIFT 0x36
+#define SC_LCTRL  0x1D
+#define SC_RCTRL  0x9D
+#define SC_LALT   0x38
+#define SC_RALT   0xB8
+#define SC_ENTER  0x1C
+#define SC_KPENTER 0x9C
+#define SC_SPACE  0x39
+#define SC_BACKSPACE 0x0E
+#define SC_UP     0xC8
+#define SC_DOWN   0xD0
+#define SC_LEFT   0xCB
+#define SC_RIGHT  0xCD
+
 // Wait a little (until the next interrupt, say) when there is nothing
 // to do but wait for a key.
 void plat_idle(void);

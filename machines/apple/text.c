@@ -390,7 +390,22 @@ void text_strobe(void) {
     latch &= 0x7F;
 }
 
+// The IIe's "any key down" ($C010's bit 7): a key held now, where the
+// platform can say (the BIOS), else a key typed and not yet taken.
 int text_any_key(void) {
+    if (plat_key_down(0) >= 0) {          // (0 is no key: does the platform know?)
+        int down = 0;
+        for (int code = 1; code < 0x100; code++) {
+            switch (code) {               // (keys that aren't keys on the Apple)
+            case SC_LSHIFT: case SC_RSHIFT: case SC_LCTRL: case SC_RCTRL:
+            case SC_LALT: case SC_RALT: case 0x3A: case 0x45: case 0x46:
+            case 0xAA: case 0xB6:         // (Caps/Num/Scroll Lock, and the
+                continue;                 // pretend Shifts some keys send)
+            }
+            down |= plat_key_down(code) > 0;
+        }
+        return down;
+    }
     return (latch & 0x80) || q_len;
 }
 
