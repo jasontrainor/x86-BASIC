@@ -342,7 +342,9 @@ and `LOAD "name" SCREEN$`. `SAVE "name" DATA a()` (or `a$()`) saves an
 array, and `LOAD "name" DATA b()` loads it back, under any name.
 `VERIFY` checks a save, `MERGE` adds a saved program's lines to the one
 in memory, `CAT` lists what's saved, and how much room is left, and
-`ERASE "name"` deletes one. Names are up to 15 characters.
+`ERASE "name"` deletes one. Names are up to 15 characters. The Spectrum
+128's RAM disk commands (`SAVE !"name"`, `LOAD !`, `MERGE !`, `CAT !`,
+`ERASE !`) work too: the disk stands in for the RAM disk as well.
 
 Each saved file is a file of its own in the `SPECTRUM` folder of the
 stick's FAT partition, so saves persist, the BIOS and UEFI versions share

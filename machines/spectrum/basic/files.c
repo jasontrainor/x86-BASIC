@@ -17,7 +17,16 @@
  *
  * LOAD "" (and VERIFY "", MERGE "") take the first file of the kind.
  */
+// The Spectrum 128's RAM disk (SAVE !"name", LOAD !, MERGE !, CAT !,
+// ERASE !): here the boot disk stands in for it as it does for the tape,
+// so the ! is taken and the file goes on the disk like any other.
+static void ram_disk(void) {
+    skip_space();
+    if (*p == '!') p++;
+}
+
 static int file_name(char *name) {
+    ram_disk();
     struct value v = expr();
     if (error_msg) return 0;
     if (!v.is_str) { error("C Nonsense in BASIC"); return 0; }
@@ -477,6 +486,7 @@ static void cat_text(const char *name, int len) {
 }
 
 static void st_cat() {
+    ram_disk();
     if (checking) return;
     int free_kb;
     const char *err = storage_list(cat_entry, &free_kb);
