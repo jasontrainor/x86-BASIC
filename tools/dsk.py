@@ -6,6 +6,11 @@ the Apple-style machines.
     tools/dsk.py extract DISK.dsk DIR    its programs (both BASICs'), text
                                          files and binary files, as saved
                                          files (NAME.SAV) in DIR
+    tools/dsk.py pack DISK.dsk FILE ...  a disk image of files from the stick,
+                                         for an emulator or a real disk:
+                                         saved files (NAME.SAV), listings
+                                         (.BAS) and text files; FP BASIC
+                                         programs, not Integer BASIC ones
     tools/dsk.py make DISK.dsk TYPE:NAME=FILE ...
                                          make an image (for tests): A an FP
                                          BASIC listing, I an Integer BASIC
@@ -356,45 +361,119 @@ def tokenize_int(listing):
     return struct.pack('<H', len(body)) + bytes(body)
 
 
-def make(path, specs):
+def write_image(path, entries):
+    """A DOS 3.3 data disk holding entries [(name, type byte, data)], laid
+    out as DOS lays one out: the VTOC at track 17 sector 0 with the map of
+    free sectors, a catalog of 15 sectors (7 files each) down track 17,
+    and each file's track/sector lists (122 sectors each) and sectors,
+    from track 18 out. Tracks 0-2 are left for the DOS image, as on a disk
+    DOS has INITed (the disk doesn't start DOS, though: it's for data)."""
     img = bytearray(TRACKS * SECTORS * SECTOR)
-    free = [(t, s) for t in range(1, TRACKS) if t != 17 for s in range(SECTORS)]
+    put = lambda t, s, data: img.__setitem__(slice((t * SECTORS + s) * SECTOR,
+                                                   (t * SECTORS + s) * SECTOR + len(data)), data)
+    order = [t for t in range(18, TRACKS)] + [t for t in range(16, 2, -1)]
+    free = [(t, s) for t in order for s in range(SECTORS - 1, -1, -1)]
+    used = {(17, s) for s in range(SECTORS)} | {(t, s) for t in range(3) for s in range(SECTORS)}
+    if len(entries) > 15 * 7:
+        raise SystemExit('%d files: a DOS 3.3 disk holds 105' % len(entries))
+    cats = [bytearray(SECTOR) for _ in range(15)]  # sectors 15 ... 1 of track 17
+    for k, cat in enumerate(cats):
+        if k < 14:
+            cat[1], cat[2] = 17, 14 - k
+    for n, (name, ftype, data) in enumerate(entries):
+        need = (len(data) + SECTOR - 1) // SECTOR or 1
+        lists = (need + 121) // 122
+        if need + lists > len(free):
+            raise SystemExit('%s: the disk is full' % name)
+        ts_sectors = [free.pop(0) for _ in range(lists)]
+        sectors = [free.pop(0) for _ in range(need)]
+        used.update(ts_sectors + sectors)
+        for i, (t, sec) in enumerate(sectors):
+            put(t, sec, data[i * SECTOR:(i + 1) * SECTOR])
+        for j, (t, sec) in enumerate(ts_sectors):
+            ts = bytearray(SECTOR)
+            if j + 1 < lists:
+                ts[1], ts[2] = ts_sectors[j + 1]
+            ts[5:7] = struct.pack('<H', j * 122)
+            for i, (dt, ds) in enumerate(sectors[j * 122:(j + 1) * 122]):
+                ts[0x0C + 2 * i], ts[0x0D + 2 * i] = dt, ds
+            put(t, sec, ts)
+        cat, e = cats[n // 7], 0x0B + (n % 7) * 35
+        cat[e], cat[e + 1], cat[e + 2] = ts_sectors[0][0], ts_sectors[0][1], ftype
+        cat[e + 3:e + 33] = bytes(ord(c) | 0x80 for c in name.upper().ljust(30)[:30])
+        cat[e + 33:e + 35] = struct.pack('<H', need + lists)
+    for k, cat in enumerate(cats):
+        put(17, 15 - k, cat)
     vtoc = bytearray(SECTOR)
     vtoc[1], vtoc[2], vtoc[3], vtoc[6] = 17, 15, 3, 254
-    vtoc[0x27], vtoc[0x34], vtoc[0x35] = 122, TRACKS, SECTORS
-    img[17 * SECTORS * SECTOR:17 * SECTORS * SECTOR + SECTOR] = vtoc
-    cat = bytearray(SECTOR)
-    for n, spec in enumerate(specs):
+    vtoc[0x27] = 122
+    vtoc[0x30], vtoc[0x31] = 18, 1        # (where DOS goes on allocating, and which way)
+    vtoc[0x34], vtoc[0x35], vtoc[0x36], vtoc[0x37] = TRACKS, SECTORS, 0, 1
+    for t in range(TRACKS):               # a bit a sector, set if it's free
+        bits = sum(1 << sec for sec in range(SECTORS) if (t, sec) not in used)
+        vtoc[0x38 + 4 * t] = bits >> 8
+        vtoc[0x39 + 4 * t] = bits & 0xFF
+    put(17, 0, vtoc)
+    open(path, 'wb').write(img)
+
+
+def text_data(text):
+    """A text file as DOS keeps one: characters with bit 7 set, lines ending
+    in a return, then a 0."""
+    return bytes((13 if c == 10 else c) | 0x80 for c in text.replace(b'\r\n', b'\n')) + b'\0'
+
+
+def make(path, specs):
+    entries = []
+    for spec in specs:
         kind_part, rest = spec.split(':', 1)
         name, src = rest.split('=', 1)
         data = open(src, 'rb').read()
         kind = kind_part[0]
         if kind == 'A':
-            data, ftype = tokenize(data.decode('latin-1')), 0x02
+            entries.append((name, 0x02, tokenize(data.decode('latin-1'))))
         elif kind == 'I':
-            data, ftype = tokenize_int(data.decode('latin-1')), 0x01
+            entries.append((name, 0x01, tokenize_int(data.decode('latin-1'))))
         elif kind == 'T':
-            data, ftype = bytes((13 if c == 10 else c) | 0x80 for c in data) + b'\0', 0x00
+            entries.append((name, 0x00, text_data(data)))
         else:
             addr = int(kind_part[2:], 0)
-            data, ftype = struct.pack('<HH', addr, len(data)) + data, 0x04
-        sectors = [free.pop(0) for _ in range((len(data) + SECTOR - 1) // SECTOR)]
-        tslist = free.pop(0)
-        ts = bytearray(SECTOR)
-        for i, (t, s) in enumerate(sectors):
-            ts[0x0C + 2 * i], ts[0x0D + 2 * i] = t, s
-            off = (t * SECTORS + s) * SECTOR
-            chunk = data[i * SECTOR:(i + 1) * SECTOR]
-            img[off:off + len(chunk)] = chunk
-        off = (tslist[0] * SECTORS + tslist[1]) * SECTOR
-        img[off:off + SECTOR] = ts
-        e = 0x0B + n * 35
-        cat[e], cat[e + 1], cat[e + 2] = tslist[0], tslist[1], ftype
-        cat[e + 3:e + 33] = bytes(ord(c) | 0x80 for c in name.ljust(30)[:30])
-        cat[e + 33:e + 35] = struct.pack('<H', len(sectors) + 1)
-    off = (17 * SECTORS + 15) * SECTOR
-    img[off:off + SECTOR] = cat
-    open(path, 'wb').write(img)
+            entries.append((name, 0x04, struct.pack('<HH', addr, len(data)) + data))
+    write_image(path, entries)
+
+
+def pack(path, sources):
+    """A disk image of files from the stick (A2FP/ or A2INT/): saved files
+    (NAME.SAV) by their saved names, and listings and text files (.BAS,
+    .TXT) by their file names, without the .BAS or .TXT. FP BASIC programs are tokenized as FP BASIC
+    does; Integer BASIC ones are left out (its tokens depend on its
+    grammar, which this doesn't have: type them in, or EXEC them as text)."""
+    entries = []
+    for src in sources:
+        raw = open(src, 'rb').read()
+        base = os.path.basename(src)
+        saved = savefile.unpack(raw)
+        if saved:
+            name, data, param, kind = saved
+            if kind == FILE_PROGRAM and param == ord('I'):
+                print('%s: an Integer BASIC program, left out (see tools/dsk.py)' % name)
+                continue
+            if kind == FILE_PROGRAM:
+                entries.append((name, 0x02, tokenize(data.decode('latin-1'))))
+            elif kind == FILE_TEXT:
+                entries.append((name, 0x00, text_data(data)))
+            elif kind == FILE_BYTES:
+                entries.append((name, 0x04, struct.pack('<HH', param, len(data)) + data))
+            else:
+                print('%s: not a kind of file DOS has, left out' % name)
+                continue
+        elif base.upper().endswith('.BAS'):           # (named without the .BAS)
+            entries.append((base[:-4], 0x02, tokenize(raw.decode('latin-1'))))
+        else:
+            name = base[:-4] if base.upper().endswith('.TXT') else base
+            entries.append((name, 0x00, text_data(raw)))
+        print('%s %s' % (TYPES[entries[-1][1]], entries[-1][0]))
+    write_image(path, entries)
 
 
 def main():
@@ -405,6 +484,8 @@ def main():
         extract(a[1], a[2])
     elif len(a) >= 2 and a[0] == 'make':
         make(a[1], a[2:])
+    elif len(a) >= 3 and a[0] == 'pack':
+        pack(a[1], a[2:])
     else:
         sys.exit(__doc__)
 

@@ -581,6 +581,16 @@ Programs, text files and binary files on DOS 3.3 disk images (140KB
 Programs become listings: FP BASIC ones (`A` in the catalog) for `A2FP/`,
 Integer BASIC ones (`I`) for `A2INT/` (or `A1BASIC/`).
 
+And the other way, files from the stick onto a disk image, for an
+emulator or a real disk drive:
+
+    tools/dsk.py pack mine.dsk A2FP/*.SAV A2FP/*.BAS
+
+Saved files keep their names, and listings and text files are named
+without their `.BAS` or `.TXT`. FP BASIC programs are tokenized as the
+original does; Integer BASIC ones are left out, since its tokens depend
+on its grammar (`EXEC` them as text files instead).
+
 ### Not the same as the originals
 
 - No 6502: machine code a program POKEs in and CALLs doesn't run, and

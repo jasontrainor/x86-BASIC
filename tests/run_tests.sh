@@ -707,6 +707,12 @@ DISK_IMAGE="$TD/dsk.img" check "dos from a dsk" "CATALOG${NL}RUN STAR TREK${NL}B
 python3 tools/dsk.py make "$TD/int.dsk" "I:INT PROG=tests/listings/dsk_int.bas" > /dev/null
 python3 tools/dsk.py extract "$TD/int.dsk" "$TD/dskint" > /dev/null
 python3 tests/make_disk.py "$TD/dskint.img" /A2INT/INT_PROG.SAV="$TD/dskint/INT_PROG.SAV"
+# ... and back: files from the stick onto a disk image (dsk.py pack)
+printf '10 PRINT "PACKED ";\n20 PRINT 6*7\n' > "$TD/packed.bas"
+tool "dsk pack" "python3 tools/dsk.py pack $TD/packed.dsk $TD/dsk/STAR_TRE.SAV $TD/dsk/SCORES.SAV $TD/dsk/CODE.SAV $TD/packed.bas $TD/dskint/INT_PROG.SAV && python3 tools/dsk.py list $TD/packed.dsk" "INT PROG: an Integer BASIC program, left out" " A 002 STAR TREK" " T 002 SCORES" " B 002 CODE" " A 002 PACKED" "<EXIT 0>"
+python3 tools/dsk.py extract "$TD/packed.dsk" "$TD/repacked" > /dev/null
+python3 tests/make_disk.py "$TD/repacked.img" /A2FP/STAR_TRE.SAV="$TD/repacked/STAR_TRE.SAV" /A2FP/SCORES.SAV="$TD/repacked/SCORES.SAV" /A2FP/PACKED.SAV="$TD/repacked/PACKED.SAV"
+DISK_IMAGE="$TD/repacked.img" check "dsk pack and back" "RUN STAR TREK${NL}RUN PACKED${NL}" "${NL}FROM A DISK${NL}123${NL}HELLO2${NL}LINE TWO${NL}" "${NL}PACKED 42${NL}"
 BIN=tests/build/a2int_host
 check "dos from int"      "10 D\$=\"${D4}\"${NL}20 PRINT D\$;\"OPEN NUMS\":PRINT D\$;\"WRITE NUMS\":PRINT 12:PRINT 34:PRINT D\$;\"CLOSE NUMS\"${NL}30 PRINT D\$;\"OPEN NUMS\":PRINT D\$;\"READ NUMS\":INPUT A,B:PRINT D\$:PRINT A+B${NL}40 PRINT D\$;\"LOAD NOPE\"${NL}50 END${NL}RUN${NL}" "${NL}46${NL}[TONE 1000 100]FILE NOT FOUND${NL}>"
 DISK_IMAGE="$TD/dskint.img" check "dos int from a dsk" "CATALOG${NL}RUN INT PROG${NL}LIST 40${NL}" " I 002 INT PROG${NL}" "${NL}INTEGER FROM A DISK${NL}100200300${NL}767${NL}" "40 X1=32767: IF X1>=100 THEN PRINT : PRINT X1 MOD 1000${NL}"
