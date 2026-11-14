@@ -105,6 +105,19 @@ int c64_vic_bank(void) {
     return (3 - (cia_regs[1][0] & 3)) * 0x4000;
 }
 
+void c64_warm_start(void) {
+    unsigned char *m = ram();
+    m[C64_PORT_DDR] = 0x2F;
+    m[C64_PORT] = 0x37;
+    m[C64_HIBASE] = 0x04;
+    m[C64_COLOR] = 14;
+    m[C64_RVS] = 0;
+    memset(sid_regs, 0, sizeof sid_regs);
+    cia_regs[1][0] = 0x97;
+    vic_init();
+    screen_init();
+}
+
 void c64_init(void) {
     memset(ram(), 0, 65536);
     memset(colours(), 14, 1024);

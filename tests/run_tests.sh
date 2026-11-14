@@ -771,6 +771,20 @@ ccheck "c64 poke screen"  "poke 1024,1:poke 1025,2:poke 55296,2:poke 53281,0${NL
 ccheck "c64 peek"         "print peek(53281) and 15;peek(53280) and 15;peek(646)${NL}print peek(43)+256*peek(44);peek(55)+256*peek(56)${NL}" "${NL} 6  14  14 " "${NL} 2049  40960 "
 ccheck "c64 lower case"   "print chr\$(14);\"x\"${NL}" "border E background 6 lower" "${NL}x${SP40:1}${NL}"
 ccheck "c64 tab spc"      "print \"a\";tab(5);\"b\";spc(3);\"c\";pos(0)${NL}" "${NL}A    B   C 10 "
+# The full-screen editor: lines edited where they're shown, insert and
+# delete, quote mode, the colour keys, RUN/STOP+RESTORE (Page Up: Ctrl+R)
+ALT=$'\x1c'; PGUP=$'\x12'
+ccheck "c64 edit listed"  "10 print 1${NL}list${NL}${UP}${UP}${R}${R}${R}${R}${R}${R}${R}${R}${R}2${NL}${DN}${DN}run${NL}" "${NL}10 PRINT 2${SP40:10}${NL}READY.${SP40:6}${NL}${SP40}${NL}RUN${SP40:3}${NL} 2 "
+ccheck "c64 over ready"   "10 print 1${NL}list${NL}${UP}${UP}${NL}run${NL}" "${NL}RUNDY.${SP40:6}${NL}${SP40}${NL}?SYNTAX  ERROR"
+ccheck "c64 insert"       "print \"ac\"${L}${L}${END}b${NL}" "${NL}PRINT \"ABC\"${SP40:11}${NL}ABC "
+ccheck "c64 delete"       "printt 5${L}${L}${BS}${NL}" "${NL}PRINT 5${SP40:7}${NL} 5 "
+ccheck "c64 quote keys"   "print \"a${L}b\"${NL}" "${NL}PRINT \"A[~]B\"${SP40:11}${NL}B "
+ccheck "c64 two rows"     "10 rem $(printf 'x%.0s' $(seq 1 40))${NL}list${NL}${UP}${UP}${UP}2${NL}${DN}${DN}list${NL}" "XXXXXXX${SP40:7}${NL}20 REM XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX${NL}XXXXXXX${SP40:7}${NL}READY."
+ccheck "c64 colour keys"  "10 rem ${ALT}3x${NL}" "${NL}EEEEEEEAEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE${NL}" "out:10 REM {LT RED}X${NL}"
+HOST_BUTTONS=2 ccheck "c64 ctrl colours" "10 rem ${ALT}3x${ALT}9y${NL}" "${NL}EEEEEEE22EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE${NL}" "${NL}10 REM X[Y]"
+ccheck "c64 c= letters"   "10 rem ${ALT}q${ALT}a${NL}list${NL}" "out:10 REM {171}{176}"
+ccheck "c64 restore"      "poke 53280,0:poke 1024,1:poke 53272,23${NL}10 goto 10${NL}run${NL}${PGUP}print 7${NL}" "${NL}READY.${SP40:6}${NL}PRINT 7${SP40:7}${NL} 7 " "border E background 6 upper" "!BREAK"
+ccheck "c64 key buffer"   "10 print chr\$(147);chr\$(17);chr\$(17);\"print 6*7\";chr\$(19);${NL}20 poke 198,1:poke 631,13:end${NL}run${NL}" "${NL}READY.${SP40:6}${NL}PRINT 6*7${SP40:9}${NL} 42 "
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"

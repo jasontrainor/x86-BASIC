@@ -171,6 +171,8 @@ static int firmware_key(void) {
     case SCAN_HOME:   return KEY_HOME;
     case SCAN_END:    return KEY_END;
     case SCAN_DELETE: return KEY_DELETE;
+    case SCAN_PAGE_UP: return KEY_PAGE_UP;
+    case SCAN_PAGE_DOWN: return KEY_PAGE_DOWN;
     case SCAN_ESC:    return 27;
     }
     int c = key.UnicodeChar;
@@ -181,6 +183,11 @@ static int firmware_key(void) {
         if (shift_state & (EFI_LEFT_CONTROL_PRESSED | EFI_RIGHT_CONTROL_PRESSED))
             return KEY_CTRL_DIGIT + c - '0';
     }
+    if ((shift_state & EFI_SHIFT_STATE_VALID) &&
+        ((shift_state & EFI_LEFT_ALT_PRESSED) ||
+         (!keymap_active() && (shift_state & EFI_RIGHT_ALT_PRESSED))) &&
+        ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+        return KEY_ALT_LETTER + (c | 0x20) - 'a';
     if (c >= 32 && c < 127)               // (through the keyboard layout)
         c = keymap_key(c, 0, (shift_state & EFI_SHIFT_STATE_VALID) &&
                              (shift_state & EFI_RIGHT_ALT_PRESSED));

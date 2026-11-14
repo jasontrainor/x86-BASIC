@@ -47,6 +47,8 @@ typedef struct {
 #define SCAN_HOME   0x05
 #define SCAN_END    0x06
 #define SCAN_DELETE 0x08
+#define SCAN_PAGE_UP   0x09
+#define SCAN_PAGE_DOWN 0x0A
 #define SCAN_ESC    0x17
 #define SCAN_F10    0x14
 

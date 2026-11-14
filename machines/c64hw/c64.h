@@ -60,6 +60,9 @@ enum {
  * --------------------------------------------------------------------- */
 
 void c64_init(void);                      // power on: memory, chips, screen
+// RUN/STOP+RESTORE: the chips as at power on, the screen cleared (memory
+// and the program kept).
+void c64_warm_start(void);
 int c64_peek(unsigned int addr);          // as the processor sees it
 void c64_poke(unsigned int addr, int value);
 int c64_ram(unsigned int addr);           // RAM itself
@@ -97,8 +100,9 @@ void c64_print(const char *s);
 // Read a line as the editor does: the cursor flashes, keys are typed
 // onto the screen and edited there, and Return reads the logical line
 // it's on (from where input started, if that's this line). PETSCII, up
-// to cap - 1 characters; returns its length.
+// to cap - 1 characters; returns its length, or -1 if RESTORE was pressed.
 int c64_input_line(char *buf, int cap);
+void c64_show_cursor(int on);             // the flashing cursor, as for GET (204)
 void c64_set_cursor(int row, int col);    // as PLOT does
 int c64_column(void);                     // PNTR: 0-79
 int c64_screen_code(int petscii);         // what a character is on the screen
@@ -113,8 +117,9 @@ void keys_init(void);
 // Call often (BASIC does between statements).
 void c64_tick(void);
 int c64_get_key(void);                    // from the buffer: PETSCII, or -1
-int c64_wait_key(void);                   // ... waiting for one
+int c64_wait_key(void);                   // ... waiting for one (-2: RESTORE)
 int c64_stop_pressed(void);               // RUN/STOP (Esc) was pressed: taken
+int c64_restore_pressed(void);            // RUN/STOP+RESTORE (Page Up): taken
 unsigned long c64_jiffies(void);
 
 extern const unsigned char c64_chars[2][128][8];

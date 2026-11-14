@@ -13,6 +13,10 @@
  *                  too, where the PC says so: UEFI)
  *   left Alt+1-8   C=+1-8 (orange ... light grey)
  *   Alt+9, Alt+0   RVS ON, RVS OFF (CTRL+9, CTRL+0)
+ *   Alt+A-Z        C= with the letter: the graphics on the left of its key
+ *   Shift+left Alt Shift+C=: the other character set (unless CHR$(8) locked it)
+ *   Page Up        RUN/STOP+RESTORE: stops the program and starts afresh,
+ *                  keeping it (unless the RESTORE vector at 792 is changed)
  *   \ ` ^ ~        the pound sign, the left arrow, the up arrow, pi
  *
  * Typed keys go into the key buffer (631-640, the count at 198) as the
@@ -26,7 +30,13 @@
 #include "platform.h"
 
 static unsigned long last_ms;             // (the clock: the time last counted)
-static int stop_flag;
+static int stop_flag, restore_flag, shift_cbm;
+
+// C= with A-Z.
+static const unsigned char cbm_letters[26] = {
+    176, 191, 188, 172, 177, 187, 165, 180, 162, 181, 161, 182, 167,
+    170, 185, 175, 171, 178, 174, 163, 184, 190, 179, 189, 183, 173,
+};
 
 static const unsigned char ctrl_colours[10] = { 146, 144, 5, 28, 159, 156, 30, 31, 158, 18 };
 static const unsigned char cbm_colours[10] = { 0, 129, 149, 150, 151, 152, 153, 154, 155, 0 };
@@ -41,6 +51,7 @@ static int petscii_key(int k) {
         return (plat_buttons() & 2) ? ctrl_colours[d] : cbm_colours[d] ? cbm_colours[d] : -1;
     }
     if (k >= KEY_CTRL_DIGIT && k < KEY_CTRL_DIGIT + 10) return ctrl_colours[k - KEY_CTRL_DIGIT];
+    if (k >= KEY_ALT_LETTER && k < KEY_ALT_LETTER + 26) return cbm_letters[k - KEY_ALT_LETTER];
     switch (k) {
     case 13: case 10: return shift ? 141 : 13;
     case 8: return shift ? 148 : 20;
@@ -90,10 +101,18 @@ static void count_time(void) {
 void c64_tick(void) {
     int k;
     count_time();
+    int b = plat_buttons();
+    if ((b & 5) == 5 && !shift_cbm && c64_ram(C64_MODE) != 128)   // Shift+C=
+        c64_poke(0xD018, c64_peek(0xD018) ^ 2);
+    shift_cbm = (b & 5) == 5;
     while ((k = plat_read_key()) >= 0) {
         if (k == 27 || k == 3) {
             if (stop_enabled()) stop_flag = 1;
             else put_key(3);
+            continue;
+        }
+        if (k == KEY_PAGE_UP) {
+            if (c64_ram(0x0318) == 0x47 && c64_ram(0x0319) == 0xFE) restore_flag = 1;
             continue;
         }
         int c = petscii_key(k);
@@ -115,8 +134,18 @@ int c64_get_key(void) {
 
 int c64_wait_key(void) {
     int c;
-    while ((c = c64_get_key()) < 0) plat_idle();
+    while ((c = c64_get_key()) < 0) {
+        if (restore_flag) return -2;
+        plat_idle();
+    }
     return c;
+}
+
+int c64_restore_pressed(void) {
+    c64_tick();
+    if (!restore_flag) return 0;
+    restore_flag = 0;
+    return 1;
 }
 
 int c64_stop_pressed(void) {
@@ -134,5 +163,5 @@ unsigned long c64_jiffies(void) {
 
 void keys_init(void) {
     last_ms = plat_timer_ms();
-    stop_flag = 0;
+    stop_flag = restore_flag = 0;
 }

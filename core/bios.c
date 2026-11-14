@@ -232,6 +232,10 @@ int plat_read_key(void) {
         }
         if (scan >= 0x02 && scan <= 0x0B && ascii == 0)   // Alt with a digit
             return KEY_ALT_DIGIT + (scan - 1) % 10;
+        if (ascii == 0 && scan >= 0x10 && scan <= 0x32) {  // ... or a letter
+            int c = keymap_scan_char(scan);
+            if (c >= 'a' && c <= 'z') return KEY_ALT_LETTER + c - 'a';
+        }
         switch (scan) {                   // keys without a character
         case 0x48: return KEY_UP;
         case 0x50: return KEY_DOWN;
@@ -240,6 +244,8 @@ int plat_read_key(void) {
         case 0x47: return KEY_HOME;
         case 0x4F: return KEY_END;
         case 0x53: return KEY_DELETE;
+        case 0x49: return KEY_PAGE_UP;
+        case 0x51: return KEY_PAGE_DOWN;
         }
         // Some other key (F1, say): ignore it and look again.
     }

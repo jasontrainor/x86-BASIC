@@ -87,6 +87,8 @@ void c64_set_cursor(int row, int col) {
 
 int c64_column(void) { return rd(C64_PNTR); }
 
+void c64_show_cursor(int on) { vic_cursor(on ? cursor_offset() : -1); }
+
 static void clear_row(int row) {
     unsigned int s = screen_base() + row * 40;
     int colour = rd(C64_COLOR);
@@ -348,6 +350,10 @@ int c64_input_line(char *buf, int cap) {
         vic_cursor(cursor_offset());
         k = c64_wait_key();
         vic_cursor(-1);
+        if (k == -2) {                    // RESTORE
+            buf[0] = '\0';
+            return -1;
+        }
         if (k == 13) break;
         c64_chrout(k);
     }

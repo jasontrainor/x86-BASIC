@@ -116,6 +116,13 @@ int plat_read_key(void) {
     case 0x01: return KEY_HOME;
     case 0x05: return KEY_END;
     case 0x7f: return KEY_DELETE;
+    case 0x12: return KEY_PAGE_UP;  /* (Ctrl+R) */
+    case 0x1c:                      /* Alt with the next key (a digit or letter) */
+        if (!*input) return -1;
+        c = (unsigned char)*input++;
+        if (c >= '0' && c <= '9') return KEY_ALT_DIGIT + c - '0';
+        if (c >= 'a' && c <= 'z') return KEY_ALT_LETTER + c - 'a';
+        return -1;
     case 0x1d:                      /* AltGr with the next key */
         if (!*input) return -1;
         c = keymap_key((unsigned char)*input++, 0, 1);

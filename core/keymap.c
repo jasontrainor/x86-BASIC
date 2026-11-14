@@ -86,6 +86,12 @@ int keymap_active(void) {
     return layout != 0;
 }
 
+int keymap_scan_char(int scan) {
+    if (scan < 2 || scan > KEYS || !us_plain[scan]) return 0;
+    int c = keymap_key(us_plain[scan], scan, 0);
+    return c > 0 ? c : 0;
+}
+
 int keymap_key(int us, int scan, int altgr) {
     if (!layout) return altgr && !us ? -1 : us;
     // Which key, and whether it's shifted (for a letter, whether it's

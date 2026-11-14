@@ -24,6 +24,10 @@ int keymap_set(const char *name);         // "UK": 1, or 0 if there's no such la
  */
 int keymap_key(int us, int scan, int altgr);
 
+// The letter or other character a key (by scan code) has on it, unshifted,
+// in this layout; 0 if none.
+int keymap_scan_char(int scan);
+
 // Whether a layout other than US is in use (for AltGr on the BIOS).
 int keymap_active(void);
 

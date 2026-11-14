@@ -50,10 +50,15 @@ int plat_read_key(void);
 #define KEY_HOME   0x105
 #define KEY_END    0x106
 #define KEY_DELETE 0x107
+#define KEY_PAGE_UP   0x108
+#define KEY_PAGE_DOWN 0x109
 // Alt with a digit: KEY_ALT_DIGIT + 0 to 9 (left or right Alt: see
 // plat_buttons); and Ctrl with one, where the platform can tell (UEFI).
+// Alt with a letter: KEY_ALT_LETTER + 0 (A) to 25 (Z), as the keyboard's
+// layout has the letters.
 #define KEY_ALT_DIGIT  0x110
 #define KEY_CTRL_DIGIT 0x120
+#define KEY_ALT_LETTER 0x130
 
 // The modifier keys held down, for machines that use them as buttons
 // (the Apple II's): bit 0 left Alt, bit 1 right Alt (AltGr), bit 2

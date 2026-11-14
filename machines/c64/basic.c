@@ -163,7 +163,12 @@ void ms_list_line(const char *text) {
 int ms_peek(unsigned int addr) { return c64_peek(addr); }
 void ms_poke(unsigned int addr, int value) { c64_poke(addr, value); }
 
-int ms_break(void) { return c64_stop_pressed(); }
+static int restored;                      // RUN/STOP+RESTORE stopped the program
+
+int ms_break(void) {
+    if (c64_restore_pressed()) restored = 1;
+    return restored || c64_stop_pressed();
+}
 
 void ms_wait_idle(void) {
     static int n;
@@ -179,11 +184,19 @@ int ms_input_line(const unsigned char *prompt, int plen, int more, char *buf, in
     if (more) ms_out('?');
     for (int i = 0; i < plen; i++) ms_out(prompt[i]);
     outs("? ");
-    c64_input_line(buf, cap > 89 ? 89 : cap);
+    if (c64_input_line(buf, cap > 89 ? 89 : cap) < 0) {
+        restored = 1;
+        ms_error(E_BREAK);
+        return 0;
+    }
     return 1;
 }
 
-int ms_get_key(void) { return c64_get_key(); }
+int ms_get_key(void) {
+    int k = c64_get_key();
+    c64_show_cursor(k < 0 && c64_peek(C64_BLNSW) == 0);   // (POKE 204,0: it flashes)
+    return k;
+}
 
 /* ------------------------------------------------------------------------
  * TI, TI$ and ST
@@ -296,6 +309,11 @@ int ms_statement(int t) {
  * --------------------------------------------------------------------- */
 
 void ms_report(int line) {
+    if (restored) {                       // (no message: just READY.)
+        restored = 0;
+        c64_warm_start();
+        return;
+    }
     ms_out(13);
     if (err == E_BREAK) {
         outs("BREAK");
@@ -335,10 +353,17 @@ void c64basic_run(void) {
     for (;;) {
         c64_print("\rREADY.\r");
         for (;;) {
-            c64_input_line(c64_line, 89);
+            if (c64_input_line(c64_line, 89) < 0) {   // RUN/STOP+RESTORE
+                c64_warm_start();
+                break;
+            }
             int c = first_char(c64_line);
             if (!c) continue;
             ms_enter_line(c64_line);
+            if (restored) {               // (RESTORE stopped LIST, say)
+                restored = 0;
+                c64_warm_start();
+            }
             if (c < '0' || c > '9') break;   // (a command: READY. again)
         }
     }

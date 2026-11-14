@@ -503,7 +503,7 @@ static void collect_keys(void) {
     int k;
     flash_tick();
     while ((k = plat_read_key()) >= 0) {
-        if (k >= KEY_ALT_DIGIT) continue;   // (Alt+1 ...: nothing here)
+        if (k >= KEY_PAGE_UP) continue;     // (Page Up, Alt+1 ...: nothing here)
         if (k == 3) k = 27;
         if (k == 163) k = '`';            // (the Spectrum's pound sign)
         if (keyq_len < KEYQ_SIZE) keyq[(keyq_head + keyq_len++) % KEYQ_SIZE] = k;
