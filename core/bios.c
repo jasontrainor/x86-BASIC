@@ -276,23 +276,6 @@ unsigned long plat_timer_ms(void) {
     return ticks * 54UL + ticks * 925UL / 1000UL + into;
 }
 
-// Wait for the given number of timer ticks (~55ms each). This is
-// independent of CPU speed, unlike a busy loop. If the timer interrupt
-// isn't running, the tick count never changes, so give up after a
-// bounded number of polls rather than hanging.
-static void wait_ticks(int n) {
-    unsigned int last = bios_ticks();
-    unsigned long polls = 0;
-    while (n > 0 && polls < 100000000UL) {
-        unsigned int now = bios_ticks();
-        if (now != last) {
-            last = now;
-            n--;
-        }
-        polls++;
-    }
-}
-
 /* ------------------------------------------------------------------------
  * Back to the chooser: F10 twice
  *
@@ -463,9 +446,16 @@ void plat_click(void) {
 }
 
 // The duration is rounded to whole timer ticks (~55ms).
+// Wait ms milliseconds, by plat_timer_ms() (which counts through each
+// 55ms tick of the timer, so this is to the millisecond, and doesn't
+// depend on the CPU's speed). If the timer isn't running, give up after
+// a bounded number of looks rather than hang.
+static void wait_ms(int ms) {
+    unsigned long start = plat_timer_ms(), polls = 0;
+    while (plat_timer_ms() - start < (unsigned long)ms && polls < 100000000UL) polls++;
+}
+
 void plat_tone(int freq, int ms) {
-    int ticks = (ms + 27) / 55;
-    if (ticks < 1 && ms > 0) ticks = 1;
     if (freq >= 20 && freq <= 20000) {
         // PIT channel 2, square wave, divisor = 1193182 Hz / freq.
         unsigned int div = 1193182 / freq;
@@ -473,9 +463,9 @@ void plat_tone(int freq, int ms) {
         outb(0x42, div & 0xFF);
         outb(0x42, div >> 8);
         outb(0x61, inb(0x61) | 0x03);    // gate the speaker on
-        wait_ticks(ticks);
+        wait_ms(ms);
         outb(0x61, inb(0x61) & ~0x03);   // and off
     } else {
-        wait_ticks(ticks);
+        wait_ms(ms);
     }
 }
