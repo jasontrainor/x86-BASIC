@@ -13,6 +13,7 @@
 
 int ms_err = E_NONE;
 int ms_dos_err;
+int ms_input_quiet;
 
 void ms_error(int e) {
     if (ms_err == E_NONE) ms_err = e;
@@ -100,7 +101,7 @@ void ms_format(double x, char *buf) {
  * The program
  * --------------------------------------------------------------------- */
 
-#define PROG_SIZE 32768
+#define PROG_SIZE MS_PROG_SIZE
 #define MAX_LINE 255                      // (crunched)
 HIGH_MEM unsigned char ms_prog[PROG_SIZE];
 int ms_prog_len;
@@ -409,6 +410,7 @@ void ms_clear_vars(void) {
     data_started = 0;
     onerr_line = -1;
     cont.ok = 0;
+    ms_cleared();
 }
 
 int ms_cur(void) {
@@ -1203,7 +1205,10 @@ static void push_gosub(void) {
     sp++;
 }
 
-static void print(void) {
+void ms_print_items(void);
+#define print ms_print_items
+
+void ms_print_items(void) {
     int newline = 1;
     while (!at_end() && err == E_NONE) {
         int c = *ip;
@@ -1314,8 +1319,8 @@ again:
         }
         struct ms_val v;
         if (!read_item(&s, p.type, &v, 0) || (p.type != MS_STR && !first_char(ms_inbuf))) {
-            if (onerr_line >= 0) {
-                error(E_REENTER);
+            if (onerr_line >= 0 || ms_input_quiet) {
+                error(ms_input_quiet ? ms_input_quiet : E_REENTER);
                 return;
             }
             outs(D.redo);
@@ -1328,7 +1333,7 @@ again:
         ip++;
     }
     while (*s == ' ') s++;
-    if (*s) {
+    if (*s && !ms_input_quiet) {
         outs("?EXTRA IGNORED");
         ms_out(13);
     }
@@ -2017,6 +2022,24 @@ int ms_detokenize(int off, char *buf) {
     }
     *p = '\0';
     return p - buf;
+}
+
+int ms_store_line(int num, const unsigned char *text, int len) {
+    if (len < 1 || len > MAX_LINE + 1) return 0;
+    return line_insert(num, text, len);
+}
+
+void ms_chain(void) {
+    sp = 0;
+    data_started = 0;
+    data_ip = 0;
+    if (ms_prog_len == 0) {
+        ended = 1;
+        return;
+    }
+    cur_line = 0;
+    ip = line_text(0);
+    jumped = 1;
 }
 
 void ms_enter_text(const char *text, int len) {

@@ -23,6 +23,7 @@
  *     memory (40960), and is negative above 32767, as there.
  */
 #include "c64basic.h"
+#include "c64listing.h"
 #include "msbasic.h"
 #include "c64.h"
 #include "num.h"
@@ -34,11 +35,6 @@
  * Keywords, in the original's order, which is also its token numbers
  * (128 on): its files keep them so (operators among them).
  * --------------------------------------------------------------------- */
-
-enum {
-    T_INPUTN = T_DIALECT, T_VERIFY, T_PRINTN, T_CMD, T_SYS, T_OPEN, T_CLOSE, T_GET64,
-    T_PI = 0xFF,                          // (pi: a constant, its own character)
-};
 
 static const struct ms_keyword keywords[] = {
     { "END", T_END }, { "FOR", T_FOR }, { "NEXT", T_NEXT }, { "DATA", T_DATA },
@@ -101,6 +97,8 @@ int ms_line_char(int c, int in_string) {
  * Errors
  * --------------------------------------------------------------------- */
 
+const char *disk_error_text(int e);
+
 static const char *error_text(int e) {
     switch (e) {
     case E_NEXT:      return "NEXT WITHOUT FOR";
@@ -121,14 +119,17 @@ static const char *error_text(int e) {
     case E_CONT:      return "CAN'T CONTINUE";
     case E_FN:        return "UNDEF'D FUNCTION";
     }
-    return "SYNTAX";
+    const char *t = disk_error_text(e);
+    return t ? t : "SYNTAX";
 }
 
 /* ------------------------------------------------------------------------
  * Output
  * --------------------------------------------------------------------- */
 
-void ms_out(int c) { c64_chrout(c); }
+void ms_out(int c) {
+    if (!disk_out(c)) c64_chrout(c);
+}
 
 static void outs(const char *s) {
     while (*s) ms_out(*s++);
@@ -136,15 +137,17 @@ static void outs(const char *s) {
 
 int ms_column(void) { return c64_column(); }
 
+// Cursor rights on the screen; spaces in a file.
 static void cursor_rights(int n) {
-    while (n-- > 0) ms_out(29);
+    int c = disk_to_file() ? ' ' : 29;
+    while (n-- > 0) ms_out(c);
 }
 
 void ms_print_number(double x) {
     char b[24];
     ms_format(x, b);
     outs(b);
-    ms_out(29);                           // (a cursor right, not a space)
+    cursor_rights(1);                     // (on the screen a cursor right, not a space)
 }
 
 void ms_print_comma(void) {               // to the next 10-column field
@@ -181,6 +184,8 @@ void ms_wait_idle(void) {
  * --------------------------------------------------------------------- */
 
 int ms_input_line(const unsigned char *prompt, int plen, int more, char *buf, int cap) {
+    int done, ok = disk_input_line(buf, cap > 89 ? 89 : cap, &done);
+    if (done) return ok;                  // (INPUT#)
     if (more) ms_out('?');
     for (int i = 0; i < plen; i++) ms_out(prompt[i]);
     outs("? ");
@@ -193,7 +198,9 @@ int ms_input_line(const unsigned char *prompt, int plen, int more, char *buf, in
 }
 
 int ms_get_key(void) {
-    int k = c64_get_key();
+    int done, k = disk_get(&done);
+    if (done) return k;                   // (GET#)
+    k = c64_get_key();
     c64_show_cursor(k < 0 && c64_peek(C64_BLNSW) == 0);   // (POKE 204,0: it flashes)
     return k;
 }
@@ -297,6 +304,7 @@ int ms_statement(int t) {
             ms_error(E_DIRECT);
             return 1;
         }
+        if (ms_cur() == '#') return disk_statement(t);
         ms_get_vars();
         return 1;
     case T_SYS: {
@@ -309,7 +317,7 @@ int ms_statement(int t) {
         return 1;                         // (machine code: not run)
     }
     }
-    return 0;
+    return disk_statement(t);
 }
 
 /* ------------------------------------------------------------------------
@@ -317,6 +325,7 @@ int ms_statement(int t) {
  * --------------------------------------------------------------------- */
 
 void ms_report(int line) {
+    disk_screen();                        // (output back to the screen)
     if (restored) {                       // (no message: just READY.)
         restored = 0;
         c64_warm_start();
@@ -339,6 +348,7 @@ void ms_report(int line) {
 }
 
 void ms_program_ended(void) {}
+void ms_cleared(void) { disk_close_all(); }
 
 #ifdef HOST_TEST
 void screen_host_hook(void);
@@ -354,6 +364,7 @@ __attribute__((noinline, noclone)) static int first_char(const char *s) {
 
 void c64basic_run(void) {
     c64_init();
+    disk_init();
 #ifdef HOST_TEST
     screen_host_hook();
 #endif
@@ -374,6 +385,7 @@ start:
                 ms_prog_len = 0;
                 ms_clear_vars();
                 c64_init();
+                disk_init();
                 goto start;
             }
             if (restored) {               // (RESTORE stopped LIST, say)

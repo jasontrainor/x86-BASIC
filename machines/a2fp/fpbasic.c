@@ -440,6 +440,7 @@ void ms_report(int line) {
 }
 
 void ms_program_ended(void) { dos_program_ended(); }
+void ms_cleared(void) {}
 
 int ms_special(const char name[2], int type) {   // (none)
     (void)name, (void)type;

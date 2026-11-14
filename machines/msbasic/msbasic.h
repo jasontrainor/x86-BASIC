@@ -89,6 +89,9 @@ enum {
 };
 
 extern int ms_err;                        // the error, once there is one
+// While INPUT reads from a file (INPUT#): the error a bad item is (no
+// ?REENTER) and no ?EXTRA IGNORED; 0 otherwise.
+extern int ms_input_quiet;
 extern int ms_dos_err;                    // the dialect's own error code, if not 0
 void ms_error(int e);                     // (the first error counts)
 
@@ -153,6 +156,7 @@ long ms_memory_used(void);
  * of what follows (2 bytes) and the crunched text, ending in 0.
  * --------------------------------------------------------------------- */
 
+#define MS_PROG_SIZE 32768
 extern unsigned char ms_prog[];
 extern int ms_prog_len;
 int ms_line_num(int off);
@@ -167,6 +171,14 @@ const char *ms_keyword_name(int token);   // 0 if it isn't a keyword
 void ms_enter_line(const char *text);
 // Run the program as it is (after RUN from the prompt), to its end.
 void ms_execute(void);
+// A line of the program stored as it's kept (crunched, ending in 0; len
+// counts the 0); 0 if there's no room.
+int ms_store_line(int num, const unsigned char *text, int len);
+// Go on from the program's first line, keeping the variables (a program
+// LOADing another, as BASIC V2 does).
+void ms_chain(void);
+// PRINT's items (ip at them), as the statement prints them.
+void ms_print_items(void);
 // Run lines given as text (LOAD of a listing): NEW, then each line.
 void ms_enter_text(const char *text, int len);
 
@@ -202,6 +214,7 @@ int ms_special(const char name[2], int type);
 void ms_special_get(int id, struct ms_val *v);
 void ms_special_set(int id, const struct ms_val *v);
 void ms_list_line(const char *text);      // a line LIST shows
+void ms_cleared(void);                    // the variables were cleared (CLR, RUN ...)
 void ms_wait_idle(void);                  // WAIT is waiting
 // A character of a line being crunched, as the program keeps it
 // (in_string: in quotes, REM or DATA).
