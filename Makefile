@@ -6,7 +6,7 @@ LD = ld
 # pair of kernels, on top of the shared code in core/: build/NAME/kernel.bin
 # for the BIOS and build/NAME/BOOTX64.EFI for UEFI. The chooser
 # (machines/chooser/) is built the same way.
-MACHINES = spectrum a2int a1basic a2fp
+MACHINES = spectrum a2int a1basic a2fp c64
 # (make run-listing's)
 MACHINE ?= spectrum
 
@@ -181,6 +181,7 @@ boot-test: os.img build/boot.bin $(CHOOSER) $(call kernels,$(MACHINES) $(TEST_MA
 	tests/qemu_smoke.py --mode all
 	tests/qemu_menu.py
 	tests/qemu_apple.py
+	tests/qemu_c64.py
 
 # make run-listing LISTING=game.bas [MODE=uefi] [WAIT=20]: boot the image
 # with that listing on it, LOAD and RUN it, and save the screen as game.png.

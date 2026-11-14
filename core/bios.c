@@ -230,6 +230,8 @@ int plat_read_key(void) {
             if (c == 163 || (c > 0 && c < 127)) return c;
             continue;
         }
+        if (scan >= 0x02 && scan <= 0x0B && ascii == 0)   // Alt with a digit
+            return KEY_ALT_DIGIT + (scan - 1) % 10;
         switch (scan) {                   // keys without a character
         case 0x48: return KEY_UP;
         case 0x50: return KEY_DOWN;

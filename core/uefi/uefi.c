@@ -175,6 +175,12 @@ static int firmware_key(void) {
     }
     int c = key.UnicodeChar;
     if (c == '\r' || c == '\n') return 13;
+    if (c >= '0' && c <= '9' && (shift_state & EFI_SHIFT_STATE_VALID)) {
+        if (shift_state & (EFI_LEFT_ALT_PRESSED | EFI_RIGHT_ALT_PRESSED))
+            return KEY_ALT_DIGIT + c - '0';
+        if (shift_state & (EFI_LEFT_CONTROL_PRESSED | EFI_RIGHT_CONTROL_PRESSED))
+            return KEY_CTRL_DIGIT + c - '0';
+    }
     if (c >= 32 && c < 127)               // (through the keyboard layout)
         c = keymap_key(c, 0, (shift_state & EFI_SHIFT_STATE_VALID) &&
                              (shift_state & EFI_RIGHT_ALT_PRESSED));

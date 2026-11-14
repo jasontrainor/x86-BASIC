@@ -718,6 +718,34 @@ check "dos from int"      "10 D\$=\"${D4}\"${NL}20 PRINT D\$;\"OPEN NUMS\":PRINT
 DISK_IMAGE="$TD/dskint.img" check "dos int from a dsk" "CATALOG${NL}RUN INT PROG${NL}LIST 40${NL}" " I 002 INT PROG${NL}" "${NL}INTEGER FROM A DISK${NL}100200300${NL}767${NL}" "40 X1=32767: IF X1>=100 THEN PRINT : PRINT X1 MOD 1000${NL}"
 BIN=tests/build/basic_host
 
+# --- BASIC V2 (machines/c64/, on machines/c64hw/) ----------------------------
+host_machine c64
+BIN=tests/build/c64_host
+# ccheck NAME INPUT EXPECTED...: as check, but each EXPECTED is looked for
+# in the screen (screen memory as text, then the colours: see
+# machines/c64hw/screen.c), or with "out:" in what was printed.
+ccheck() {
+    local name=$1 in=$2; shift 2
+    local out scr ok=1
+    rm -f tests/build/c64.txt
+    out=$(C64_SCREEN=tests/build/c64.txt timeout 10 "$BIN" "$in" 2>&1; echo "<EOF>")
+    scr=$(cat tests/build/c64.txt 2>/dev/null)
+    if [[ $out == *AddressSanitizer* || $out == *"runtime error"* ]]; then ok=0; fi
+    for want in "$@"; do
+        local where=$scr w=$want
+        if [[ $w == out:* ]]; then where=$out; w=${w:4}; fi
+        if [[ $w == !* ]]; then [[ $where == *"${w:1}"* ]] && ok=0
+        else [[ $where == *"$w"* ]] || ok=0; fi
+    done
+    if ((ok)); then pass=$((pass+1)); echo "PASS $name"
+    else fail=$((fail+1)); echo "FAIL $name"; sed 's/^/    | /' <<<"$scr" | head -25; sed 's/^/    | /' <<<"$out" | tail -5; fi
+}
+SP40='                                        '
+ccheck "c64 start"        "" "${NL}    **** X86 BASIC V2 ****   " "${NL} 64K RAM SYSTEM  38911 BASIC BYTES FREE ${NL}${SP40}${NL}READY.   " "border E background 6 upper" "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE${NL}EEEE"
+ccheck "c64 typing"       "hello there${NL}HELLO${NL}" "${NL}READY.${SP40:6}${NL}HELLO THERE${SP40:11}${NL}~~~~~ " "out:HELLO THERE${NL}hello${NL}"
+ccheck "c64 long line"    "$(printf 'x%.0s' $(seq 1 50))${NL}ok${NL}" "${NL}XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX${NL}XXXXXXXXXX${SP40:10}${NL}OK "
+ccheck "c64 scrolls"      "$(for i in $(seq 1 30); do printf 'line%d\n' $i; done)${NL}" "${NL}LINE30${SP40:6}${NL}${SP40}${NL}${NL}" "!LINE6 " "LINE7 "
+
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"
 printf '10 PRINT "HI"\n20 PRINT 1+\n30 GOTO 10\n' > "$TD/badint.bas"

@@ -49,6 +49,21 @@ void host_echo(char c) {
 
 void host_trace(const char *fmt, int a, int b) { printf(fmt, a, b); }
 
+/* A machine can leave something for the tests when the run ends (the
+   C64's screen memory as text, say): it sets host_exit_hook, which
+   writes with host_write() to the file an environment variable names. */
+void (*host_exit_hook)(void);
+static void run_exit_hook(void) {
+    if (host_exit_hook) host_exit_hook();
+}
+void host_write(const char *env, const void *data, int len) {
+    const char *path = getenv(env);
+    FILE *f = path ? fopen(path, "wb") : 0;
+    if (!f) return;
+    fwrite(data, 1, len, f);
+    fclose(f);
+}
+
 /* The picture is kept, and written out at the end as a PPM file if
    SCREEN_OUT names one (each pixel tall times, as it's shown). */
 static struct video video;
@@ -204,6 +219,7 @@ int main(int argc, char **argv) {
     }
     if (getenv("DISK_OUT")) atexit(save_disk);
     if (getenv("SCREEN_OUT")) atexit(save_screen);
+    atexit(run_exit_hook);
     atexit(report_clicks);
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;
     keymap_init();                  /* as kernel_start() does: BOOT.CFG, */
