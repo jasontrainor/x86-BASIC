@@ -94,7 +94,7 @@ def run(mode):
     return good
 
 
-def run_basic(mode, machine, prompt, typed, want, hold=()):
+def run_basic(mode, machine, prompt, typed, want, hold=(), keyboard='us'):
     """Boot an image with just this BASIC machine, type a line, and look
     for what it should print (with the keys in hold held down, as QEMU
     qcodes)."""
@@ -103,7 +103,7 @@ def run_basic(mode, machine, prompt, typed, want, hold=()):
     with tempfile.TemporaryDirectory() as tmp:
         image = os.path.join(tmp, machine + '.img')
         subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'mkimage.py'), image,
-                        '--machines', machine], check=True)
+                        '--machines', machine, '--keyboard', keyboard], check=True)
         mon_path = os.path.join(tmp, 'mon.sock')
         proc = subprocess.Popen(q.qemu_args(mode, image, mon_path),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -121,7 +121,8 @@ def run_basic(mode, machine, prompt, typed, want, hold=()):
                 if hold:
                     q.hold_keys(mon, hold, False)
             print(f'[{mode}] {"PASS" if ok else "FAIL"} {machine}'
-                  + (f' holding {"+".join(hold)}' if hold else ''))
+                  + (f' holding {"+".join(hold)}' if hold else '')
+                  + (f' ({keyboard.upper()} keyboard)' if keyboard != 'us' else ''))
             if not ok:
                 print(screen(mon, tmp).text())
             return ok
@@ -138,6 +139,8 @@ BASICS = [
     ('a2int', '>', '10 PRINT 6*7:END\nSAVE PROG\nNEW\nRUN PROG\n', '42'),
     # Shift is button 2, BIOS and UEFI
     ('a2fp', ']', '10 VTAB 1:PRINT PEEK(-16285);"   ":GOTO 10\nRUN\n', '128', ['shift']),
+    # A UK keyboard: Shift+2 is a quote (on a US one, @)
+    ('a2fp', ']', 'PRINT @X@;@Y@\n', 'XY', (), 'uk'),
 ]
 
 

@@ -11,6 +11,7 @@
 #include "efi.h"
 #include "platform.h"
 #include "string.h"
+#include "keymap.h"
 
 void kernel_start(void);                  // kernel.c
 
@@ -172,10 +173,13 @@ static int firmware_key(void) {
     case SCAN_DELETE: return KEY_DELETE;
     case SCAN_ESC:    return 27;
     }
-    CHAR16 c = key.UnicodeChar;
+    int c = key.UnicodeChar;
     if (c == '\r' || c == '\n') return 13;
+    if (c >= 32 && c < 127)               // (through the keyboard layout)
+        c = keymap_key(c, 0, (shift_state & EFI_SHIFT_STATE_VALID) &&
+                             (shift_state & EFI_RIGHT_ALT_PRESSED));
     // (Ctrl+letter: 1-26, as the BIOS gives them.)
-    if ((c >= 1 && c <= 26) || (c >= 32 && c < 127)) return c;
+    if ((c >= 1 && c <= 26) || (c >= 32 && c < 127) || c == 163) return c;
     // Anything else (function keys, accented letters): ignore it.
     return 0;
 }

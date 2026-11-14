@@ -26,7 +26,7 @@ BIOS_CFLAGS = -m16 -march=i686 -mtune=generic -mfpmath=387 -mno-mmx -mno-sse -mn
               -Wall -Icore -DBIOS_KERNEL
 
 # The shared code every machine is built with.
-CORE = kernel fat storage string num font
+CORE = kernel fat storage string num font keymap
 HEADERS = $(wildcard core/*.h core/uefi/*.h)
 
 # --- The 64-bit kernel, a UEFI application ------------------------------
@@ -122,7 +122,9 @@ LISTINGS ?=
 DEFAULT ?=
 MENU ?= auto
 TIMEOUT ?= 5
-IMAGE_OPTIONS = --menu $(MENU) --timeout $(TIMEOUT) $(if $(DEFAULT),--default $(DEFAULT))
+KEYBOARD ?= us
+IMAGE_OPTIONS = --menu $(MENU) --timeout $(TIMEOUT) --keyboard $(KEYBOARD) \
+	$(if $(DEFAULT),--default $(DEFAULT))
 
 CHOOSER = build/chooser/kernel.bin build/chooser/BOOTX64.EFI
 kernels = $(foreach m,$(1),build/$(m)/kernel.bin build/$(m)/BOOTX64.EFI machines/$(m)/title.txt)

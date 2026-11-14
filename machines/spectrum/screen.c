@@ -504,6 +504,7 @@ static void collect_keys(void) {
     flash_tick();
     while ((k = plat_read_key()) >= 0) {
         if (k == 3) k = 27;
+        if (k == 163) k = '`';            // (the Spectrum's pound sign)
         if (keyq_len < KEYQ_SIZE) keyq[(keyq_head + keyq_len++) % KEYQ_SIZE] = k;
     }
 }

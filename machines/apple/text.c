@@ -337,6 +337,7 @@ static void move_paddle(int n, int by) {
 // A PC key as the Apple keyboard would type it, or -1.
 static int translate(int k) {
     int iie = apple_model == APPLE_IIE;
+    if (k == 163) k = '#';                // (no pound sign here)
     switch (k) {                          // (the arrows also move the paddles)
     case KEY_LEFT:  move_paddle(0, -16); break;
     case KEY_RIGHT: move_paddle(0, 16); break;

@@ -4,6 +4,7 @@
  */
 #include "platform.h"
 #include "string.h"
+#include "keymap.h"
 
 // kernel_entry.asm. Called after every BIOS call: a BIOS that switches to
 // protected mode internally may leave the segment limits at 64KB.
@@ -186,6 +187,16 @@ void plat_init(void) {
 
 static int f10_pressed(void);
 
+// AltGr (right Alt) held, from the BIOS's flags at 0040:0096.
+static int altgr_held(void) {
+    unsigned char extra;
+    __asm__ __volatile__ ("movb 0x0496, %0" : "=q" (extra) : : "memory");
+    return (extra >> 3) & 1;
+}
+
+// Keys from the enhanced keyboard functions (INT 16h AH=10h, 11h), which
+// report all of them (the older ones drop Alt with some keys), then put
+// through the keyboard layout (core/keymap.h).
 int plat_read_key(void) {
     for (;;) {
         unsigned char no_key;
@@ -193,20 +204,32 @@ int plat_read_key(void) {
             "int $0x16\n\t"
             "setz %0"
             : "=qm" (no_key)
-            : "a" (0x0100)                // AH=01h: is a key waiting?
+            : "a" (0x1100)                // AH=11h: is a key waiting?
             : "cc"
         );
         enter_unreal();
         if (no_key) return -1;
         unsigned short ax;
-        __asm__ __volatile__ ("int $0x16" : "=a" (ax) : "a" (0x0000) : "cc");
+        __asm__ __volatile__ ("int $0x16" : "=a" (ax) : "a" (0x1000) : "cc");
         enter_unreal();
         unsigned char ascii = ax & 0xFF, scan = ax >> 8;
+        if (scan == 0xE0) scan = 0;       // (Enter and / on the keypad)
+        if (ascii == 0xE0 && scan) ascii = 0;   // (the grey arrows, Home ...)
         if (ascii == 0 && scan == 0x44) {      // F10
             if (f10_pressed()) plat_restart_menu();
             continue;
         }
-        if (ascii != 0 && ascii != 0xE0) return ascii;
+        if (ascii == 0 && scan >= 0x78 && scan <= 0x83) scan -= 0x76;  // (Alt with 1 ... =)
+        if (keymap_active() && altgr_held() && (ascii == 0 || scan)) {
+            int c = keymap_key(0, scan, 1);
+            if (c == 163 || (c >= 32 && c < 127)) return c;
+            if (ascii == 0) continue;
+        }
+        if (ascii != 0) {
+            int c = keymap_key(ascii, scan, 0);
+            if (c == 163 || (c > 0 && c < 127)) return c;
+            continue;
+        }
         switch (scan) {                   // keys without a character
         case 0x48: return KEY_UP;
         case 0x50: return KEY_DOWN;

@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "platform.h"
+#include "keymap.h"
 #include "machine.h"
 
 static const char *input;
@@ -68,6 +69,7 @@ static void save_screen(void) {
  */
 int plat_read_key(void) {
     static int toggle;
+    int c;
     if (!*input || (toggle = !toggle) == 0) return -1;
     switch (*input++) {             /* control characters for the editing keys */
     case 0x02: return KEY_LEFT;     /* (as Ctrl+B, F, P, N, A, E in Emacs) */
@@ -77,8 +79,15 @@ int plat_read_key(void) {
     case 0x01: return KEY_HOME;
     case 0x05: return KEY_END;
     case 0x7f: return KEY_DELETE;
+    case 0x1d:                      /* AltGr with the next key */
+        if (!*input) return -1;
+        c = keymap_key((unsigned char)*input++, 0, 1);
+        return c == 163 || (c >= 32 && c < 127) ? c : -1;
     }
-    return (unsigned char)input[-1];
+    c = (unsigned char)input[-1];
+    if (c < 32 || c >= 127) return c;
+    c = keymap_key(c, 0, 0);        /* (as the platforms do) */
+    return c == 163 || (c >= 32 && c < 127) ? c : -1;
 }
 
 /* HOST_BUTTONS: the modifier keys held down (plat_buttons()). */
@@ -168,6 +177,8 @@ int main(int argc, char **argv) {
     if (getenv("SCREEN_OUT")) atexit(save_screen);
     atexit(report_clicks);
     host_scroll_prompt = getenv("SCROLL_PROMPT") != NULL;
-    machine_start();                /* as kernel_start() does */
+    keymap_init();                  /* as kernel_start() does: BOOT.CFG, */
+    if (getenv("HOST_KEYBOARD")) keymap_set(getenv("HOST_KEYBOARD"));   /* or this */
+    machine_start();
     return 0;
 }

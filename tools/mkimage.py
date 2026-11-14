@@ -5,7 +5,7 @@ more machines on it.
 
     tools/mkimage.py OUT.img [--machines spectrum,...] [--default NAME]
                      [--menu auto|always|never] [--timeout SECONDS]
-                     [--sectors N] [--build build] [listing ...]
+                     [--keyboard US|UK|DE|FR] [--sectors N] [--build build] [listing ...]
 
 Each machine NAME is taken from build/NAME/ (kernel.bin and BOOTX64.EFI)
 and called what machines/NAME/title.txt says. The first is the default
@@ -191,11 +191,13 @@ def partition(active, ptype, start, count):
         chs(start + count - 1) + struct.pack('<II', start, count)
 
 
-def boot_cfg(machines, titles, default, menu, timeout):
+def boot_cfg(machines, titles, default, menu, timeout, keyboard='US'):
     lines = ['# x86 BASIC: which machine to start (see the README).',
              'DEFAULT=%s' % default.upper(),
              'MENU=%s' % menu.upper(),
              'TIMEOUT=%d' % timeout,
+             '# The keyboard\'s layout: US, UK, DE or FR.',
+             'KEYBOARD=%s' % keyboard.upper(),
              '# The menu\'s names for X86BASIC/NAME.SYS and NAME.EFI:']
     lines += ['%s=%s' % (m.upper(), titles[m]) for m in machines]
     return ('\r\n'.join(lines) + '\r\n').encode()
@@ -210,6 +212,8 @@ def main():
     ap.add_argument('--default')
     ap.add_argument('--menu', default='auto', choices=['auto', 'always', 'never'])
     ap.add_argument('--timeout', type=int, default=5)
+    ap.add_argument('--keyboard', default='us', type=str.lower,
+                    choices=['us', 'uk', 'gb', 'de', 'fr'])
     ap.add_argument('--sectors', type=int)
     ap.add_argument('--build', default=os.path.join(ROOT, 'build'))
     a = ap.parse_args()
@@ -240,7 +244,7 @@ def main():
         title_file = os.path.join(ROOT, 'machines', m, 'title.txt')
         titles[m] = (open(title_file).read().strip() if os.path.exists(title_file)
                      else m.upper())[:26]
-    files['BOOT.CFG'] = boot_cfg(machines, titles, default, a.menu, a.timeout)
+    files['BOOT.CFG'] = boot_cfg(machines, titles, default, a.menu, a.timeout, a.keyboard)
     for p in a.listings:
         files['%s/%s' % (machines[0].upper(), dos_name(p))] = read(p)
 

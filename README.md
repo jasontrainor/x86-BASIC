@@ -151,7 +151,19 @@ start; it can be edited on any PC:
                             machine; ALWAYS; or NEVER
     TIMEOUT=5               seconds before the menu starts DEFAULT
                             (0: wait for a key)
+    KEYBOARD=US             the keyboard's layout: US, UK, DE or FR
     SPECTRUM=Spectrum BASIC what the menu calls X86BASIC/SPECTRUM.*
+
+PC firmware types as a US keyboard does, whatever the keycaps say, so
+`KEYBOARD=` says what they do say (`make KEYBOARD=uk`, or
+`tools/mkimage.py --keyboard uk`, builds an image with it). AltGr works
+for the characters it types (`@` on a German keyboard is AltGr+Q), and
+the £ key gives the Spectrum's pound sign (`#` on the Apple-style
+machines); letters with accents type nothing, since the machines have
+none. UEFI firmware can't tell the extra key beside the left Shift from
+the one beside Enter, so on UEFI PCs they type the same: on a UK
+keyboard `#` and `~` (and AltGr+`#` types `\`), on German and French
+ones `<` and `>`.
 
 Copying a machine's two kernel files onto a stick adds it to the menu,
 and deleting them takes it away. To get to the menu anyway, hold

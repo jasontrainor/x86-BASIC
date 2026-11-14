@@ -38,7 +38,8 @@ void plat_put_block(int x, int y, int w, int h, const unsigned char *pixels);
 void plat_border(int colour);
 
 // The next key typed, or -1 if there is none (doesn't wait). Printable
-// characters are ASCII; also 8 (backspace), 13 (Enter), 27 (Esc), 3
+// characters are ASCII, as the keyboard's layout has them (core/keymap.h),
+// and 163 for the pound sign; also 8 (backspace), 13 (Enter), 27 (Esc), 3
 // (Ctrl+C) and the KEY_ codes below.
 int plat_read_key(void);
 

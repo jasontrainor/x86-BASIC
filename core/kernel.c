@@ -1,9 +1,11 @@
 #include "platform.h"
 #include "machine.h"
+#include "keymap.h"
 
 // Common start-up, once the platform is ready to go.
 void kernel_start(void) {
     plat_init();
+    keymap_init();
     machine_start();
 }
 

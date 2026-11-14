@@ -8,7 +8,7 @@ mkdir -p tests/build
 BIN=tests/build/basic_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Icore -Imachines/spectrum -DHOST_TEST \
-    -o "$BIN" tests/host_stub.c machines/spectrum/*.c core/storage.c core/fat.c core/string.c core/num.c core/font.c || exit 1
+    -o "$BIN" tests/host_stub.c machines/spectrum/*.c core/storage.c core/fat.c core/string.c core/num.c core/font.c core/keymap.c || exit 1
 
 # Saved files go on the disk's FAT partition, so tests start with a blank
 # disk that has one (each test gets a fresh copy; DISK_OUT keeps the result).
@@ -239,6 +239,17 @@ check "keyword chars"     "PRINT CHR\$ 245;\"X\";CHR\$ 199${NL}" "${NL}PRINT X<=
 check "custom charset"    "CLS: POKE 23606,8: PRINT \"A\";: POKE 23606,0: PRINT SCREEN\$ (0,0)${NL}" "${NL}AB${NL}"
 check "caps lock"         "10 POKE 23658,8: INPUT a\$: POKE 23658,0: PRINT a\$${NL}RUN${NL}abc${NL}" "${NL}ABC${NL}"
 check "out border"        "OUT 254,2: PRINT IN 65278${NL}" "[BORDER 2]255${NL}"
+# Keyboard layouts: the input is typed as on a US keyboard, the keys
+# being where they are (Shift+2 is " on a UK keyboard); AltGr is \x1d.
+AG=$'\x1d'
+HOST_KEYBOARD=UK check "uk keyboard"  "PRINT @a\\b@;CODE @#@${NL}" "${NL}a#b96${NL}"
+HOST_KEYBOARD=DE check "de keyboard"  "PRINT @zes@${NL}PRINT CODE @^@${NL}" "${NL}yes${NL}" "${NL}38${NL}"
+HOST_KEYBOARD=UK check "uk altgr backslash" "PRINT CODE @${AG}\\@${NL}" "${NL}92${NL}"
+HOST_KEYBOARD=DE check "de less than"  "PRINT 1\\2${NL}PRINT 2|1${NL}" "PRINT 1<2${NL}1${NL}" "PRINT 2>1${NL}1${NL}"
+HOST_KEYBOARD=US check "us keyboard"  "PRINT @zes@${NL}" "!yes"
+printf 'DEFAULT=SPECTRUM\r\nKEYBOARD = uk\r\n' > tests/build/boot_uk.cfg
+python3 tests/make_disk.py tests/build/uk.img /BOOT.CFG=tests/build/boot_uk.cfg
+DISK_IMAGE=tests/build/uk.img check "keyboard in boot.cfg" "PRINT @uk@${NL}" "${NL}uk${NL}"
 # Keys held down, where the platform can tell (HOST_HELD: their scan codes)
 HOST_HELD=1E check "in held key"  "PRINT IN 65022;\" \";IN 65278${NL}" "${NL}254 255${NL}"
 HOST_HELD=2A,2C check "in caps shift" "PRINT IN 65278${NL}" "${NL}252${NL}"
@@ -463,7 +474,7 @@ ABIN=tests/build/a2video_host
 gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wall -Icore -Imachines/a2video -Imachines/apple -DHOST_TEST \
     -o "$ABIN" tests/host_stub.c machines/a2video/*.c machines/apple/*.c \
-    core/storage.c core/fat.c core/string.c core/num.c core/font.c || exit 1
+    core/storage.c core/fat.c core/string.c core/num.c core/font.c core/keymap.c || exit 1
 # acheck NAME INPUT [--80] EXPECTED...: as check, but each EXPECTED is
 # looked for in the screen as read back from the picture (inverse
 # characters in [brackets]), or with "out:" in what the program printed.
@@ -534,7 +545,7 @@ host_machine() {
     # shellcheck disable=SC2086
     gcc -g -O1 -fno-builtin -fsanitize=address,undefined -fno-sanitize-recover=all \
         -Wall $inc -DHOST_TEST -o "tests/build/$1_host" tests/host_stub.c $src \
-        core/storage.c core/fat.c core/string.c core/num.c core/font.c || exit 1
+        core/storage.c core/fat.c core/string.c core/num.c core/font.c core/keymap.c || exit 1
 }
 host_machine a2int
 host_machine a1basic
@@ -599,6 +610,7 @@ ABIN=tests/build/a2fp_host
 B1='[TONE 1000 100]'
 check "fp numbers"        "PRINT 1/3;\" \";2/3;\" \";1E9;\" \";.001;\" \";.01;\" \";123456789;\" \";-.5;\" \";10/3${NL}" "${NL}.333333333 .666666667 1E+09 1E-03 .01 123456789 -.5 3.33333333${NL}"
 check "fp more numbers"   "PRINT 2^10;\" \";-2^2;\" \";2^-1;\" \";1.5E-5;\" \";1234567891;\" \";1E38*10${NL}" "${NL}1024 -4 .5 1.5E-05 1.23456789E+09 " "?OVERFLOW ERROR${NL}"
+HOST_KEYBOARD=FR check "fr keyboard altgr" "PRINT 3X${AG}0Y3${NL}" "${NL}X@Y${NL}"
 check "fp fre"            "PRINT FRE(0)${NL}10 PRINT 1${NL}HIMEM: 16384${NL}PRINT FRE(0)${NL}A=1:B\$=\"HELLO\":DIM C(9),D%(4),E\$(2)${NL}PRINT FRE(0)${NL}" "${NL}-29187${NL}" "${NL}14326${NL}" "${NL}14217${NL}"
 check "fp functions"      "PRINT SQR(2);\" \";INT(-3.7);\" \";ABS(-2);\" \";SGN(-5);\" \";ATN(1)*4;\" \";LOG(EXP(1));\" \";SIN(0)${NL}" "${NL}1.41421356 -4 2 -1 3.14159265 1 0${NL}"
 check "fp strings"        "A\$=\"HELLO\":PRINT LEFT\$(A\$,2);MID\$(A\$,2,3);RIGHT\$(A\$,2);LEN(A\$);ASC(A\$);CHR\$(65);STR\$(12.5);VAL(\"3.5E2X\")${NL}PRINT A\$+\" \"+A\$, A\$<\"HELP\", A\$=\"HELLO\"${NL}" "${NL}HEELLLO572A12.5350${NL}" "${NL}HELLO HELLO     1               1${NL}"

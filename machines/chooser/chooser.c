@@ -125,6 +125,8 @@ static void cfg_line(char *key, char *value) {
         int t = 0;
         while (*value >= '0' && *value <= '9' && t < 1000) t = t * 10 + *value++ - '0';
         timeout_s = t;
+    } else if (same(key, "KEYBOARD")) {
+        // (the keyboard's layout: core/keymap.c reads it)
     } else if (key[0] && strlen(key) <= 8) {
         int i = add_machine(key);
         if (i >= 0 && value[0]) {
