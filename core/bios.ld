@@ -45,9 +45,12 @@ SECTIONS
     /* The boot sector loads the kernel image here (see boot/boot.asm). */
     . = 0x1000;
 
+    /* (The start-up code's sections are .boot.*: C functions each have a
+       .text.NAME section of their own, -ffunction-sections, and one
+       called entry must not land here.) */
     .entry : {
         /* _start must be the first byte: the boot sector jumps to 0x1000. */
-        KEEP(*(.text.entry))
+        KEEP(*(.boot.entry))
     }
 
     .rodata : ALIGN(4) {
@@ -64,7 +67,7 @@ SECTIONS
     __code_load = .;
     .text 0 : AT(__code_load) {
         /* _code_start first: offset 0 is never a function pointer. */
-        KEEP(*(.text.code_entry))
+        KEEP(*(.boot.code_entry))
         *(.text.startup .text.startup.*)   /* GCC puts main() here */
         *(.text .text.*)
     }

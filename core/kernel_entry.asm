@@ -9,7 +9,7 @@ MIN_MEMORY_KB equ 576      ; ... so it needs memory up to 0x90000
 
 ; Placed first in the image by core/bios.ld, so this is at 0x1000, and runs
 ; with CS = 0 as the boot sector left it.
-section .text.entry progbits alloc exec nowrite align=1
+section .boot.entry progbits alloc exec nowrite align=1
 
 global _start
 _start:
@@ -73,8 +73,9 @@ no_memory_msg: db "Not enough memory: x86 BASIC needs 576KB", 13, 10, 0
 ; ---------------------------------------------------------------------------
 ; The rest runs in the code segment, CS = CODE_SEGMENT.
 ; ---------------------------------------------------------------------------
-section .text.code_entry progbits alloc exec nowrite align=1
+section .boot.code_entry progbits alloc exec nowrite align=1
 
+global _code_start
 _code_start:
     ; GCC's -m16 code addresses the stack through the full 32-bit ESP and
     ; EBP, but the boot sector (and BIOS) only set the low 16 bits. Load

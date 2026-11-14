@@ -23,6 +23,7 @@ BIOS_CFLAGS = -m16 -march=i686 -mtune=generic -mfpmath=387 -mno-mmx -mno-sse -mn
               -fno-builtin -fno-asynchronous-unwind-tables -fno-unwind-tables \
               -fno-tree-loop-distribute-patterns -mstringop-strategy=loop \
               -Os -falign-functions=1 -falign-jumps=1 -falign-loops=1 -falign-labels=1 \
+              -ffunction-sections -fdata-sections \
               -Wall -Icore -DBIOS_KERNEL
 
 # The shared code every machine is built with.
@@ -79,7 +80,12 @@ build/$(1)/kernel.bin: $$($(1)_BIOS) core/bios.ld tools/check16.sh
 	sh tools/check16.sh $$($(1)_BIOS_C)
 	@# --no-check-sections: the code is linked at offset 0 of its own
 	@# segment, so its addresses overlap the data's (see core/bios.ld).
-	$$(LD) -m elf_i386 -T core/bios.ld --no-check-sections --oformat binary $$($(1)_BIOS) -o $$@
+	@# First the objects into one, leaving out the functions and data
+	@# nothing uses (each is in a section of its own: -ffunction-sections,
+	@# -fdata-sections), which the flat binary's link can't do itself.
+	$$(LD) -m elf_i386 -r --gc-sections -e _start -u _code_start $$($(1)_BIOS) -o build/$(1)/kernel.o
+	$$(LD) -m elf_i386 -T core/bios.ld --no-check-sections --oformat binary \
+		build/$(1)/kernel.o -o $$@
 
 # Subsystem 10: EFI application.
 build/$(1)/BOOTX64.EFI: $$($(1)_UEFI)
