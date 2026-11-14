@@ -6,8 +6,9 @@
 Builds a copy of the disk image with the listing on its FAT partition
 (from the kernels in build/, so run make first: `make run-listing` does),
 boots it, types LOAD "GAME.BAS" and RUN (on the Apple-style machines,
---machine a2fp, a2int or a1basic: RUN GAME.BAS), waits, saves the screen
-as a PNG and prints the text on it. The listing needs a DOS 8.3 name.
+--machine a2fp, a2int or a1basic: RUN GAME.BAS; on --machine c64,
+LOAD "GAME.BAS",8 and RUN), waits, saves the screen as a PNG and prints
+the text on it. The listing needs a DOS 8.3 name.
 """
 import argparse
 import os
@@ -20,6 +21,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, os.path.join(ROOT, 'tests'))
 import qemu_smoke as q
 import apple_screen
+import c64_screen
 
 # The Apple-style machines: the prompt each shows when it's ready.
 APPLE_PROMPTS = {'a2fp': ']', 'a2int': '>', 'a1basic': '>'}
@@ -36,6 +38,19 @@ def apple_text(mon, tmp):
         time.sleep(0.05)
     s = apple_screen.Screen(path)
     return s.text() if s.w >= 560 else ''
+
+
+def c64_text(mon, tmp):
+    path = os.path.join(tmp, 'c64.ppm')
+    if os.path.exists(path):
+        os.unlink(path)
+    mon.qmp('screendump', filename=path)
+    for _ in range(50):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            break
+        time.sleep(0.05)
+    s = c64_screen.Screen(path)
+    return s.text() if s.w >= 320 else ''
 
 
 def main():
@@ -59,15 +74,19 @@ def main():
         try:
             mon = q.Monitor(mon_path)
             apple = APPLE_PROMPTS.get(a.machine)
+            c64 = a.machine == 'c64'
             deadline = time.time() + 30
-            while not (apple in apple_text(mon, tmp) if apple else q.ready(mon, tmp)):
+            while not ('READY.' in c64_text(mon, tmp) if c64 else
+                       apple in apple_text(mon, tmp) if apple else q.ready(mon, tmp)):
                 if time.time() > deadline:
                     sys.exit('the image did not start')
                 time.sleep(0.2)
-            q.type_keys(mon, ('RUN %s\n' if apple else 'LOAD "%s"\nRUN\n') % name)
+            q.type_keys(mon, 'load "%s",8\nrun\n' % name.lower() if c64 else
+                        ('RUN %s\n' if apple else 'LOAD "%s"\nRUN\n') % name)
             time.sleep(a.wait)
             mon.qmp('screendump', filename=os.path.abspath(out), format='png')
-            print(apple_text(mon, tmp) if apple else q.screen_text(mon, tmp))
+            print(c64_text(mon, tmp) if c64 else
+                  apple_text(mon, tmp) if apple else q.screen_text(mon, tmp))
             print('screenshot: ' + out)
         finally:
             proc.kill()

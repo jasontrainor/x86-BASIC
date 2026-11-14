@@ -19,12 +19,14 @@ import qemu_smoke as q
 
 DIR = os.path.normpath(os.path.join(ROOT, 'docs', 'screenshots'))
 
-# (listing, machine, seconds to let it run)
+# (listing, machine, seconds to let it run, how it boots: UEFI shows the
+# BASIC V2 machine's border, which the BIOS's 320x200 has no room for)
 LISTINGS = [
-    ('COLOURS.BAS', 'spectrum', 6),
-    ('HIRES.BAS', 'a2fp', 10),
-    ('LORES.BAS', 'a2int', 8),
-    ('TERMINAL.BAS', 'a1basic', 15),
+    ('COLOURS.BAS', 'spectrum', 6, 'hdd'),
+    ('HIRES.BAS', 'a2fp', 10, 'hdd'),
+    ('LORES.BAS', 'a2int', 8, 'hdd'),
+    ('TERMINAL.BAS', 'a1basic', 15, 'hdd'),
+    ('SPRITES.BAS', 'c64', 8, 'uefi'),
 ]
 
 
@@ -86,11 +88,11 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         menu(tmp)
         spectrum_list(tmp)
-    for listing, machine, wait in LISTINGS:
+    for listing, machine, wait, mode in LISTINGS:
         out = os.path.join(DIR, machine + '.png')
         subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'run_listing.py'),
                         os.path.join(DIR, listing), '--machine', machine,
-                        '--wait', str(wait), '--out', out],
+                        '--wait', str(wait), '--out', out, '--mode', mode],
                        check=True, stdout=subprocess.DEVNULL)
         print(out)
 

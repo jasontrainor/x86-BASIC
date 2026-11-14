@@ -6,7 +6,7 @@ the character sets tools/mkc64chars.py draws, and the colour of a dot.
 
 The 320x200 picture is where the kernels put it: on the BIOS, VGA mode
 13h fills the screen (QEMU's screenshot of it is 640x400); on UEFI, it is
-scaled by the largest whole number that fits a 384x272 frame, centred.
+scaled by the largest whole number that fits a 352x232 frame, centred.
 
     tests/c64_screen.py SCREEN.ppm        prints the text
     tests/c64_screen.py SCREEN.ppm --colour X,Y ...   the colours of dots
@@ -61,7 +61,7 @@ class Screen:
         if (self.w, self.h) == (640, 400):        # mode 13h, double-scanned
             self.sx, self.sy, self.left, self.top = 2, 2, 0, 0
         else:
-            s = max(1, min(self.w // 384, self.h // 272))
+            s = max(1, min(self.w // 352, self.h // 232))
             self.sx = self.sy = s
             self.left, self.top = (self.w - 320 * s) // 2, (self.h - 200 * s) // 2
 

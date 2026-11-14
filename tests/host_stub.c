@@ -102,10 +102,13 @@ static void save_screen(void) {
 int plat_read_key(void) {
     static int toggle;
     int c;
+    /* A program still asking for keys long after the input has run out
+       (10 GET K$:IF K$="" THEN 10) ends the run. */
 #ifdef FUZZ
-    /* A program still running when the input has run out (10 GOTO 10)
-       ends the run after a while. */
     if (!*input && ++fuzz_polls > 2000) exit(0);
+#else
+    static long idle_polls;
+    if (!*input && ++idle_polls > 200000) exit(0);
 #endif
     if (!*input || (toggle = !toggle) == 0) return -1;
     switch (*input++) {             /* control characters for the editing keys */

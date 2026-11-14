@@ -115,7 +115,7 @@ void vic_init(void) {
     regs[0x20] = 14;                      // light blue border
     regs[0x21] = 6;                       // on blue
     collided[0] = collided[1] = 0;
-    struct video v = { 320, 200, 1, 384, 272, { { 0 } } };
+    struct video v = { 320, 200, 1, 352, 232, { { 0 } } };
     memcpy(v.palette, palette, sizeof palette);
     plat_video(&v);
     border_shown = -1;

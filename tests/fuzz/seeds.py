@@ -21,7 +21,7 @@ LOADS = {
     'spectrum': ['LOAD "fuzz.bas"\n', 'MERGE "fuzz.bas"\n', 'LOAD ""\n', 'LOAD "" CODE\n',
                  'LOAD "" SCREEN$\n', 'LOAD "" DATA a()\n', 'LOAD "" DATA a$()\n',
                  'VERIFY "fuzz.bas"\n', 'CAT\n', 'RUN\n', 'LIST\n', 'EDIT\n'],
-    'c64': ['LOAD"FUZZ.BAS",8\n', 'LOAD"FUZZ.SAV",8\n', 'LOAD"$",8\n', 'RUN\n', 'LIST\n'],
+    'c64': ['load"fuzz.bas",8\n', 'load"fuzz.sav",8\n', 'load"$",8\n', 'run\n', 'list\n'],
     'apple': ['RUN FUZZ.BAS\n', 'LOAD FUZZ.BAS\n', 'EXEC FUZZ.BAS\n', 'BLOAD FUZZ.BAS\n',
               'CATALOG\n', 'RUN\n', 'LIST\n', '\x04OPEN FUZZ.BAS\n', 'PRINT CHR$(4);"',
               'READ FUZZ.BAS\n', 'CLOSE\n', 'POSITION', ',R', ',B', ',L', ',A'],
@@ -66,9 +66,11 @@ def main():
     seeds = []
     for text in listings(machine):
         text = text.replace(b'\r', b'')
-        seeds.append(b'\0' + text + b'RUN\n')                     # typed in
+        run = b'run\n' if machine == 'c64' else b'RUN\n'   # (c64: upper case is shifted)
+        seeds.append(b'\0' + text + run)                         # typed in
         for load in LOADS[kind][:3]:                              # loaded from a file
-            seeds.append(text + b'\0' + load.encode() + b'RUN\nLIST\n')
+            seeds.append(text + b'\0' + load.encode() + run + run.replace(b'run', b'list')
+                         .replace(b'RUN', b'LIST'))
     for s in seeds:
         name = hashlib.sha1(s).hexdigest()
         with open(os.path.join(corpus, name), 'wb') as f:

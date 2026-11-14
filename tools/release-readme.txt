@@ -12,6 +12,7 @@ The disk images
     a1basic.img     Integer BASIC (1976; Apple I listings)
     a2int.img       Integer BASIC II (1977; Apple II listings)
     a2fp.img        FP BASIC (1978-83; Applesoft listings)
+    c64.img         BASIC V2 (1982; Commodore 64 listings)
 
 Each image boots on both BIOS and UEFI PCs, from a USB stick, hard
 disk or floppy. SHA256SUMS has their checksums.

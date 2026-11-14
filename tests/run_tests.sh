@@ -886,6 +886,16 @@ tool "c64 printout" "c64file $TD/c64prn.img PRINTOUT.TXT" "0a3130205052494e54202
 ccheck "c64 verify"       "10 print 1${NL}save \"v\",8${NL}verify \"v\",8${NL}20 rem${NL}verify \"v\",8${NL}" "${NL}VERIFYING${SP40:9}${NL}OK${SP40:2}${NL}READY." "?VERIFY  ERROR"
 ccheck "c64 tape"         "10 print \"tape\"${NL}save \"t\"${NL}new${NL}load \"t\"${NL}run${NL}" "${NL}TAPE "
 ccheck "c64 keyboard file" "10 open 1,0:input#1,a\$:print a\$+\"!\"${NL}run${NL}hi${NL}" "${NL}HI${SP40:2}${NL}HI! "
+# tools/c64.py: listings, .PRG and .D64 both ways, and a program from a
+# disk image loaded on the machine
+printf '10 PRINT "{CLR}HELLO{CBM-A}";\n20 GOTO 10\n' > "$TD/mag.bas"
+tool "c64 tool prg"       "python3 tools/c64.py prg $TD/mag.bas $TD/mag.prg && xxd -p $TD/mag.prg && python3 tools/c64.py text $TD/mag.prg" "01081208" "0a0099202293" "10 PRINT \"{CLR}HELLO{CBM-A}\";${NL}20 GOTO 10" "<EXIT 0>"
+tool "c64 tool d64"       "python3 tools/c64.py pack $TD/t.d64 tests/listings/c64_demo.bas $TD/mag.prg && python3 tools/c64.py list $TD/t.d64 && python3 tools/c64.py extract $TD/t.d64 $TD/t64out && cmp $TD/mag.prg $TD/t64out/MAG.PRG" "0 \"X86 BASIC       \" 64 2A" "\"C64_DEMO\"         PRG" "C64_DEMO -> C64_DEMO.PRG" "<EXIT 0>"
+python3 tests/make_disk.py "$TD/fromd64.img" /C64/C64_DEMO.PRG="$TD/t64out/C64_DEMO.PRG"
+DISK_IMAGE="$TD/fromd64.img" ccheck "c64 from a d64" "load \"c64_demo\",8${NL}run${NL}" "HELLO ELLO 4  72" "${NL}BETWEEN "
+printf '10 PRINT "{CLR}{FOO}"\n20 PRINT "%s"\n' "$(printf 'X%.0s' $(seq 1 80))" > "$TD/bad64.bas"
+tool "check c64"          "python3 tools/check.py --machine c64 $TD/bad64.bas" "bad64.bas:1: 10 PRINT \"{CLR}{FOO}\"  (not known: {FOO})" "longer than 80 characters" "2 lines, 2 refused (c64)" "<EXIT 1>"
+tool "check c64 run"      "python3 tools/check.py --machine c64 --run 5 tests/listings/c64_demo.bas" "all taken (c64)" "SCORE 100" "BETWEEN" "<EXIT 0>"
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"

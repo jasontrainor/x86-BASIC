@@ -2,7 +2,7 @@
 """Check a listing before it goes on the stick: each line is typed into the
 machine's BASIC, run on this PC, and the lines it won't take are listed.
 
-    tools/check.py [--machine spectrum|a2int|a1basic|a2fp] [--run [SECONDS]] FILE ...
+    tools/check.py [--machine spectrum|a2int|a1basic|a2fp|c64] [--run [SECONDS]] FILE ...
 
 --machine is the BASIC the listing is for (spectrum unless the file is in
 a folder named after another, such as A2FP/). The Spectrum's BASIC and
@@ -13,6 +13,12 @@ for it (or for any), --run also runs the program, for up to SECONDS
 and prints what it shows. Each file is read as LOAD reads one: blank lines
 are skipped, and for the Spectrum so are lines starting with #, and a \\ at
 the end of a line joins the next one on.
+
+BASIC V2 (c64) doesn't check lines as they're typed either; for it, the
+lines with escapes in braces it doesn't know ({CLR} and the like: see
+tools/c64.py) are listed, and those longer than the 80 characters its
+editor takes (LOAD takes them). --run shows its screen when the program
+stops.
 
 It needs gcc, as make test does: the BASICs are built for this PC (into
 tests/build/check/) the first time, and again when their source changes.
@@ -27,7 +33,7 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MACHINES = ['spectrum', 'a2int', 'a1basic', 'a2fp']
+MACHINES = ['spectrum', 'a2int', 'a1basic', 'a2fp', 'c64']
 CORE = ['storage', 'fat', 'string', 'num', 'font', 'keymap']
 
 
@@ -87,7 +93,24 @@ def refused(machine, out):
 
 
 SHOWN = 40                                # lines of what a run printed
-TAGS = re.compile(r'\[(?:CLS|BORDER [0-9]+|TONE [0-9 ]+|AT [0-9,]+|CLICKS [0-9]+|ERR)\]')
+TAGS = re.compile(r'\[(?:CLS|BORDER [0-9]+|TONE [0-9 ]+|AT [0-9,]+|CLICKS [0-9]+|ERR|'
+                  r'SPK [0-9]+ @[0-9]+)\]')
+
+
+def c64_problem(text, folder):
+    """What's wrong with a line of a BASIC V2 listing, or None."""
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import c64
+    m = re.match(r'\s*(\d+) ?(.*)', text)
+    if int(m.group(1)) > 63999:
+        return 'line number over 63999'
+    unknown = []
+    body = c64.to_petscii(m.group(2), folder['lower'], unknown)
+    if unknown:
+        return 'not known: %s' % ' '.join(unknown)
+    if len(m.group(1)) + 1 + len(body) > 80:
+        return 'longer than 80 characters (LOAD takes it; it can\'t be typed)'
+    return None
 
 
 def run(binary, machine, path, seconds):
@@ -101,14 +124,19 @@ def run(binary, machine, path, seconds):
         img = os.path.join(tmp, 'disk.img')
         subprocess.run([sys.executable, os.path.join(ROOT, 'tests', 'make_disk.py'), img,
                         '/%s/%s=%s' % (machine.upper(), disk_name, path)], check=True)
-        keys = ('LOAD "%s"\nRUN\n' % disk_name if machine == 'spectrum'
+        keys = ('LOAD "%s"\nRUN\n' % disk_name if machine == 'spectrum' else
+                'load "%s",8\nrun\n' % disk_name.lower() if machine == 'c64'
                 else 'RUN %s\n' % disk_name)
+        screen = os.path.join(tmp, 'screen.txt')
         try:
             r = subprocess.run([binary, keys], capture_output=True, timeout=seconds,
-                               env=dict(os.environ, DISK_IMAGE=img))
+                               env=dict(os.environ, DISK_IMAGE=img, C64_SCREEN=screen))
             out = r.stdout.decode('latin-1')
         except subprocess.TimeoutExpired as e:
             out = (e.stdout or b'').decode('latin-1') + '\n(still running after %gs)' % seconds
+        if machine == 'c64' and os.path.exists(screen):   # (its screen, not its {RIGHT}s)
+            rows = open(screen, encoding='latin-1').read().split('\n\n')[0].split('\n')
+            out = '\n'.join(r.rstrip() for r in rows).rstrip('\n')
     return TAGS.sub('', out)
 
 
@@ -127,10 +155,20 @@ def main():
         binary = host_binary(machine)
         lines = lines_of(path, machine)
         problems = 0
+        if machine == 'c64':
+            sys.path.insert(0, os.path.join(ROOT, 'tools'))
+            import c64
+            folder = {'lower': c64.has_lower('\n'.join(t for _, t in lines))}
         for at, text in lines:
             if not text.lstrip()[:1].isdigit():
                 print('%s:%d: not a program line (no line number): %s' % (path, at, text))
                 problems += 1
+                continue
+            if machine == 'c64':
+                why = c64_problem(text, folder)
+                if why is not None:
+                    print('%s:%d: %s  (%s)' % (path, at, text.strip(), why))
+                    problems += 1
                 continue
             out = subprocess.run([binary, text + '\n'], capture_output=True,
                                  timeout=10).stdout.decode('latin-1')

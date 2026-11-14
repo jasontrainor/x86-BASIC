@@ -2,13 +2,13 @@
 
 Home-computer BASICs of the late 1970s and 1980s, for PCs. Boot it from
 a USB stick and the PC starts straight into BASIC, like a home computer
-from then: a ZX Spectrum-style machine, or one of three for Apple I and
-Apple II listings, picked from a menu. There's no operating system
+from then: a ZX Spectrum-style machine, three for Apple I and Apple II
+listings, or one for Commodore 64 listings, picked from a menu. There's no operating system
 underneath: just a boot loader, a small kernel and the interpreter.
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/menu.png" alt="The chooser's menu, listing the four machines" width="400"></td>
+    <td><img src="docs/screenshots/menu.png" alt="The chooser's menu, listing the five machines" width="400"></td>
     <td><img src="docs/screenshots/spectrum.png" alt="Spectrum BASIC: colour bars, circles and lines inside a blue border" width="400"></td>
   </tr>
   <tr>
@@ -43,6 +43,10 @@ project.
   of 1978–83, for Applesoft listings (Apple II Plus and IIe): their text,
   low- and high-resolution graphics, shapes and DOS 3.3-style disk
   commands (see [The Apple-style machines](#the-apple-style-machines))
+- **BASIC V2**, the 1982 64KB home computer's, for Commodore 64
+  listings: its full-screen editor and PETSCII, the VIC-II's modes and
+  sprites, the SID on the PC speaker, the keyboard and joysticks, and
+  the disk drive's files (see [The BASIC V2 machine](#the-basic-v2-machine))
 - SAVE/LOAD to files on the boot disk, which any PC can read
 - One disk image that boots on both old (BIOS) and new (UEFI) PCs, from
   a USB stick, hard disk or floppy, with a menu to choose the machine
@@ -69,8 +73,15 @@ project.
        20 END
        RUN
 
+   On the BASIC V2 machine (typed in lower case, which it shows as
+   capitals):
+
+       10 for n=1 to 7:poke 646,n:print "hello, world":next
+       run
+
 4. `SAVE "hello"` keeps it on the stick and `LOAD "hello"` brings it
-   back (`SAVE HELLO` and `LOAD HELLO` on the Apple-style machines).
+   back (`SAVE HELLO` and `LOAD HELLO` on the Apple-style machines,
+   `SAVE "HELLO",8` and `LOAD "HELLO",8` on the BASIC V2 machine).
    **F10 twice** goes back to the menu.
 
 ## Contents
@@ -88,6 +99,8 @@ project.
 - [The Apple-style machines](#the-apple-style-machines):
   [Integer BASIC](#integer-basic), [FP BASIC](#fp-basic),
   [disk commands](#disk-commands)
+- [The BASIC V2 machine](#the-basic-v2-machine): [keys](#keys-1),
+  [the language](#the-language-1), [the disk and files](#the-disk-and-files)
 - [Booting a real PC from a USB stick](#booting-a-real-pc-from-a-usb-stick)
 - [Tests](#tests), [Making a release](#making-a-release),
   [How it works](#how-it-works)
@@ -129,6 +142,7 @@ each in `machines/NAME/`:
 | `a1basic`  | Integer BASIC (1976)      | the Apple I's Integer BASIC           |
 | `a2int`    | Integer BASIC II (1977)   | the Apple II's Integer BASIC          |
 | `a2fp`     | FP BASIC (1978-83)        | Applesoft, on an Apple II Plus or IIe |
+| `c64`      | BASIC V2 (1982)           | the Commodore 64's BASIC V2           |
 
 When the PC starts, a small chooser comes first and starts a machine:
 straight away if the image has only one, or from a menu if it has
@@ -606,6 +620,171 @@ on its grammar (`EXEC` them as text files instead).
   (`machines/a2video/`), with commands such as `HGR`, `BARS`, `80` and
   `CHARS`.
 
+## The BASIC V2 machine
+
+`c64` runs listings written for the BASIC V2 of the 1982 64KB home
+computer (the Commodore 64). As with the others, it isn't an emulator:
+it doesn't run 6502 machine code, and nothing in it comes from the
+original's ROMs, character sets or manuals. Its BASIC was written for
+this project from how the original behaves (it shares its language core,
+`machines/msbasic/`, with FP BASIC, its close relative); its characters
+were drawn for it (`tools/mkc64chars.py`), from the project's font and
+rules for the lines and blocks; and its sixteen colours were chosen for
+it. "Commodore" and "Commodore 64" are trademarks of their owners, used
+here only to say what listings this machine is for; the machine itself
+has a neutral name and banner.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/c64.png" alt="BASIC V2: a box drawn with line characters, colour bars, three ball sprites and PETSCII graphics" width="520"></td>
+  </tr>
+  <tr>
+    <td align="center"><code>c64</code>: BASIC V2 (1982), <code>docs/screenshots/SPRITES.BAS</code></td>
+  </tr>
+</table>
+
+It starts as the original does, light blue on blue, with
+`38911 BASIC BYTES FREE` and `READY.`, and keeps its files in the `C64`
+folder on the stick. On UEFI PCs the picture has its border; the BIOS's
+320x200 mode has no room for one, so there the picture fills the screen.
+
+BASIC V2 has no statements for graphics, sound or the cursor: programs
+POKE the chips and print control characters for those. So most of the
+machine is a model of what programs POKE and PEEK
+(`machines/c64hw/`):
+
+- **The screen editor:** the cursor goes anywhere, and Return enters the
+  line it's on (a logical line of up to 80 characters, two rows), so a
+  line is changed by LISTing it, typing over it and pressing Return.
+  Printing goes through it as on the original: PETSCII, with the control
+  characters in strings doing the cursor work (`CHR$(147)` clears, 19
+  homes, 17/145/29/157 move, 18/146 reverse, 5, 28, 30 ... colours, 14
+  and 142 the character sets); after an odd number of quotes, or after
+  INST, they show as reversed characters instead (quote mode). Its
+  state is where programs expect it: 211 and 214 the cursor (`POKE
+  214,R:PRINT` goes to row R+1), 646 the colour, 199 reverse, 198 and
+  631-640 the key buffer (`POKE 631,13:POKE 198,1` types Return).
+- **The VIC-II** at 53248: screen memory at 1024 and colour RAM at
+  55296 (`POKE 1024,1` shows an A); border and background; text,
+  multicolour text, extended background colour, bitmap and multicolour
+  bitmap; the screen and characters wherever 53272 and the 16KB bank
+  (56576) put them, characters in RAM (the usual loop copying the
+  character ROM works, with this project's characters); fine scrolling,
+  24 rows and 38 columns, blanking; the raster line (53266) for WAIT.
+- **Sprites:** all eight, 24x21, expanded, multicolour, in front of or
+  behind the characters, and the collision registers games read
+  (53278, 53279).
+- **The SID** at 54272: three voices with their envelopes, played on
+  the PC speaker while the program goes on. The speaker plays one square
+  wave, so it plays the loudest voice at each moment; noise jumps about;
+  the filter and the waveforms' tone are lost. Voice 3 read back (54299)
+  gives random numbers, as programs use it.
+- **The keyboard and joysticks:** `PEEK(197)` is the key held (64 for
+  none), `PEEK(653)` the shift keys, CIA 1 (56320, 56321) the keyboard
+  matrix and the joysticks; and the CIAs' timers and time-of-day clocks.
+- **SYS** to the firmware routines listings call is done here: 64738
+  (reset), 65520 (PLOT, with 781-783 as the registers), 58640 and 58732
+  (the cursor from 214 and 211), 65490 (CHROUT), 65508 (GETIN), 58692
+  (clear the screen). Other addresses are machine code, which isn't run.
+
+### Keys
+
+| PC key | The original's key |
+|---|---|
+| a-z | its letters (shown as capitals): type programs in lower case |
+| Shift with a letter (or Caps Lock) | the shifted letter: a graphics character, or a capital in the lower-case set (the original's Shift Lock does the same) |
+| Esc | RUN/STOP |
+| Page Up | RUN/STOP+RESTORE: stops the program and resets the screen and chips, keeping the program |
+| Home, Shift+Home | HOME, CLR |
+| Backspace, Delete | DEL |
+| Shift+Backspace, End | INST |
+| the arrows | the cursor keys |
+| Shift+Return | moves to the next line without entering this one |
+| right Alt with 1-8, 9, 0 | CTRL with them: the colours black to yellow, RVS ON, RVS OFF (Ctrl with them too, on UEFI) |
+| left Alt with 1-8 | C= with them: the colours orange to light grey |
+| Alt with a letter | C= with it: the graphics character on the left of the key |
+| Shift with left Alt | switches the character sets |
+| `\`, `` ` `` or `_`, `^`, `~` | £, ←, ↑, π |
+| the arrows and right Ctrl | the joystick in port 2 (or port 1, with `JOYSTICK=1` in `BOOT.CFG`); on UEFI PCs, which can't say which keys are held, the arrows just typed count, without fire |
+| F10 twice | back to the chooser |
+
+### The language
+
+BASIC V2's keywords, behaving as the original's do:
+
+- Lines keep their spaces and are listed as typed; keywords are found
+  inside names (`TOTAL` is `TO TAL`) and only two letters of a name
+  count; keywords can be typed short, their first letters then the next
+  shifted (`pO` is POKE, `?` PRINT).
+- Numbers print with a space (or `-`) before them and a cursor right
+  after; true is -1, and AND, OR and NOT work on the bits of 16-bit
+  integers; `A%` is -32768 to 32767.
+- `TI` counts sixtieths of a second, `TI$` is the time (`TI$="000000"`
+  sets it), `ST` the status of the last file operation; `FRE(0)` goes
+  negative above 32767; `RND(-n)` starts a sequence again, `RND(0)`
+  takes one from the clock; `GET` doesn't wait.
+- Errors read `?SYNTAX  ERROR IN 10`, then `READY.`; an empty line for
+  `INPUT` leaves its variables as they were, a bad one gives
+  `?REDO FROM START`.
+- It runs at about the original's speed: a FOR loop of 1000 takes 1.1
+  seconds. `POKE 2,1` (a byte the firmware leaves unused) runs at full
+  speed; `POKE 2,0` goes back.
+
+### The disk and files
+
+The disk drive (device 8, and 9-11) and the tape (device 1) are the
+`C64` folder on the stick:
+
+    LOAD "GAME",8           a program            SAVE "GAME",8
+    LOAD "DATA",8,1         bytes, at their own address (in a program,
+                            it goes on from its first line, as there)
+    LOAD "$",8 : LIST       the directory        LOAD "*",8   the first file
+    LOAD "GAME.BAS",8       a text listing, or any file by its DOS name
+    OPEN 2,8,2,"SCORES,S,W" : PRINT#2,S : CLOSE 2     (and ,S,R INPUT#, GET#)
+    OPEN 15,8,15,"S0:OLD" : CLOSE 15                  the drive's commands
+    OPEN 15,8,15 : INPUT#15,E,E$,T,S                  its error channel
+    OPEN 4,4 : CMD 4 : LIST                           the printer: PRINTOUT.TXT
+
+Programs are saved as `.PRG` files (their load address, then their bytes
+as the original keeps them), which emulators and tools read, with DOS
+names: letters, digits, `-` and `_`, and for a longer name its first six
+and last two characters (`MY GAME PART 2` is `MYGAMET2.PRG`). LOAD also
+reads `.P00` files and listings as text (`.BAS`, `.TXT`), with the
+characters a keyboard hasn't written in braces, as printed listings and
+tools write them: `{CLR}`, `{HOME}`, `{RVS ON}`, `{WHT}`, `{F1}`,
+`{CBM-A}`, `{SHIFT-A}`, `{PI}`, `{3 DOWN}`, `{147}`. A listing with no
+lower case letters (as magazines print them) is read as typed; in one
+with lower case (as tools write them), capitals are shifted letters.
+Sequential files are `.SEQ`.
+
+`tools/c64.py` moves programs between a PC and the machine:
+
+    tools/c64.py list game.d64            what's on a disk image (or .t64)
+    tools/c64.py extract game.d64 DIR     its files, as the C64 folder keeps them
+    tools/c64.py pack new.d64 a.prg b.bas files (and listings) onto a disk image
+    tools/c64.py text game.prg            a program as a listing
+    tools/c64.py prg game.bas game.prg    ... and back
+
+and `tools/check.py --machine c64 --run game.bas` checks a listing (for
+escapes it doesn't know, and lines too long to type) and runs it,
+showing the screen it leaves.
+
+### Not the same as the original
+
+- No 6502: machine code doesn't run (SYS to it does nothing, USR is an
+  error), and neither do interrupts, so raster tricks and anything
+  timed to the picture being drawn don't work. The raster line moves on
+  each time it's read.
+- One square wave for three voices, on the PC speaker.
+- Sprites and the picture are drawn at most 50 times a second, from
+  memory as it is then; the border shows only on UEFI, and sprites in
+  it aren't drawn. Collisions are worked out when read, at most once a
+  frame.
+- SAVE replaces a file of the same name (the original's drive refuses,
+  unless the name starts `@0:`). The drive's commands are scratch,
+  rename, initialize and validate; formatting isn't done.
+- Its RND gives a different sequence from the original's.
+
 ## Booting a real PC from a USB stick
 
 **Write the image (Linux):**
@@ -655,10 +834,12 @@ The two versions look and behave the same.
     make boot-test    # boot os.img in QEMU and type a BASIC session,
                       # then try the chooser's menu
 
-`make test` runs about 430 tests: the Spectrum's interpreter, including
+`make test` runs about 570 tests: the Spectrum's interpreter, including
 a program written the way Spectrum listings are
 (`tests/listings/demo.bas`), the Apple layer, both Integer BASICs, FP
-BASIC and the disk commands.
+BASIC and the disk commands, and the BASIC V2 machine (its screen
+memory read back as text, the colours of the picture's dots, and the
+speaker's tones).
 `make boot-test` boots the image five ways: BIOS floppy, BIOS hard disk,
 BIOS USB stick, UEFI USB stick and UEFI hard disk. It reads the text back
 from screenshots. It uses KVM when available, because QEMU's emulator
@@ -668,7 +849,8 @@ menu, choosing, F10 twice back to it, `MENU=NEVER`, and Shift held at
 start. `tests/qemu_apple.py` boots the Apple test machine and reads its
 screen back (`tests/apple_screen.py`): line input, colours, 80 columns;
 then each Apple-style BASIC, BIOS and UEFI, saving to and loading from
-the image's disk.
+the image's disk. `tests/qemu_c64.py` boots the BASIC V2 machine, BIOS
+and UEFI, reads its screen back (`tests/c64_screen.py`) and times it.
 `make test` also runs the Apple layer on the host, checking the text and
 colours of the picture it draws. The same tests run on
 GitHub Actions for every push (`.github/workflows/ci.yml`).
@@ -684,7 +866,7 @@ prints what's on the screen, for trying things out.
 `make run-listing LISTING=game.bas` boots the image with that listing on
 it, runs it, and saves the screen as `game.png` (`MODE=uefi`, `WAIT=20`
 to change how it boots and how long it runs first); `MACHINE=a2fp`
-(or `a2int`, `a1basic`) runs it on that machine instead.
+(or `a2int`, `a1basic`, `c64`) runs it on that machine instead.
 `make screenshots` remakes the pictures in this file
 (`tools/screenshots.py`), from the listings in `docs/screenshots/`.
 
@@ -721,6 +903,16 @@ and publishes the release with the zip and the image.
                            keywords, statements and hooks)
     machines/a2fp/         FP BASIC: the dialect, on machines/apple/
     machines/a2video/      a test machine for the Apple screen
+    machines/c64hw/        the BASIC V2 machine's hardware, as programs see it:
+      memory.c             the memory map, banking, the I/O chips
+      vic.c                the picture: the VIC-II's modes, sprites
+      screen.c             the screen editor: printing, logical lines, Return
+      keys.c, cia.c        the keyboard, joysticks, clocks, timers
+      sid.c                the SID, on the PC speaker
+      calls.c              the firmware routines programs SYS
+      chars.c              the characters (generated by tools/mkc64chars.py)
+    machines/c64/          BASIC V2: the dialect (basic.c), the disk and
+                           files (disk.c), listings as text (listing.c)
     core/                  shared by every machine:
       kernel_entry.asm     16-bit start-up: moves the code to its segment
                            and sets up "unreal mode" so the real-mode
@@ -746,6 +938,7 @@ and publishes the release with the zip and the image.
     tools/mkimage.py       builds disk images, including the FAT partition
     tools/savefile.py      .SAV files on a PC; converts old saves
     tools/dsk.py           files from DOS 3.3 disk images
+    tools/c64.py           BASIC V2 programs: .prg, .d64, .t64, listings
     tools/write_usb.py     writes an image to a USB stick, carefully
     tools/screenshots.py   the screenshots in this file (docs/screenshots/)
     tools/release-readme.txt  README.txt in the release zip
