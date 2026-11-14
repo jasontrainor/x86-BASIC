@@ -19,6 +19,15 @@
  *   multicolour bitmap  160x200: background, the screen's high and low
  *                    nybbles, colour RAM
  *
+ * Eight sprites, 24x21 dots (or 12x21 in multicolour: transparent, $D025,
+ * their own colour, $D026), each twice as wide or tall if expanded, are
+ * drawn over it, sprite 0 in front; one with its priority bit set
+ * ($D01B) goes behind the characters' foreground dots (the 1s, or
+ * multicolour's 10s and 11s). Their shapes are 63 bytes at the bank +
+ * 64 x their pointer (the last 8 bytes of the screen). Where two
+ * sprites' dots meet, or a sprite's and the foreground's, the collision
+ * registers ($D01E, $D01F) say which; reading one empties it.
+ *
  * and $D011 and $D016 also scroll the picture (0-7 dots down and right),
  * cover a row or a column at its edges with the border (24 rows, 38
  * columns) and blank it ($D011 bit 4). The raster line ($D012, and bit 7
@@ -75,6 +84,10 @@ __attribute__((noinline, noclone)) static unsigned char *row_pixels(void) { retu
 __attribute__((noinline, noclone)) static unsigned char *line_pixels(void) { return line_px; }
 __attribute__((noinline, noclone)) static unsigned char *line_fore(void) { return line_fg; }
 
+static unsigned char collided[2];        // $D01E and $D01F, as worked out
+static void sprites_dirty(void);
+static void find_collisions(void);
+
 static void all_dirty(void) {
     memset(dirty, 1, sizeof dirty);
 }
@@ -101,6 +114,7 @@ void vic_init(void) {
     regs[0x18] = 0x15;                    // screen $0400, characters $1000 (ROM)
     regs[0x20] = 14;                      // light blue border
     regs[0x21] = 6;                       // on blue
+    collided[0] = collided[1] = 0;
     struct video v = { 320, 200, 1, 384, 272, { { 0 } } };
     memcpy(v.palette, palette, sizeof palette);
     plat_video(&v);
@@ -119,6 +133,18 @@ int vic_read(int reg) {
         raster = (raster + 1) % 312;
         return reg == 0x12 ? r & 0xFF : (regs[0x11] & 0x7F) | (r > 255 ? 0x80 : 0);
     }
+    case 0x1E:
+    case 0x1F: {
+        static unsigned long found;       // (worked out once a frame, as drawn)
+        unsigned long t = plat_timer_ms();
+        if (regs[0x15] && t - found >= 20) {
+            find_collisions();
+            found = t;
+        }
+        int c = collided[reg - 0x1E];
+        collided[reg - 0x1E] = 0;
+        return c;
+    }
     case 0x16: return regs[reg] | 0xC0;
     case 0x18: return regs[reg] | 0x01;
     case 0x19: return regs[reg] | 0x70;
@@ -133,12 +159,115 @@ void vic_write(int reg, int value) {
     reg &= 63;
     if (reg > 0x2E) return;
     int old = regs[reg];
-    regs[reg] = value;
     if (old == value) return;
+    int sprite_reg = reg <= 0x10 || reg == 0x15 || reg == 0x17 || (reg >= 0x1B && reg <= 0x1D) ||
+                     reg >= 0x25;
+    if (sprite_reg) sprites_dirty();
+    regs[reg] = value;
+    if (sprite_reg) sprites_dirty();
     if (reg == 0x18) find_memory();
     else if (reg == 0x11 || reg == 0x16 || (reg >= 0x21 && reg <= 0x24)) all_dirty();
     else if (reg == 0x20 && (regs[0x11] & 0x18) != 0x18) all_dirty();   // (border in the picture)
     else if (reg == 0x20 && !(regs[0x16] & 8)) all_dirty();
+}
+
+/* ------------------------------------------------------------------------
+ * Sprites
+ * --------------------------------------------------------------------- */
+
+static int sprite_x(int n) { return regs[n * 2] | (regs[0x10] >> n & 1) << 8; }
+static int sprite_top(int n) { return regs[n * 2 + 1] - 50; }   // (a line of the picture)
+static int sprite_height(int n) { return regs[0x17] >> n & 1 ? 42 : 21; }
+static unsigned int sprite_data(int n) {
+    return bank + c64_ram(screen_at + 1016 + n) * 64;
+}
+
+// The rows of characters sprite n covers drawn again.
+static void sprite_dirty(int n) {
+    int top = sprite_top(n), bottom = top + sprite_height(n) - 1;
+    if (bottom < 0 || top > 199) return;
+    for (int row = top < 0 ? 0 : top / 8; row <= bottom / 8 && row < 25; row++) dirty[row] = 1;
+}
+
+static void sprites_dirty(void) {
+    for (int n = 0; n < 8; n++)
+        if (regs[0x15] >> n & 1) sprite_dirty(n);
+}
+
+/*
+ * The sprites' dots on line y of the picture: spr[x] the colour of the
+ * front one (255 where there's none) and who[x] its number; and the
+ * collisions, if the counts are wanted: a bit for each sprite whose dots
+ * meet another's (*ss) or the foreground (*sb, given fg).
+ */
+HIGH_MEM static unsigned char spr_px[320], spr_who[320];
+__attribute__((noinline, noclone)) static unsigned char *spr_pixels(void) { return spr_px; }
+__attribute__((noinline, noclone)) static unsigned char *spr_numbers(void) { return spr_who; }
+
+static int sprite_line(int y, const unsigned char *fg, int *ss, int *sb) {
+    unsigned char *spr = spr_pixels(), *who = spr_numbers();
+    int any = 0;
+    memset(spr, 255, 320);
+    for (int n = 7; n >= 0; n--) {
+        if (!(regs[0x15] >> n & 1)) continue;
+        int row = y - sprite_top(n);
+        if (row < 0 || row >= sprite_height(n)) continue;
+        if (regs[0x17] >> n & 1) row >>= 1;
+        unsigned int data = sprite_data(n) + row * 3;
+        long bits = (long)vic_byte(data) << 16 | vic_byte(data + 1) << 8 | vic_byte(data + 2);
+        if (!bits) continue;
+        int mc = regs[0x1C] >> n & 1, wide = regs[0x1D] >> n & 1 ? 2 : 1;
+        int colours[4] = { -1, regs[0x25] & 15, regs[0x27 + n] & 15, regs[0x26] & 15 };
+        int x0 = sprite_x(n) - 24;
+        for (int i = 0; i < 24; i++) {
+            int c;
+            if (mc) c = colours[bits >> (22 - (i & ~1)) & 3];
+            else c = bits >> (23 - i) & 1 ? colours[2] : -1;
+            if (c < 0) continue;
+            for (int k = 0; k < wide; k++) {
+                int x = x0 + i * wide + k;
+                if (x < 0 || x >= 320) continue;
+                if (ss) {
+                    if (spr[x] != 255) *ss |= 1 << n | 1 << who[x];
+                    if (fg[x]) *sb |= 1 << n;
+                }
+                spr[x] = c;
+                who[x] = n;
+                any = 1;
+            }
+        }
+    }
+    return any;
+}
+
+// Sprites over line y (out, with fg its foreground dots).
+static void draw_sprites(int y, unsigned char *out, const unsigned char *fg) {
+    if (!sprite_line(y, fg, 0, 0)) return;
+    const unsigned char *spr = spr_pixels(), *who = spr_numbers();
+    for (int x = 0; x < 320; x++)
+        if (spr[x] != 255 && !(fg[x] && (regs[0x1B] >> who[x] & 1))) out[x] = spr[x];
+}
+
+static void draw_cells(int y, unsigned char *px, unsigned char *fg);
+
+// The collisions, as they are now (into collided[]).
+static void find_collisions(void) {
+    unsigned char *px = line_pixels(), *fg = line_fore();
+    int ss = 0, sb = 0;
+    for (int y = 0; y < 200; y++) {
+        int on = 0;
+        for (int n = 0; n < 8; n++) {
+            int row = y - sprite_top(n);
+            if ((regs[0x15] >> n & 1) && row >= 0 && row < sprite_height(n)) on = 1;
+        }
+        if (!on) continue;
+        int xs = regs[0x16] & 7, sy = y - ((regs[0x11] & 7) - 3);
+        memset(fg, 0, 336);
+        if (sy >= 0 && sy < 200 && (regs[0x11] & 0x10)) draw_cells(sy, px + xs, fg + xs);
+        sprite_line(y, fg, &ss, &sb);
+    }
+    collided[0] |= ss;
+    collided[1] |= sb;
 }
 
 // Rows of characters that change: those dots drawn again (and the
@@ -152,6 +281,11 @@ static void row_changed(int row) {
 }
 
 void vic_mem_written(unsigned int addr) {
+    if (regs[0x15]) {                     // a sprite's pointer or shape
+        if (addr - screen_at - 1016 < 8) sprite_dirty(addr - screen_at - 1016);
+        for (int n = 0; n < 8; n++)
+            if ((regs[0x15] >> n & 1) && addr - sprite_data(n) < 63) sprite_dirty(n);
+    }
     if (addr - screen_at < 1000) row_changed((addr - screen_at) / 40);
     else if (regs[0x11] & 0x20) {         // a bitmap
         if (addr - bitmap_at < 8000) row_changed((addr - bitmap_at) / 320);
@@ -248,7 +382,9 @@ static void draw_line(int y, unsigned char *out) {
         draw_cells(sy, px + xs, fg + xs);
     }
     memset(px, regs[0x21] & 15, xs);
+    memset(fg, 0, xs);
     memcpy(out, px, 320);
+    if (regs[0x15]) draw_sprites(y, out, fg);
     if (!(regs[0x16] & 8)) {              // 38 columns
         memset(out, border, 7);
         memset(out + 311, border, 9);

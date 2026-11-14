@@ -816,6 +816,18 @@ COPY="10 poke 56334,peek(56334)and254:poke 1,peek(1)and251${NL}20 for i=0 to 511
 ccheck  "c64 char rom copy" "${COPY}run${NL}" "${NL}RUN${SP40:3}${NL}${SP40}${NL}READY."
 ccolour "c64 char in ram"   "${COPY}50 print chr\$(147);\"a\":poke 12296,255${NL}run${NL}" 0,0=14 7,0=14 1,2=14 2,2=6
 ccheck  "c64 raster"        "print peek(53266)<>peek(53266)${NL}wait 53266,128:wait 53265,128:print \"waited\"${NL}" "${NL}-1 " "${NL}WAITED "
+# Sprites: shapes, positions, expansion, multicolour, priority, collisions
+SPR="${CLS}poke 2040,13:poke 2041,14:for i=0 to 127:poke 832+i,255:next${NL}"
+ccolour "c64 sprite"       "${SPR}poke 53248,34:poke 53249,170:poke 53269,1:poke 53287,2${NL}" 10,120=2 33,120=2 34,120=6 9,120=6 10,140=2 10,141=6 10,119=6
+ccolour "c64 sprite x msb" "${SPR}poke 53248,10:poke 53264,1:poke 53249,70:poke 53269,1:poke 53287,2${NL}" 241,30=6 242,30=2 265,30=2 266,30=6
+ccolour "c64 sprite expand" "${SPR}poke 53248,34:poke 53249,70:poke 53277,1:poke 53271,1:poke 53269,1:poke 53287,1${NL}" 57,20=1 58,20=6 10,61=1 10,62=6
+ccolour "c64 sprite mc"    "${SPR}poke 832,27:poke 53276,1:poke 53285,5:poke 53286,7:poke 53287,2${NL}poke 53248,34:poke 53249,70:poke 53269,1${NL}" 10,20=6 11,20=6 12,20=5 14,20=2 16,20=7 18,20=7
+ccolour "c64 sprite order" "${SPR}poke 53248,34:poke 53249,70:poke 53250,40:poke 53251,70:poke 53269,3${NL}poke 53287,2:poke 53288,7${NL}" 10,20=2 33,20=2 34,20=7 39,20=7 40,20=6
+# behind the foreground: a reversed space (all foreground) at the sprite
+PRI="${CLS}poke 1024+81,160:poke 55296+81,1${NL}poke 53248,34:poke 53249,70:poke 53269,1:poke 53287,2${NL}"
+ccolour "c64 sprite front" "${SPR}${PRI}" 10,20=2 16,20=2
+ccolour "c64 sprite behind" "${SPR}${PRI}poke 53275,1${NL}" 10,20=1 15,20=1 16,20=2
+ccheck  "c64 collisions"   "${SPR}poke 53248,34:poke 53249,70:poke 53250,40:poke 53251,70:poke 53269,3${NL}a=peek(53278):poke 53250,100:b=peek(53278):print a;b${NL}poke 1024+81,160:print peek(53279) and 1${NL}" "${NL} 3  0 " "${NL} 1 "
 
 # --- tools/check.py: listings checked line by line, and run -----------------
 printf '10 PRINT "hi"\n# a comment\n20 PRINT 1+\n30 GO \\\nTO 10\n' > "$TD/bad.bas"

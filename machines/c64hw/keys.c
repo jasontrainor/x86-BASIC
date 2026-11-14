@@ -105,7 +105,13 @@ void c64_tick(void) {
     if ((b & 5) == 5 && !shift_cbm && c64_ram(C64_MODE) != 128)   // Shift+C=
         c64_poke(0xD018, c64_peek(0xD018) ^ 2);
     shift_cbm = (b & 5) == 5;
-    while ((k = plat_read_key()) >= 0) {
+    for (;;) {
+#ifdef HOST_TEST
+        // (The tests type ahead: keys wait while the buffer is full,
+        // rather than being lost as they are on the machine.)
+        if (c64_ram(C64_NDX) >= 10) break;
+#endif
+        if ((k = plat_read_key()) < 0) break;
         if (k == 27 || k == 3) {
             if (stop_enabled()) stop_flag = 1;
             else put_key(3);
